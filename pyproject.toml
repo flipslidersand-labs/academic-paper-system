@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "academic-paper-system"
+version = "0.1.0"
+description = "Paper RAG system for academic paper processing and retrieval"
+requires-python = ">=3.12"
+authors = [
+    {name = "dev-nodee", email = "yukihanajob2025@gmail.com"},
+]
+license = {text = "MIT"}
+readme = "README.md"
+keywords = ["rag", "paper", "academic", "retrieval"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+]
+
+dependencies = [
+    "pdfplumber>=0.11",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "qdrant-client>=1.9",
+    "httpx>=0.27",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "google-genai>=1.0",
+    "opentelemetry-sdk>=1.24",
+    "opentelemetry-instrumentation-fastapi>=0.45b0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.4",
+    "respx>=0.21",
+]
+
+[project.urls]
+Homepage = "https://github.com/flipslidersand/academic-paper-system"
+Repository = "https://github.com/flipslidersand/academic-paper-system.git"
+
+[tool.hatch.build.targets.wheel]
+packages = ["academic_paper"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=academic_paper --cov-report=html --cov-report=term-missing"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N"]
+ignore = ["E501"]  # line-too-long is handled by formatter
+
+[tool.coverage.run]
+branch = true
+source = ["academic_paper"]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
