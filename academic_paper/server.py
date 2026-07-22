@@ -1,5 +1,6 @@
 """FastAPI server for academic paper ingestion and retrieval."""
 
+import httpx
 import sqlite3
 import tempfile
 import uuid
@@ -512,3 +513,47 @@ async def search(
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Search error: {str(e)}")
+
+
+@app.get("/health")
+async def health():
+    """Qdrant / embedding-svc 疎通チェック"""
+    status = {"qdrant": "ok", "embedding_svc": "ok"}
+    overall = "ok"
+    
+    # Qdrant ping
+    try:
+        app.state.vector_store.client.get_collections()
+    except Exception:
+        status["qdrant"] = "error"
+        overall = "degraded"
+    
+    # embedding-svc ping (GET /health)
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{settings.embedding_svc_url}/health")
+            if resp.status_code >= 500:
+                raise Exception()
+    except Exception:
+        status["embedding_svc"] = "error"
+        overall = "degraded"
+    
+    return {"status": overall, **status}
+
+
+@app.get("/stats")
+def stats():
+    """DB統計情報"""
+    conn = get_connection(settings.academic_db)
+    try:
+        papers = conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
+        chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+        # Qdrant point数（エラー時は-1）
+        try:
+            info = app.state.vector_store.client.get_collection(settings.qdrant_collection)
+            qdrant_points = info.points_count
+        except Exception:
+            qdrant_points = -1
+        return {"papers": papers, "chunks": chunks, "qdrant_points": qdrant_points, "db": settings.academic_db}
+    finally:
+        conn.close()
