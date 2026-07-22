@@ -2,12 +2,12 @@
 
 import tempfile
 from io import BytesIO
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
 
-from academic_paper.db import init_db
+from academic_paper.db import init_db, get_connection, get_chunks
 from academic_paper.server import app
 from academic_paper.config import settings
 
@@ -24,9 +24,22 @@ def temp_db():
 
 @pytest.fixture
 def client(temp_db):
-    """Create a test client with patched settings."""
+    """Create a test client with patched settings and mocked services."""
     with patch.object(settings, "academic_db", temp_db):
-        yield TestClient(app)
+        # Create mock instances for EmbedderClient and QdrantStore
+        mock_embedder = MagicMock()
+        mock_embedder.embed = AsyncMock(return_value=[[0.1] * 768])  # 768-dim vector
+        
+        mock_qdrant = MagicMock()
+        
+        # Patch and create client
+        with patch("academic_paper.server.EmbedderClient", return_value=mock_embedder), \
+             patch("academic_paper.server.QdrantStore", return_value=mock_qdrant):
+            client = TestClient(app)
+            # Manually set the mocked services since lifespan is patched
+            client.app.state.embedder = mock_embedder
+            client.app.state.vector_store = mock_qdrant
+            yield client
 
 
 def create_minimal_pdf() -> bytes:
@@ -148,3 +161,56 @@ def test_list_papers_with_data(client):
         assert data["total"] == 1
         assert len(data["papers"]) == 1
         assert data["papers"][0]["file_name"] == "test.pdf"
+
+
+def test_ingest_calls_embedder(client):
+    """Test POST /papers/ingest calls EmbedderClient and QdrantStore."""
+    pdf_content = create_minimal_pdf()
+
+    with patch("academic_paper.server.extract_text") as mock_extract:
+        mock_extract.return_value = [
+            {"page": 1, "text": "Test Document content paragraph one"},
+        ]
+
+        response = client.post(
+            "/papers/ingest",
+            files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+
+        assert response.status_code == 200
+        # Verify embedder was called
+        client.app.state.embedder.embed.assert_called_once()
+        # Verify Qdrant ensure_collection was called
+        client.app.state.vector_store.ensure_collection.assert_called_once()
+        # Verify Qdrant upsert was called
+        client.app.state.vector_store.upsert.assert_called_once()
+
+
+def test_ingest_stores_qdrant_id(client):
+    """Test POST /papers/ingest stores qdrant_id in database."""
+    pdf_content = create_minimal_pdf()
+
+    with patch("academic_paper.server.extract_text") as mock_extract:
+        mock_extract.return_value = [
+            {"page": 1, "text": "Test Document content paragraph one"},
+        ]
+
+        response = client.post(
+            "/papers/ingest",
+            files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        paper_id = data["paper_id"]
+
+        # Verify qdrant_id was stored in database
+        conn = get_connection(settings.academic_db)
+        chunks = get_chunks(conn, paper_id)
+        conn.close()
+
+        assert len(chunks) > 0
+        for chunk in chunks:
+            assert "qdrant_id" in chunk
+            assert chunk["qdrant_id"] is not None
+            assert len(chunk["qdrant_id"]) > 0
