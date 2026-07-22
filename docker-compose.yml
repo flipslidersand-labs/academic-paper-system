@@ -1,0 +1,10 @@
+services:
+  paper-rag:
+    build: .
+    ports:
+      - "8020:8020"
+    volumes:
+      - ./data:/data
+    env_file:
+      - .env
+    restart: unless-stopped
