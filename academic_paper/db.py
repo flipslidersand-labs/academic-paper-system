@@ -307,3 +307,85 @@ def search_fts(
 
     rows = cursor.fetchall()
     return [dict(row) for row in rows]
+
+
+def get_summary(conn: sqlite3.Connection, paper_id: int) -> dict | None:
+    """Get cached summary for a paper.
+
+    Args:
+        conn: Database connection.
+        paper_id: ID of the paper.
+
+    Returns:
+        Summary dictionary or None if not cached.
+    """
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT model, objective, method, results, limitations, keywords, raw_json, created_at
+        FROM summaries
+        WHERE paper_id = ?
+    """, (paper_id,))
+    row = cursor.fetchone()
+
+    if row is None:
+        return None
+
+    summary = dict(row)
+    # Deserialize keywords JSON if present
+    if summary["keywords"]:
+        summary["keywords"] = json.loads(summary["keywords"])
+    # Deserialize raw_json if present for debugging
+    if summary["raw_json"]:
+        summary["raw_json"] = json.loads(summary["raw_json"])
+
+    return summary
+
+
+def save_summary(conn: sqlite3.Connection, paper_id: int, model: str, summary: dict) -> None:
+    """Save or update summary for a paper (upsert).
+
+    Args:
+        conn: Database connection.
+        paper_id: ID of the paper.
+        model: Name of the LLM model used.
+        summary: Summary dictionary with keys:
+                - objective: str
+                - method: str
+                - results: str
+                - limitations: str
+                - keywords: list[str]
+    """
+    cursor = conn.cursor()
+    created_at = datetime.utcnow().isoformat()
+
+    # Serialize keywords to JSON
+    keywords_json = json.dumps(summary.get("keywords", []))
+
+    # Store raw summary as JSON for debugging
+    raw_json = json.dumps(summary)
+
+    cursor.execute("""
+        INSERT INTO summaries (paper_id, model, objective, method, results, limitations, keywords, raw_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(paper_id) DO UPDATE SET
+            model = excluded.model,
+            objective = excluded.objective,
+            method = excluded.method,
+            results = excluded.results,
+            limitations = excluded.limitations,
+            keywords = excluded.keywords,
+            raw_json = excluded.raw_json,
+            created_at = excluded.created_at
+    """, (
+        paper_id,
+        model,
+        summary.get("objective", ""),
+        summary.get("method", ""),
+        summary.get("results", ""),
+        summary.get("limitations", ""),
+        keywords_json,
+        raw_json,
+        created_at
+    ))
+
+    conn.commit()

@@ -19,11 +19,15 @@ from academic_paper.db import (
     get_paper,
     get_chunks,
     search_fts,
+    get_summary,
+    save_summary,
 )
 from academic_paper.extractor import extract_text, hash_file
 from academic_paper.embedder import EmbedderClient
 from academic_paper.vector_store import QdrantStore, make_qdrant_id
 from academic_paper.hybrid import rrf_merge
+from academic_paper.llm import get_llm_client
+from academic_paper.summarizer import RAGSummarizer
 
 
 @asynccontextmanager
@@ -33,6 +37,13 @@ async def lifespan(app: FastAPI):
     # Initialize EmbedderClient and QdrantStore
     app.state.embedder = EmbedderClient()
     app.state.vector_store = QdrantStore()
+    # Initialize LLM client and RAGSummarizer
+    llm_client = get_llm_client()
+    app.state.llm = llm_client
+    if llm_client is not None:
+        app.state.summarizer = RAGSummarizer(llm_client, app.state.vector_store)
+    else:
+        app.state.summarizer = None
     yield
 
 
@@ -200,6 +211,96 @@ def get_paper_endpoint(paper_id: int):
         raise HTTPException(status_code=404, detail="Paper not found")
 
     return paper
+
+
+@app.get("/papers/{paper_id}/summary")
+async def get_summary_endpoint(paper_id: int, force: bool = Query(False)):
+    """Get summary of a paper.
+
+    Args:
+        paper_id: ID of the paper to summarize.
+        force: Force regenerate summary even if cached (default False).
+
+    Returns:
+        JSON response with summary:
+        {
+            "paper_id": int,
+            "model": str,  # "gemini-2.0-flash" or "ollama/mistral"
+            "objective": str,
+            "method": str,
+            "results": str,
+            "limitations": str,
+            "keywords": List[str],
+            "cached": bool
+        }
+
+    Raises:
+        HTTPException: If paper not found (404) or no LLM configured (503).
+    """
+    conn = get_connection(settings.academic_db)
+    paper = get_paper(conn, paper_id)
+
+    if paper is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    # Check for cached summary if not forcing regeneration
+    if not force:
+        cached_summary = get_summary(conn, paper_id)
+        if cached_summary is not None:
+            conn.close()
+            return {
+                "paper_id": paper_id,
+                "model": cached_summary["model"],
+                "objective": cached_summary["objective"],
+                "method": cached_summary["method"],
+                "results": cached_summary["results"],
+                "limitations": cached_summary["limitations"],
+                "keywords": cached_summary["keywords"],
+                "cached": True,
+            }
+
+    # Check if LLM is available
+    if app.state.llm is None:
+        conn.close()
+        raise HTTPException(status_code=503, detail="LLM not configured")
+
+    # Ensure summarizer is available
+    if app.state.summarizer is None:
+        conn.close()
+        raise HTTPException(status_code=503, detail="Summarizer not initialized")
+
+    try:
+        # Generate summary using RAGSummarizer
+        summary = await app.state.summarizer.summarize(paper_id, paper["file_hash"])
+
+        # Determine model name
+        llm_class_name = app.state.llm.__class__.__name__
+        if llm_class_name == "GeminiClient":
+            model = "gemini-2.0-flash"
+        elif llm_class_name == "OllamaClient":
+            model = f"ollama/{app.state.llm.model}"
+        else:
+            model = llm_class_name
+
+        # Save summary to cache
+        save_summary(conn, paper_id, model, summary)
+        conn.close()
+
+        return {
+            "paper_id": paper_id,
+            "model": model,
+            "objective": summary.get("objective", ""),
+            "method": summary.get("method", ""),
+            "results": summary.get("results", ""),
+            "limitations": summary.get("limitations", ""),
+            "keywords": summary.get("keywords", []),
+            "cached": False,
+        }
+
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=400, detail=f"Summarization error: {str(e)}")
 
 
 @app.get("/search")
