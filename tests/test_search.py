@@ -52,6 +52,7 @@ def test_search_returns_results(client):
             "payload": {
                 "paper_id": 1,
                 "chunk_index": 0,
+                "chunk_id": 1,
                 "text": "This is a test document about machine learning and AI systems.",
             }
         },
@@ -61,6 +62,7 @@ def test_search_returns_results(client):
             "payload": {
                 "paper_id": 1,
                 "chunk_index": 1,
+                "chunk_id": 2,
                 "text": "Deep learning models require significant computational resources.",
             }
         }
@@ -75,16 +77,17 @@ def test_search_returns_results(client):
         mock_get_conn.return_value = mock_conn
         
         # Mock cursor.fetchone() to return page_start
+        # For hybrid mode: need to handle FTS + Vector enrichment
         mock_cursor.fetchone.side_effect = [
             {"page_start": 1},
             {"page_start": 2},
         ]
         
-        response = client.get("/search?q=machine learning")
+        response = client.get("/search?q=machine learning&mode=vector")
         
         assert response.status_code == 200
         data = response.json()
-        assert data["mode"] == "hybrid"  # default mode
+        assert data["mode"] == "vector"
         assert data["query"] == "machine learning"
         assert len(data["results"]) == 2
         assert data["results"][0]["rank"] == 1
@@ -150,7 +153,7 @@ def test_search_with_paper_id_filter(client):
         mock_get_conn.return_value = mock_conn
         mock_cursor.fetchone.return_value = {"page_start": 1}
         
-        response = client.get("/search?q=test&paper_id=1&limit=5")
+        response = client.get("/search?q=test&paper_id=1&limit=5&mode=vector")
         
         assert response.status_code == 200
         # Verify search was called with paper_id_filter
@@ -159,3 +162,107 @@ def test_search_with_paper_id_filter(client):
             limit=5,
             paper_id_filter=1,
         )
+
+
+def test_search_hybrid_mode(client):
+    """Test GET /search with hybrid mode calls both FTS and vector search."""
+    # Mock FTS results
+    mock_fts_results = [
+        {"chunk_id": 1, "paper_id": 1, "text": "Machine learning basics", "rank": -5.0},
+        {"chunk_id": 2, "paper_id": 1, "text": "Neural networks", "rank": -3.0},
+    ]
+
+    # Mock vector results
+    mock_vector_results = [
+        {
+            "id": "qdrant-id-2",
+            "score": 0.95,
+            "payload": {
+                "paper_id": 1,
+                "chunk_index": 1,
+                "chunk_id": 2,
+                "text": "Neural networks",
+            }
+        },
+        {
+            "id": "qdrant-id-3",
+            "score": 0.80,
+            "payload": {
+                "paper_id": 1,
+                "chunk_index": 2,
+                "chunk_id": 3,
+                "text": "Deep learning",
+            }
+        }
+    ]
+
+    # Mock vector store search
+    client.app.state.vector_store.search = MagicMock(return_value=mock_vector_results)
+
+    with patch("academic_paper.server.search_fts") as mock_search_fts, \
+         patch("academic_paper.server.get_connection") as mock_get_conn:
+        mock_search_fts.return_value = mock_fts_results
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_get_conn.return_value = mock_conn
+
+        # Mock cursor.execute calls for page_start lookups
+        mock_cursor.fetchone.side_effect = [
+            {"chunk_index": 0},  # For FTS chunk_id enrichment for chunk_id=1
+            {"chunk_index": 1},  # For FTS chunk_id enrichment for chunk_id=2
+            {"page_start": 1},   # For final result lookup
+            {"page_start": 2},   # For final result lookup
+            {"page_start": 3},   # For final result lookup
+        ]
+
+        response = client.get("/search?q=machine learning&mode=hybrid")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["mode"] == "hybrid"
+        assert data["query"] == "machine learning"
+        assert len(data["results"]) > 0
+
+
+def test_search_keyword_mode(client):
+    """Test GET /search with keyword mode calls FTS5 only."""
+    # Mock FTS results
+    mock_fts_results = [
+        {"chunk_id": 1, "paper_id": 1, "text": "Machine learning basics", "rank": -5.0, "chunk_index": 0},
+        {"chunk_id": 2, "paper_id": 1, "text": "Neural networks", "rank": -3.0, "chunk_index": 1},
+    ]
+
+    with patch("academic_paper.server.search_fts") as mock_search_fts, \
+         patch("academic_paper.server.get_connection") as mock_get_conn:
+        mock_search_fts.return_value = mock_fts_results
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_get_conn.return_value = mock_conn
+
+        # Mock cursor.fetchone for page_start lookups
+        mock_cursor.fetchone.side_effect = [
+            {"page_start": 1},
+            {"page_start": 2},
+        ]
+
+        response = client.get("/search?q=machine learning&mode=keyword")
+
+        assert response.status_code == 200
+        # Verify FTS search was called
+        mock_search_fts.assert_called_once_with(
+            mock_conn,
+            query="machine learning",
+            limit=10,
+            paper_id=None,
+        )
+        # Verify vector store search was NOT called
+        client.app.state.vector_store.search.assert_not_called()
+
+        data = response.json()
+        assert data["mode"] == "keyword"
+        assert data["query"] == "machine learning"
+        assert len(data["results"]) == 2

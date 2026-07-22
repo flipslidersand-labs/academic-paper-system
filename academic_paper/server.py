@@ -18,10 +18,12 @@ from academic_paper.db import (
     list_papers,
     get_paper,
     get_chunks,
+    search_fts,
 )
 from academic_paper.extractor import extract_text, hash_file
 from academic_paper.embedder import EmbedderClient
 from academic_paper.vector_store import QdrantStore, make_qdrant_id
+from academic_paper.hybrid import rrf_merge
 
 
 @asynccontextmanager
@@ -207,12 +209,14 @@ async def search(
     limit: int = Query(10, ge=1, le=100),
     paper_id: int | None = Query(None),
 ):
-    """Search papers using vector similarity.
+    """Search papers using vector similarity, keyword search, or hybrid.
 
     Args:
         q: Search query text.
-        mode: Search mode ("vector", "keyword", or "hybrid").
-              Currently only "vector" is fully implemented.
+        mode: Search mode:
+              - "hybrid": Combine FTS5 (BM25) and vector search using RRF
+              - "keyword": FTS5 (BM25) search only
+              - "vector": Vector similarity search only
         limit: Maximum number of results to return (1-100, default 10).
         paper_id: Optional paper ID to filter results to a single paper.
 
@@ -237,56 +241,173 @@ async def search(
         HTTPException: If embedding or search fails (400).
     """
     try:
-        # Embed query using search mode
-        query_vector = await app.state.embedder.embed_single(q, mode="search")
-
-        # Search vector store
-        search_results = app.state.vector_store.search(
-            query_vector=query_vector,
-            limit=limit,
-            paper_id_filter=paper_id,
-        )
-
-        # Fetch chunk metadata from database to get page_start and full info
         conn = get_connection(settings.academic_db)
         cursor = conn.cursor()
 
-        # Build results with rank
-        results = []
-        for rank, result in enumerate(search_results, start=1):
-            qdrant_id = result["id"]
-            score = result["score"]
-            payload = result["payload"]
-            chunk_idx = payload["chunk_index"]
-            paper_id_res = payload["paper_id"]
-
-            # Fetch chunk from database to get page_start
-            cursor.execute(
-                "SELECT page_start FROM chunks WHERE qdrant_id = ?",
-                (qdrant_id,),
+        if mode == "keyword":
+            # Keyword search only (FTS5 BM25)
+            fts_results = search_fts(
+                conn,
+                query=q,
+                limit=limit,
+                paper_id=paper_id,
             )
-            row = cursor.fetchone()
-            page_start = row["page_start"] if row else None
 
-            # Extract snippet (first 200 chars of text)
-            snippet = payload["text"][:200]
+            # Build results from FTS5
+            results = []
+            for rank, result in enumerate(fts_results, start=1):
+                chunk_id = result["chunk_id"]
+                paper_id_res = result["paper_id"]
 
-            results.append({
-                "rank": rank,
-                "score": score,
-                "paper_id": paper_id_res,
-                "chunk_index": chunk_idx,
-                "page_start": page_start,
-                "snippet": snippet,
-            })
+                # Fetch chunk from database to get page_start
+                cursor.execute(
+                    "SELECT page_start FROM chunks WHERE id = ?",
+                    (chunk_id,),
+                )
+                row = cursor.fetchone()
+                page_start = row["page_start"] if row else None
 
-        conn.close()
+                # Extract snippet
+                snippet = result["text"][:200]
 
-        return {
-            "mode": mode,
-            "query": q,
-            "results": results,
-        }
+                results.append({
+                    "rank": rank,
+                    "score": result["rank"],  # FTS5 BM25 score
+                    "paper_id": paper_id_res,
+                    "chunk_index": result.get("chunk_index", 0),
+                    "page_start": page_start,
+                    "snippet": snippet,
+                })
+
+            conn.close()
+            return {
+                "mode": mode,
+                "query": q,
+                "results": results,
+            }
+
+        elif mode == "vector":
+            # Vector search only
+            query_vector = await app.state.embedder.embed_single(q, mode="search")
+            search_results = app.state.vector_store.search(
+                query_vector=query_vector,
+                limit=limit,
+                paper_id_filter=paper_id,
+            )
+
+            # Build results from vector search
+            results = []
+            for rank, result in enumerate(search_results, start=1):
+                qdrant_id = result["id"]
+                score = result["score"]
+                payload = result["payload"]
+                chunk_idx = payload["chunk_index"]
+                paper_id_res = payload["paper_id"]
+
+                # Fetch chunk from database to get page_start
+                cursor.execute(
+                    "SELECT page_start FROM chunks WHERE qdrant_id = ?",
+                    (qdrant_id,),
+                )
+                row = cursor.fetchone()
+                page_start = row["page_start"] if row else None
+
+                # Extract snippet
+                snippet = payload["text"][:200]
+
+                results.append({
+                    "rank": rank,
+                    "score": score,
+                    "paper_id": paper_id_res,
+                    "chunk_index": chunk_idx,
+                    "page_start": page_start,
+                    "snippet": snippet,
+                })
+
+            conn.close()
+            return {
+                "mode": mode,
+                "query": q,
+                "results": results,
+            }
+
+        else:  # mode == "hybrid"
+            # Hybrid search: combine FTS5 and vector using RRF
+            # 1. FTS5 search
+            fts_results = search_fts(
+                conn,
+                query=q,
+                limit=limit,
+                paper_id=paper_id,
+            )
+
+            # Enrich FTS5 results with chunk_index
+            for fts_result in fts_results:
+                cursor.execute(
+                    "SELECT chunk_index FROM chunks WHERE id = ?",
+                    (fts_result["chunk_id"],),
+                )
+                row = cursor.fetchone()
+                if row:
+                    fts_result["chunk_index"] = row["chunk_index"]
+
+            # 2. Vector search
+            query_vector = await app.state.embedder.embed_single(q, mode="search")
+            vector_results = app.state.vector_store.search(
+                query_vector=query_vector,
+                limit=limit,
+                paper_id_filter=paper_id,
+            )
+
+            # Prepare vector results for RRF (add chunk_id to payload if missing)
+            for vec_result in vector_results:
+                if "chunk_id" not in vec_result["payload"]:
+                    # Try to get chunk_id from qdrant_id
+                    cursor.execute(
+                        "SELECT id FROM chunks WHERE qdrant_id = ?",
+                        (vec_result["id"],),
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        vec_result["payload"]["chunk_id"] = row["id"]
+
+            # 3. RRF merge
+            merged = rrf_merge(fts_results, vector_results)
+
+            # 4. Build results with rank
+            results = []
+            for rank, result in enumerate(merged[:limit], start=1):
+                chunk_id = result["chunk_id"]
+                paper_id_res = result["paper_id"]
+                chunk_idx = result["chunk_index"]
+                rrf_score = result["rrf_score"]
+
+                # Fetch chunk from database to get page_start
+                cursor.execute(
+                    "SELECT page_start FROM chunks WHERE id = ?",
+                    (chunk_id,),
+                )
+                row = cursor.fetchone()
+                page_start = row["page_start"] if row else None
+
+                # Extract snippet
+                snippet = result["text"][:200]
+
+                results.append({
+                    "rank": rank,
+                    "score": rrf_score,
+                    "paper_id": paper_id_res,
+                    "chunk_index": chunk_idx,
+                    "page_start": page_start,
+                    "snippet": snippet,
+                })
+
+            conn.close()
+            return {
+                "mode": mode,
+                "query": q,
+                "results": results,
+            }
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Search error: {str(e)}")
