@@ -29,11 +29,16 @@ from academic_paper.vector_store import QdrantStore, make_qdrant_id
 from academic_paper.hybrid import rrf_merge
 from academic_paper.llm import get_llm_client
 from academic_paper.summarizer import RAGSummarizer
+from academic_paper.telemetry import setup_telemetry, get_tracer
 
 
+
+tracer = get_tracer()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize database and services on startup."""
+    # OTel初期化（OTEL_ENDPOINTが設定されている場合のみ有効）
+    setup_telemetry(app, settings.otel_endpoint)
     init_db(settings.academic_db)
     # Initialize EmbedderClient and QdrantStore
     app.state.embedder = EmbedderClient()
@@ -83,7 +88,8 @@ async def ingest_paper(file: UploadFile = File(...)):
             raise HTTPException(status_code=409, detail="File already ingested")
 
         # Extract text from PDF
-        pages = extract_text(tmp_path)
+        with tracer.start_as_current_span("pdf.extract"):
+            pages = extract_text(tmp_path)
         if not pages:
             conn.close()
             raise HTTPException(status_code=400, detail="No text extracted from PDF")
@@ -105,7 +111,8 @@ async def ingest_paper(file: UploadFile = File(...)):
         try:
             # Embed chunks using EmbedderClient
             chunk_texts = [chunk["text"] for chunk in chunks_list]
-            embeddings = await app.state.embedder.embed(chunk_texts, mode="index")
+            with tracer.start_as_current_span("embed.batch"):
+                embeddings = await app.state.embedder.embed(chunk_texts, mode="index")
 
             # Ensure Qdrant collection exists
             app.state.vector_store.ensure_collection()
@@ -127,7 +134,8 @@ async def ingest_paper(file: UploadFile = File(...)):
                 })
 
             # Upsert to Qdrant
-            app.state.vector_store.upsert(points)
+            with tracer.start_as_current_span("qdrant.upsert"):
+                app.state.vector_store.upsert(points)
 
             # Save chunks with qdrant_id to database
             save_chunks(conn, paper_id, chunks_list)
@@ -390,7 +398,8 @@ async def search(
 
         elif mode == "vector":
             # Vector search only
-            query_vector = await app.state.embedder.embed_single(q, mode="search")
+            with tracer.start_as_current_span("embed.query"):
+                query_vector = await app.state.embedder.embed_single(q, mode="search")
             search_results = app.state.vector_store.search(
                 query_vector=query_vector,
                 limit=limit,
@@ -454,7 +463,8 @@ async def search(
                     fts_result["chunk_index"] = row["chunk_index"]
 
             # 2. Vector search
-            query_vector = await app.state.embedder.embed_single(q, mode="search")
+            with tracer.start_as_current_span("embed.query"):
+                query_vector = await app.state.embedder.embed_single(q, mode="search")
             vector_results = app.state.vector_store.search(
                 query_vector=query_vector,
                 limit=limit,
