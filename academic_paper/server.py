@@ -198,3 +198,95 @@ def get_paper_endpoint(paper_id: int):
         raise HTTPException(status_code=404, detail="Paper not found")
 
     return paper
+
+
+@app.get("/search")
+async def search(
+    q: str = Query(..., min_length=1),
+    mode: str = Query("hybrid", pattern="^(vector|keyword|hybrid)$"),
+    limit: int = Query(10, ge=1, le=100),
+    paper_id: int | None = Query(None),
+):
+    """Search papers using vector similarity.
+
+    Args:
+        q: Search query text.
+        mode: Search mode ("vector", "keyword", or "hybrid").
+              Currently only "vector" is fully implemented.
+        limit: Maximum number of results to return (1-100, default 10).
+        paper_id: Optional paper ID to filter results to a single paper.
+
+    Returns:
+        JSON response with search results:
+        {
+            "mode": str,
+            "query": str,
+            "results": [
+                {
+                    "rank": int,
+                    "score": float,
+                    "paper_id": int,
+                    "chunk_index": int,
+                    "page_start": int | None,
+                    "snippet": str
+                }
+            ]
+        }
+
+    Raises:
+        HTTPException: If embedding or search fails (400).
+    """
+    try:
+        # Embed query using search mode
+        query_vector = await app.state.embedder.embed_single(q, mode="search")
+
+        # Search vector store
+        search_results = app.state.vector_store.search(
+            query_vector=query_vector,
+            limit=limit,
+            paper_id_filter=paper_id,
+        )
+
+        # Fetch chunk metadata from database to get page_start and full info
+        conn = get_connection(settings.academic_db)
+        cursor = conn.cursor()
+
+        # Build results with rank
+        results = []
+        for rank, result in enumerate(search_results, start=1):
+            qdrant_id = result["id"]
+            score = result["score"]
+            payload = result["payload"]
+            chunk_idx = payload["chunk_index"]
+            paper_id_res = payload["paper_id"]
+
+            # Fetch chunk from database to get page_start
+            cursor.execute(
+                "SELECT page_start FROM chunks WHERE qdrant_id = ?",
+                (qdrant_id,),
+            )
+            row = cursor.fetchone()
+            page_start = row["page_start"] if row else None
+
+            # Extract snippet (first 200 chars of text)
+            snippet = payload["text"][:200]
+
+            results.append({
+                "rank": rank,
+                "score": score,
+                "paper_id": paper_id_res,
+                "chunk_index": chunk_idx,
+                "page_start": page_start,
+                "snippet": snippet,
+            })
+
+        conn.close()
+
+        return {
+            "mode": mode,
+            "query": q,
+            "results": results,
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Search error: {str(e)}")
