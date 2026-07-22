@@ -1,0 +1,6 @@
+profile: python-t2@1
+containers:
+  - name: paper-rag
+    base_image: python:3.12-slim
+    pinned_runtime:
+      python: "3.12"

@@ -214,3 +214,81 @@ def test_ingest_stores_qdrant_id(client):
             assert "qdrant_id" in chunk
             assert chunk["qdrant_id"] is not None
             assert len(chunk["qdrant_id"]) > 0
+
+
+def test_health_returns_ok(client):
+    """Test GET /health returns ok when all services are healthy."""
+    # Mock vector_store to have a working client
+    mock_client = MagicMock()
+    mock_client.get_collections.return_value = MagicMock(collections=[])
+    client.app.state.vector_store.client = mock_client
+    
+    # Mock httpx to return 200 status
+    with patch("academic_paper.server.httpx.AsyncClient") as mock_httpx:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_httpx.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
+        
+        response = client.get("/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["qdrant"] == "ok"
+        assert data["embedding_svc"] == "ok"
+
+
+def test_health_returns_degraded_on_qdrant_error(client):
+    """Test GET /health returns degraded when Qdrant is unavailable."""
+    # Mock vector_store to raise exception
+    mock_client = MagicMock()
+    mock_client.get_collections.side_effect = Exception("Connection failed")
+    client.app.state.vector_store.client = mock_client
+    
+    # Mock httpx to return 200 status
+    with patch("academic_paper.server.httpx.AsyncClient") as mock_httpx:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_httpx.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
+        
+        response = client.get("/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "degraded"
+        assert data["qdrant"] == "error"
+        assert data["embedding_svc"] == "ok"
+
+
+def test_stats_returns_counts(client):
+    """Test GET /stats returns papers, chunks, and qdrant_points counts."""
+    # First ingest a paper to get some data
+    pdf_content = create_minimal_pdf()
+    
+    with patch("academic_paper.server.extract_text") as mock_extract:
+        mock_extract.return_value = [
+            {"page": 1, "text": "Test Document content"},
+        ]
+        
+        response_ingest = client.post(
+            "/papers/ingest",
+            files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert response_ingest.status_code == 200
+    
+    # Mock vector_store client for stats call
+    mock_client = MagicMock()
+    mock_collection_info = MagicMock()
+    mock_collection_info.points_count = 1
+    mock_client.get_collection.return_value = mock_collection_info
+    client.app.state.vector_store.client = mock_client
+    
+    # Get stats
+    response = client.get("/stats")
+    assert response.status_code == 200
+    data = response.json()
+    assert "papers" in data
+    assert "chunks" in data
+    assert "qdrant_points" in data
+    assert "db" in data
+    assert data["papers"] >= 1
+    assert data["chunks"] >= 1
+    assert data["qdrant_points"] >= 1
