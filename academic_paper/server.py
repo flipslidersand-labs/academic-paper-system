@@ -20,12 +20,17 @@ from academic_paper.db import (
     get_chunks,
 )
 from academic_paper.extractor import extract_text, hash_file
+from academic_paper.embedder import EmbedderClient
+from academic_paper.vector_store import QdrantStore, make_qdrant_id
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize database on startup."""
+    """Initialize database and services on startup."""
     init_db(settings.academic_db)
+    # Initialize EmbedderClient and QdrantStore
+    app.state.embedder = EmbedderClient()
+    app.state.vector_store = QdrantStore()
     yield
 
 
@@ -83,24 +88,52 @@ async def ingest_paper(file: UploadFile = File(...)):
         # Save paper to database
         paper_id = save_paper(conn, file.filename or "unknown.pdf", file_hash)
 
-        # Add qdrant_id to chunks and save
-        chunks_with_ids = []
-        for chunk in chunks_list:
-            chunk["qdrant_id"] = str(uuid.uuid4())
-            chunks_with_ids.append(chunk)
+        try:
+            # Embed chunks using EmbedderClient
+            chunk_texts = [chunk["text"] for chunk in chunks_list]
+            embeddings = await app.state.embedder.embed(chunk_texts, mode="index")
 
-        save_chunks(conn, paper_id, chunks_with_ids)
+            # Ensure Qdrant collection exists
+            app.state.vector_store.ensure_collection()
 
-        # Update status to indexed
-        update_paper_status(conn, paper_id, "indexed")
-        conn.close()
+            # Prepare points for Qdrant with qdrant_id based on file_hash
+            points = []
+            for idx, (chunk, embedding) in enumerate(zip(chunks_list, embeddings)):
+                qdrant_id = make_qdrant_id(file_hash, idx)
+                chunk["qdrant_id"] = qdrant_id
+                points.append({
+                    "id": qdrant_id,
+                    "vector": embedding,
+                    "payload": {
+                        "paper_id": paper_id,
+                        "chunk_index": idx,
+                        "text": chunk["text"],
+                        "file_name": file.filename or "unknown.pdf",
+                    }
+                })
 
-        return {
-            "paper_id": paper_id,
-            "file_name": file.filename or "unknown.pdf",
-            "chunks": len(chunks_with_ids),
-            "status": "indexed",
-        }
+            # Upsert to Qdrant
+            app.state.vector_store.upsert(points)
+
+            # Save chunks with qdrant_id to database
+            save_chunks(conn, paper_id, chunks_list)
+
+            # Update status to indexed
+            update_paper_status(conn, paper_id, "indexed")
+            conn.close()
+
+            return {
+                "paper_id": paper_id,
+                "file_name": file.filename or "unknown.pdf",
+                "chunks": len(chunks_list),
+                "status": "indexed",
+            }
+
+        except Exception as e:
+            # If embedding/Qdrant fails, update status and return error
+            update_paper_status(conn, paper_id, "failed")
+            conn.close()
+            raise HTTPException(status_code=400, detail=f"Embedding or Qdrant error: {str(e)}")
 
     except HTTPException:
         raise
