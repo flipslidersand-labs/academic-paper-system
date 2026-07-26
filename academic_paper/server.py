@@ -280,8 +280,10 @@ async def get_summary_endpoint(paper_id: int, force: bool = Query(False)):
         raise HTTPException(status_code=503, detail="Summarizer not initialized")
 
     try:
-        # Generate summary using RAGSummarizer
-        summary = await app.state.summarizer.summarize(paper_id, paper["file_hash"])
+        # Generate summary using RAGSummarizer with tracing
+        with tracer.start_as_current_span("summarize") as span:
+            span.set_attribute("paper_id", paper_id)
+            summary = await app.state.summarizer.summarize(paper_id, paper["file_hash"])
 
         # Determine model name
         llm_class_name = app.state.llm.__class__.__name__
