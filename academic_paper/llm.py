@@ -74,7 +74,7 @@ class OllamaClient(BaseLLMClient):
         Returns:
             Generated text response
         """
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             response = await client.post(
                 f"{self.base_url}/api/generate",
                 json={
