@@ -117,4 +117,15 @@ Please respond ONLY with valid JSON in this exact format:
         except json.JSONDecodeError as e:
             raise ValueError(f"LLM returned invalid JSON: {str(e)}")
 
+        # Normalize fields to strings (LLM sometimes returns nested dicts)
+        for field in ("objective", "method", "results", "limitations"):
+            val = summary_data.get(field, "")
+            if not isinstance(val, str):
+                summary_data[field] = json.dumps(val, ensure_ascii=False)
+        keywords = summary_data.get("keywords", [])
+        if not isinstance(keywords, list):
+            summary_data["keywords"] = [str(keywords)]
+        else:
+            summary_data["keywords"] = [str(k) for k in keywords]
+
         return summary_data
