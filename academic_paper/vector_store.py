@@ -1,6 +1,6 @@
 import uuid
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
+from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue, Query
 from academic_paper.config import settings
 
 PAPER_NS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
@@ -48,10 +48,10 @@ class QdrantStore:
             query_filter = Filter(
                 must=[FieldCondition(key="paper_id", match=MatchValue(value=paper_id_filter))]
             )
-        results = self.client.search(
+        results = self.client.query_points(
             collection_name=self.collection,
-            query_vector=query_vector,
+            query=query_vector,
             limit=limit,
             query_filter=query_filter,
         )
-        return [{"id": str(r.id), "score": r.score, "payload": r.payload} for r in results]
+        return [{"id": str(r.id), "score": r.score, "payload": r.payload} for r in results.points]

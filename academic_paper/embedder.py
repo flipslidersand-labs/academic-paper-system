@@ -18,12 +18,13 @@ class EmbedderClient:
         self.base_url = base_url or settings.embedding_svc_url
         self.api_key = api_key or settings.embedding_api_key
 
-    async def embed(self, texts: list[str], mode: str = "index") -> list[list[float]]:
-        """Embed texts using embedding service.
+    async def embed(self, texts: list[str], mode: str = "index", collection: str = "facts") -> list[list[float]]:
+        """Embed texts using embedding service (one request per text).
 
         Args:
             texts: List of texts to embed
             mode: Embedding mode ("index" or "search")
+            collection: Qdrant collection name
 
         Returns:
             List of embedding vectors
@@ -31,28 +32,20 @@ class EmbedderClient:
         Raises:
             httpx.HTTPError: If request fails
         """
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/embed",
-                json={"texts": texts, "mode": mode},
-                headers={"X-API-Key": self.api_key},
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data["embeddings"]
+        results = []
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for text in texts:
+                response = await client.post(
+                    f"{self.base_url}/embed",
+                    json={"text": text, "mode": mode, "collection": collection},
+                    headers={"X-API-Key": self.api_key},
+                )
+                response.raise_for_status()
+                data = response.json()
+                results.append(data["vector"])
+        return results
 
-    async def embed_single(self, text: str, mode: str = "search") -> list[float]:
-        """Embed single text using embedding service.
-
-        Args:
-            text: Text to embed
-            mode: Embedding mode ("index" or "search")
-
-        Returns:
-            Embedding vector
-
-        Raises:
-            httpx.HTTPError: If request fails
-        """
-        results = await self.embed([text], mode=mode)
+    async def embed_single(self, text: str, mode: str = "search", collection: str = "facts") -> list[float]:
+        """Embed single text using embedding service."""
+        results = await self.embed([text], mode=mode, collection=collection)
         return results[0]
