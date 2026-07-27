@@ -3,11 +3,11 @@
 import json
 import re
 import sqlite3
+
 from academic_paper.llm import BaseLLMClient
 from academic_paper.vector_store import QdrantStore
 
-
-SYSTEM_PROMPT = """You are an expert academic paper analyzer. 
+SYSTEM_PROMPT = """You are an expert academic paper analyzer.
 Your task is to provide a structured summary of academic papers.
 Focus on clarity, accuracy, and extracting key information."""
 
@@ -50,15 +50,15 @@ class RAGSummarizer:
             # If Qdrant mock doesn't support search, try alternative approach
             # This handles both real and mocked Qdrant instances
             try:
-                from academic_paper.db import get_connection, get_chunks
                 from academic_paper.config import settings
+                from academic_paper.db import get_chunks, get_connection
                 conn = get_connection(settings.academic_db)
                 chunks_db = get_chunks(conn, paper_id)
                 conn.close()
-                
+
                 if not chunks_db:
                     raise ValueError(f"No chunks found for paper {paper_id}")
-                
+
                 # Convert database chunks to Qdrant-like format
                 chunks = []
                 for chunk in chunks_db[:top_k]:
@@ -83,10 +83,10 @@ class RAGSummarizer:
             text = payload.get("text", "")
             if text:
                 context_parts.append(f"Page {page_start}: {text}")
-        
+
         if not context_parts:
             raise ValueError(f"No valid content found in chunks for paper {paper_id}")
-        
+
         context = "\n\n".join(context_parts)
 
         # Generate summary using LLM
