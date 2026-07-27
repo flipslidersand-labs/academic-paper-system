@@ -50,19 +50,21 @@ def test_search_with_paper_id_filter():
         mock_client = MagicMock()
         MockClient.return_value = mock_client
         
-        # Simulate search results
+        # Simulate query_points results (qdrant-client 1.18+)
         mock_result = MagicMock()
         mock_result.id = "123"
         mock_result.score = 0.95
         mock_result.payload = {"paper_id": 1, "text": "test"}
-        mock_client.search.return_value = [mock_result]
-        
+        mock_query_response = MagicMock()
+        mock_query_response.points = [mock_result]
+        mock_client.query_points.return_value = mock_query_response
+
         store = QdrantStore(url="http://test", collection="test-collection")
         results = store.search([0.1] * 768, limit=10, paper_id_filter=1)
-        
-        # Verify search was called with filter
-        assert mock_client.search.called
-        call_kwargs = mock_client.search.call_args[1]
+
+        # Verify query_points was called with filter
+        assert mock_client.query_points.called
+        call_kwargs = mock_client.query_points.call_args[1]
         assert call_kwargs['query_filter'] is not None
         assert len(results) == 1
         assert results[0]['score'] == 0.95

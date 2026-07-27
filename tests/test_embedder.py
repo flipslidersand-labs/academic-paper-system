@@ -16,17 +16,12 @@ async def test_embed_returns_vectors():
     )
 
     with respx.mock:
-        # Mock the POST /embed endpoint
+        # embedding-svc returns {"vector": [...]} per request (one request per text)
         respx.post("http://localhost:9092/embed").mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "embeddings": [
-                        [0.1, 0.2, 0.3],
-                        [0.4, 0.5, 0.6],
-                    ]
-                }
-            )
+            side_effect=[
+                httpx.Response(200, json={"vector": [0.1, 0.2, 0.3]}),
+                httpx.Response(200, json={"vector": [0.4, 0.5, 0.6]}),
+            ]
         )
 
         result = await client.embed(["hello", "world"])
@@ -46,16 +41,8 @@ async def test_embed_single_returns_vector():
     )
 
     with respx.mock:
-        # Mock the POST /embed endpoint
         respx.post("http://localhost:9092/embed").mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "embeddings": [
-                        [0.1, 0.2, 0.3],
-                    ]
-                }
-            )
+            return_value=httpx.Response(200, json={"vector": [0.1, 0.2, 0.3]})
         )
 
         result = await client.embed_single("hello")
@@ -75,10 +62,7 @@ async def test_embed_sends_correct_headers():
     with respx.mock:
         # Create a route that captures the request
         route = respx.post("http://localhost:9092/embed").mock(
-            return_value=httpx.Response(
-                200,
-                json={"embeddings": [[0.1, 0.2, 0.3]]}
-            )
+            return_value=httpx.Response(200, json={"vector": [0.1, 0.2, 0.3]})
         )
 
         await client.embed(["hello"], mode="search")
