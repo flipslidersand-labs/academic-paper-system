@@ -80,7 +80,7 @@ def test_extract_text_empty_pages_skipped(tmp_path: Path) -> None:
     from unittest.mock import MagicMock, patch
 
     try:
-        import pdfplumber
+        import pdfplumber  # noqa: F401
     except ImportError:
         pytest.skip("pdfplumber not installed")
 
