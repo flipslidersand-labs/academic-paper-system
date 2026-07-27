@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+
 from academic_paper.vector_store import QdrantStore, make_qdrant_id
 
 
@@ -11,16 +12,16 @@ def test_make_qdrant_id_is_deterministic():
 
 def test_ensure_collection_creates_when_missing():
     """コレクションが存在しない場合にcreate_collectionが呼ばれることを確認"""
-    with patch('academic_paper.vector_store.QdrantClient') as MockClient:
+    with patch('academic_paper.vector_store.QdrantClient') as MockClient:  # noqa: N806
         mock_client = MagicMock()
         MockClient.return_value = mock_client
-        
+
         # Simulate no collections exist
         mock_client.get_collections.return_value.collections = []
-        
+
         store = QdrantStore(url="http://test", collection="test-collection")
         store.ensure_collection()
-        
+
         mock_client.create_collection.assert_called_once()
         call_kwargs = mock_client.create_collection.call_args[1]
         assert call_kwargs['collection_name'] == 'test-collection'
@@ -29,27 +30,27 @@ def test_ensure_collection_creates_when_missing():
 
 def test_ensure_collection_skips_when_exists():
     """コレクションが既に存在する場合はcreate_collectionが呼ばれないことを確認"""
-    with patch('academic_paper.vector_store.QdrantClient') as MockClient:
+    with patch('academic_paper.vector_store.QdrantClient') as MockClient:  # noqa: N806
         mock_client = MagicMock()
         MockClient.return_value = mock_client
-        
+
         # Simulate collection already exists
         mock_collection = MagicMock()
         mock_collection.name = "test-collection"
         mock_client.get_collections.return_value.collections = [mock_collection]
-        
+
         store = QdrantStore(url="http://test", collection="test-collection")
         store.ensure_collection()
-        
+
         mock_client.create_collection.assert_not_called()
 
 
 def test_search_with_paper_id_filter():
     """paper_id_filterを指定してsearchが呼ばれることを確認"""
-    with patch('academic_paper.vector_store.QdrantClient') as MockClient:
+    with patch('academic_paper.vector_store.QdrantClient') as MockClient:  # noqa: N806
         mock_client = MagicMock()
         MockClient.return_value = mock_client
-        
+
         # Simulate query_points results (qdrant-client 1.18+)
         mock_result = MagicMock()
         mock_result.id = "123"
