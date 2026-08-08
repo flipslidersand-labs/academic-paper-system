@@ -2,7 +2,7 @@
 
 import pytest
 
-from academic_paper.chunker import chunk_pages, DEFAULT_SIZE, DEFAULT_OVERLAP
+from academic_paper.chunker import chunk_pages
 
 
 def test_chunk_pages_basic() -> None:
