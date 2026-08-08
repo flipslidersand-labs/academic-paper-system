@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
+
 import httpx
+
 from academic_paper.config import settings
 
 

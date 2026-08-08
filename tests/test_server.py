@@ -2,14 +2,14 @@
 
 import tempfile
 from io import BytesIO
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from academic_paper.db import init_db, get_connection, get_chunks
-from academic_paper.server import app
 from academic_paper.config import settings
+from academic_paper.db import get_chunks, get_connection, init_db
+from academic_paper.server import app
 
 
 @pytest.fixture
@@ -29,9 +29,9 @@ def client(temp_db):
         # Create mock instances for EmbedderClient and QdrantStore
         mock_embedder = MagicMock()
         mock_embedder.embed = AsyncMock(return_value=[[0.1] * 768])  # 768-dim vector
-        
+
         mock_qdrant = MagicMock()
-        
+
         # Patch and create client
         with patch("academic_paper.server.EmbedderClient", return_value=mock_embedder), \
              patch("academic_paper.server.QdrantStore", return_value=mock_qdrant):
@@ -222,13 +222,13 @@ def test_health_returns_ok(client):
     mock_client = MagicMock()
     mock_client.get_collections.return_value = MagicMock(collections=[])
     client.app.state.vector_store.client = mock_client
-    
+
     # Mock httpx to return 200 status
     with patch("academic_paper.server.httpx.AsyncClient") as mock_httpx:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_httpx.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
-        
+
         response = client.get("/health")
         assert response.status_code == 200
         data = response.json()
@@ -243,13 +243,13 @@ def test_health_returns_degraded_on_qdrant_error(client):
     mock_client = MagicMock()
     mock_client.get_collections.side_effect = Exception("Connection failed")
     client.app.state.vector_store.client = mock_client
-    
+
     # Mock httpx to return 200 status
     with patch("academic_paper.server.httpx.AsyncClient") as mock_httpx:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_httpx.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
-        
+
         response = client.get("/health")
         assert response.status_code == 200
         data = response.json()
@@ -262,25 +262,25 @@ def test_stats_returns_counts(client):
     """Test GET /stats returns papers, chunks, and qdrant_points counts."""
     # First ingest a paper to get some data
     pdf_content = create_minimal_pdf()
-    
+
     with patch("academic_paper.server.extract_text") as mock_extract:
         mock_extract.return_value = [
             {"page": 1, "text": "Test Document content"},
         ]
-        
+
         response_ingest = client.post(
             "/papers/ingest",
             files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
         )
         assert response_ingest.status_code == 200
-    
+
     # Mock vector_store client for stats call
     mock_client = MagicMock()
     mock_collection_info = MagicMock()
     mock_collection_info.points_count = 1
     mock_client.get_collection.return_value = mock_collection_info
     client.app.state.vector_store.client = mock_client
-    
+
     # Get stats
     response = client.get("/stats")
     assert response.status_code == 200

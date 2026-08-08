@@ -1,21 +1,17 @@
 """Tests for academic_paper.db module."""
 
 import json
-import sqlite3
 import tempfile
 from pathlib import Path
 
 import pytest
 
 from academic_paper.db import (
+    get_chunks,
     get_connection,
     init_db,
-    save_paper,
-    update_paper_status,
     save_chunks,
-    list_papers,
-    get_paper,
-    get_chunks,
+    save_paper,
     search_fts,
 )
 

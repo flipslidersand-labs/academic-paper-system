@@ -5,6 +5,7 @@ and provides file integrity verification via SHA-256 hashing.
 """
 
 import hashlib
+
 import pdfplumber
 
 

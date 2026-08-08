@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from academic_paper.summarizer import RAGSummarizer, SYSTEM_PROMPT
+from academic_paper.summarizer import SYSTEM_PROMPT, RAGSummarizer
 
 
 @pytest.mark.anyio
