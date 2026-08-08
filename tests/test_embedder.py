@@ -1,8 +1,8 @@
 """Tests for embedder client."""
 
+import httpx
 import pytest
 import respx
-import httpx
 
 from academic_paper.embedder import EmbedderClient
 

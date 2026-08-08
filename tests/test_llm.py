@@ -1,5 +1,7 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+
 from academic_paper.llm import GeminiClient, OllamaClient, get_llm_client
 
 

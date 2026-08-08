@@ -8,8 +8,8 @@ import pytest
 from academic_paper.db import (
     get_connection,
     init_db,
-    save_paper,
     save_chunks,
+    save_paper,
     search_fts,
 )
 

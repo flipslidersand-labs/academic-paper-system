@@ -3,7 +3,6 @@
 import json
 import sqlite3
 from datetime import datetime
-from pathlib import Path
 
 
 def get_connection(db_path: str) -> sqlite3.Connection:

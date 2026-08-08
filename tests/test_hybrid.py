@@ -1,6 +1,5 @@
 """Tests for hybrid search RRF merge functionality."""
 
-import pytest
 from academic_paper.hybrid import rrf_merge
 
 

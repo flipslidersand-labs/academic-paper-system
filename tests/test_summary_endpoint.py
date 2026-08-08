@@ -1,15 +1,14 @@
 """Tests for GET /papers/{id}/summary endpoint."""
 
 import tempfile
-from io import BytesIO
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from academic_paper.db import init_db, get_connection, save_paper, save_chunks
-from academic_paper.server import app
 from academic_paper.config import settings
+from academic_paper.db import get_connection, init_db, save_chunks, save_paper
+from academic_paper.server import app
 
 
 @pytest.fixture
@@ -29,9 +28,9 @@ def client(temp_db):
         # Create mock instances for EmbedderClient and QdrantStore
         mock_embedder = MagicMock()
         mock_embedder.embed = AsyncMock(return_value=[[0.1] * 768])  # 768-dim vector
-        
+
         mock_qdrant = MagicMock()
-        
+
         # Patch and create client
         with patch("academic_paper.server.EmbedderClient", return_value=mock_embedder), \
              patch("academic_paper.server.QdrantStore", return_value=mock_qdrant):
@@ -54,7 +53,7 @@ def test_summary_503_when_no_llm(client, temp_db):
     # Create a paper in the database
     conn = get_connection(temp_db)
     paper_id = save_paper(conn, "test.pdf", "hash123")
-    
+
     # Create minimal chunks
     chunks = [{"text": "test content", "page_start": 1, "page_end": 1, "chunk_index": 0, "qdrant_id": "qid1", "token_count": 10}]
     save_chunks(conn, paper_id, chunks)
@@ -74,7 +73,7 @@ def test_summary_returns_structured_response(client, temp_db):
     # Create a paper in the database
     conn = get_connection(temp_db)
     paper_id = save_paper(conn, "test.pdf", "hash123")
-    
+
     # Create minimal chunks
     chunks = [{"text": "test content", "page_start": 1, "page_end": 1, "chunk_index": 0, "qdrant_id": "qid1", "token_count": 10}]
     save_chunks(conn, paper_id, chunks)
@@ -83,7 +82,7 @@ def test_summary_returns_structured_response(client, temp_db):
     # Mock the LLM and summarizer
     mock_llm = MagicMock()
     mock_llm.__class__.__name__ = "GeminiClient"
-    
+
     mock_summarizer = AsyncMock()
     mock_summarizer.summarize = AsyncMock(return_value={
         "objective": "Test objective",
@@ -92,14 +91,14 @@ def test_summary_returns_structured_response(client, temp_db):
         "limitations": "Test limitations",
         "keywords": ["test", "keyword"],
     })
-    
+
     client.app.state.llm = mock_llm
     client.app.state.summarizer = mock_summarizer
 
     response = client.get(f"/papers/{paper_id}/summary")
     assert response.status_code == 200
     data = response.json()
-    
+
     assert data["paper_id"] == paper_id
     assert data["model"] == "gemini-2.0-flash"
     assert data["objective"] == "Test objective"
@@ -115,7 +114,7 @@ def test_summary_cached_on_second_call(client, temp_db):
     # Create a paper in the database
     conn = get_connection(temp_db)
     paper_id = save_paper(conn, "test.pdf", "hash123")
-    
+
     # Create minimal chunks
     chunks = [{"text": "test content", "page_start": 1, "page_end": 1, "chunk_index": 0, "qdrant_id": "qid1", "token_count": 10}]
     save_chunks(conn, paper_id, chunks)
@@ -124,7 +123,7 @@ def test_summary_cached_on_second_call(client, temp_db):
     # Mock the LLM and summarizer
     mock_llm = MagicMock()
     mock_llm.__class__.__name__ = "GeminiClient"
-    
+
     mock_summarizer = AsyncMock()
     mock_summarizer.summarize = AsyncMock(return_value={
         "objective": "Test objective",
@@ -133,7 +132,7 @@ def test_summary_cached_on_second_call(client, temp_db):
         "limitations": "Test limitations",
         "keywords": ["test", "keyword"],
     })
-    
+
     client.app.state.llm = mock_llm
     client.app.state.summarizer = mock_summarizer
 
