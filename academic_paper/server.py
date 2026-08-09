@@ -1,12 +1,14 @@
 """FastAPI server for academic paper ingestion and retrieval."""
 
+import asyncio
 import httpx
 import sqlite3
 import tempfile
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, UploadFile
 
 from academic_paper.chunker import chunk_pages
 from academic_paper.config import settings
@@ -29,17 +31,21 @@ from academic_paper.vector_store import QdrantStore, make_qdrant_id
 from academic_paper.hybrid import rrf_merge
 from academic_paper.llm import get_llm_client
 from academic_paper.summarizer import RAGSummarizer
+from academic_paper.jobs import JobStore
 from academic_paper.telemetry import setup_telemetry, get_tracer
 
 
-
 tracer = get_tracer()
+job_store = JobStore()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize database and services on startup."""
     # OTel初期化（OTEL_ENDPOINTが設定されている場合のみ有効）
     setup_telemetry(app, settings.otel_endpoint)
     init_db(settings.academic_db)
+    job_store.init(settings.academic_db)
     # Initialize EmbedderClient and QdrantStore
     app.state.embedder = EmbedderClient()
     app.state.vector_store = QdrantStore()
@@ -569,3 +575,98 @@ def stats():
         return {"papers": papers, "chunks": chunks, "qdrant_points": qdrant_points, "db": settings.academic_db}
     finally:
         conn.close()
+
+
+async def _run_summarize_all(job_id: str) -> None:
+    """Background task: summarize all indexed papers without cached summaries."""
+    job = job_store.get(job_id)
+    if job is None:
+        return
+
+    job["status"] = "running"
+    job["started_at"] = datetime.utcnow().isoformat()
+    job_store.persist(job)
+
+    try:
+        conn = get_connection(settings.academic_db)
+        papers = list_papers(conn)
+        conn.close()
+
+        indexed = [p for p in papers if p["status"] == "indexed"]
+        succeeded = 0
+        failed = 0
+
+        for paper in indexed:
+            paper_id = paper["id"]
+            conn = get_connection(settings.academic_db)
+            cached = get_summary(conn, paper_id)
+            conn.close()
+            if cached:
+                continue
+
+            if app.state.summarizer is None:
+                failed += 1
+                continue
+
+            try:
+                summary = await app.state.summarizer.summarize(paper_id, paper["file_hash"])
+                llm_class = app.state.llm.__class__.__name__
+                model = "gemini-2.0-flash" if llm_class == "GeminiClient" else f"ollama/{getattr(app.state.llm, 'model', 'unknown')}"
+                conn = get_connection(settings.academic_db)
+                save_summary(conn, paper_id, model, summary)
+                conn.close()
+                succeeded += 1
+            except Exception:
+                failed += 1
+
+        job["status"] = "completed"
+        job["finished_at"] = datetime.utcnow().isoformat()
+        job["result"] = {"total": len(indexed), "succeeded": succeeded, "failed": failed}
+        job_store.persist(job)
+
+    except Exception as exc:
+        job["status"] = "failed"
+        job["finished_at"] = datetime.utcnow().isoformat()
+        job["error"] = str(exc)
+        job_store.persist(job)
+
+
+@app.post("/jobs/summarize-all", status_code=202)
+async def start_summarize_all(background_tasks: BackgroundTasks):
+    """Start a background job to summarize all papers without cached summaries.
+
+    Returns:
+        JSON with job_id and status 202.
+    """
+    job = job_store.create("summarize-all")
+    background_tasks.add_task(_run_summarize_all, job["id"])
+    return {"job_id": job["id"], "status": job["status"]}
+
+
+@app.get("/jobs")
+def list_jobs():
+    """List all background jobs (newest first).
+
+    Returns:
+        JSON with jobs list.
+    """
+    return {"jobs": job_store.all()}
+
+
+@app.get("/jobs/{job_id}")
+def get_job(job_id: str):
+    """Get a specific job by ID.
+
+    Args:
+        job_id: UUID of the job.
+
+    Returns:
+        JSON with job details.
+
+    Raises:
+        HTTPException: If job not found (404).
+    """
+    job = job_store.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job

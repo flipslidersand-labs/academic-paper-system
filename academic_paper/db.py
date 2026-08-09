@@ -88,8 +88,79 @@ def init_db(db_path: str) -> None:
         )
     """)
 
+    # Create jobs table for background job persistence
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS jobs (
+            id TEXT PRIMARY KEY,
+            type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT,
+            result TEXT,
+            error TEXT
+        )
+    """)
+
     conn.commit()
     conn.close()
+
+
+def upsert_job(conn: sqlite3.Connection, job: dict) -> None:
+    """Insert or update a job record.
+
+    Args:
+        conn: Database connection.
+        job: Job dictionary with keys: id, type, status, created_at,
+             started_at, finished_at, result, error.
+    """
+    import json as _json
+
+    result_json = _json.dumps(job.get("result")) if job.get("result") is not None else None
+    conn.execute(
+        """
+        INSERT INTO jobs (id, type, status, created_at, started_at, finished_at, result, error)
+        VALUES (:id, :type, :status, :created_at, :started_at, :finished_at, :result, :error)
+        ON CONFLICT(id) DO UPDATE SET
+            status = excluded.status,
+            started_at = excluded.started_at,
+            finished_at = excluded.finished_at,
+            result = excluded.result,
+            error = excluded.error
+        """,
+        {
+            "id": job["id"],
+            "type": job["type"],
+            "status": job["status"],
+            "created_at": job["created_at"],
+            "started_at": job.get("started_at"),
+            "finished_at": job.get("finished_at"),
+            "result": result_json,
+            "error": job.get("error"),
+        },
+    )
+    conn.commit()
+
+
+def load_all_jobs(conn: sqlite3.Connection) -> list[dict]:
+    """Load all job records ordered by creation time (newest first).
+
+    Args:
+        conn: Database connection.
+
+    Returns:
+        List of job dictionaries.
+    """
+    import json as _json
+
+    rows = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC").fetchall()
+    jobs = []
+    for row in rows:
+        job = dict(row)
+        if job.get("result"):
+            job["result"] = _json.loads(job["result"])
+        jobs.append(job)
+    return jobs
 
 
 def save_paper(
