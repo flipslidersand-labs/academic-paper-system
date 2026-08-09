@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from academic_paper.config import settings
-from academic_paper.db import get_chunks, get_connection, init_db
+from academic_paper.db import get_chunks, get_connection, init_db, save_paper
 from academic_paper.server import app
 
 
@@ -292,3 +292,136 @@ def test_stats_returns_counts(client):
     assert data["papers"] >= 1
     assert data["chunks"] >= 1
     assert data["qdrant_points"] >= 1
+
+
+# --- New tests ---
+
+def test_get_paper_by_id_success(client):
+    """Test GET /papers/{paper_id} returns paper details."""
+    pdf_content = create_minimal_pdf()
+
+    with patch("academic_paper.server.extract_text") as mock_extract:
+        mock_extract.return_value = [{"page": 1, "text": "Test Document content"}]
+        resp = client.post(
+            "/papers/ingest",
+            files={"file": ("detail.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert resp.status_code == 200
+        paper_id = resp.json()["paper_id"]
+
+    response = client.get(f"/papers/{paper_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == paper_id
+    assert data["file_name"] == "detail.pdf"
+    assert data["status"] == "indexed"
+
+
+def test_get_paper_by_id_not_found(client):
+    """Test GET /papers/{paper_id} returns 404 for missing paper."""
+    response = client.get("/papers/99999")
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+def test_health_embedding_svc_degraded(client):
+    """Test GET /health returns degraded when embedding-svc returns 5xx."""
+    mock_client = MagicMock()
+    mock_client.get_collections.return_value = MagicMock(collections=[])
+    client.app.state.vector_store.client = mock_client
+
+    with patch("academic_paper.server.httpx.AsyncClient") as mock_httpx:
+        mock_response = MagicMock()
+        mock_response.status_code = 503
+        mock_httpx.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
+
+        response = client.get("/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "degraded"
+        assert data["qdrant"] == "ok"
+        assert data["embedding_svc"] == "error"
+
+
+def test_stats_qdrant_error(client):
+    """Test GET /stats returns qdrant_points=-1 when Qdrant collection is unavailable."""
+    mock_client = MagicMock()
+    mock_client.get_collection.side_effect = Exception("Connection failed")
+    client.app.state.vector_store.client = mock_client
+
+    response = client.get("/stats")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["qdrant_points"] == -1
+
+
+def test_ingest_empty_pages(client):
+    """Test POST /papers/ingest returns 400 when no text extracted from PDF."""
+    pdf_content = create_minimal_pdf()
+
+    with patch("academic_paper.server.extract_text") as mock_extract:
+        mock_extract.return_value = []
+
+        response = client.post(
+            "/papers/ingest",
+            files={"file": ("empty.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert response.status_code == 400
+        assert "No text extracted" in response.json()["detail"]
+
+
+def test_ingest_no_chunks(client):
+    """Test POST /papers/ingest returns 400 when chunker produces no chunks."""
+    pdf_content = create_minimal_pdf()
+
+    with patch("academic_paper.server.extract_text") as mock_extract, \
+         patch("academic_paper.server.chunk_pages") as mock_chunk:
+        mock_extract.return_value = [{"page": 1, "text": "Some text"}]
+        mock_chunk.return_value = []
+
+        response = client.post(
+            "/papers/ingest",
+            files={"file": ("nochunk.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert response.status_code == 400
+        assert "No chunks generated" in response.json()["detail"]
+
+
+def test_ingest_embedding_failure(client):
+    """Test POST /papers/ingest returns 400 when embedding service fails."""
+    pdf_content = create_minimal_pdf()
+
+    with patch("academic_paper.server.extract_text") as mock_extract:
+        mock_extract.return_value = [{"page": 1, "text": "Test Document content"}]
+        client.app.state.embedder.embed = AsyncMock(
+            side_effect=Exception("Embedding service unavailable")
+        )
+
+        response = client.post(
+            "/papers/ingest",
+            files={"file": ("fail.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert response.status_code == 400
+        assert "Embedding or Qdrant error" in response.json()["detail"]
+
+
+def test_list_papers_pagination(client, temp_db):
+    """Test GET /papers pagination with limit and offset."""
+    conn = get_connection(temp_db)
+    save_paper(conn, "paper1.pdf", "hash_pg_1")
+    save_paper(conn, "paper2.pdf", "hash_pg_2")
+    save_paper(conn, "paper3.pdf", "hash_pg_3")
+    conn.close()
+
+    response = client.get("/papers?limit=2&offset=0")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 3
+    assert len(data["papers"]) == 2
+
+    response2 = client.get("/papers?limit=2&offset=2")
+    assert response2.status_code == 200
+    data2 = response2.json()
+    assert data2["total"] == 3
+    assert len(data2["papers"]) == 1
+    assert data2["papers"][0]["id"] != data["papers"][0]["id"]

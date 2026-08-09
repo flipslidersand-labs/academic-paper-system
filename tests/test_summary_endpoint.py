@@ -41,6 +41,19 @@ def client(temp_db):
             yield client
 
 
+def _make_chunks():
+    return [
+        {
+            "text": "test content",
+            "page_start": 1,
+            "page_end": 1,
+            "chunk_index": 0,
+            "qdrant_id": "qid1",
+            "token_count": 10,
+        }
+    ]
+
+
 def test_summary_404_for_missing_paper(client):
     """Test GET /papers/{paper_id}/summary returns 404 for missing paper."""
     response = client.get("/papers/999/summary")
@@ -50,16 +63,11 @@ def test_summary_404_for_missing_paper(client):
 
 def test_summary_503_when_no_llm(client, temp_db):
     """Test GET /papers/{paper_id}/summary returns 503 when LLM not configured."""
-    # Create a paper in the database
     conn = get_connection(temp_db)
     paper_id = save_paper(conn, "test.pdf", "hash123")
-
-    # Create minimal chunks
-    chunks = [{"text": "test content", "page_start": 1, "page_end": 1, "chunk_index": 0, "qdrant_id": "qid1", "token_count": 10}]
-    save_chunks(conn, paper_id, chunks)
+    save_chunks(conn, paper_id, _make_chunks())
     conn.close()
 
-    # Ensure LLM is None (no configuration)
     client.app.state.llm = None
     client.app.state.summarizer = None
 
@@ -70,19 +78,13 @@ def test_summary_503_when_no_llm(client, temp_db):
 
 def test_summary_returns_structured_response(client, temp_db):
     """Test GET /papers/{paper_id}/summary returns structured response."""
-    # Create a paper in the database
     conn = get_connection(temp_db)
     paper_id = save_paper(conn, "test.pdf", "hash123")
-
-    # Create minimal chunks
-    chunks = [{"text": "test content", "page_start": 1, "page_end": 1, "chunk_index": 0, "qdrant_id": "qid1", "token_count": 10}]
-    save_chunks(conn, paper_id, chunks)
+    save_chunks(conn, paper_id, _make_chunks())
     conn.close()
 
-    # Mock the LLM and summarizer
     mock_llm = MagicMock()
     mock_llm.__class__.__name__ = "GeminiClient"
-
     mock_summarizer = AsyncMock()
     mock_summarizer.summarize = AsyncMock(return_value={
         "objective": "Test objective",
@@ -91,14 +93,12 @@ def test_summary_returns_structured_response(client, temp_db):
         "limitations": "Test limitations",
         "keywords": ["test", "keyword"],
     })
-
     client.app.state.llm = mock_llm
     client.app.state.summarizer = mock_summarizer
 
     response = client.get(f"/papers/{paper_id}/summary")
     assert response.status_code == 200
     data = response.json()
-
     assert data["paper_id"] == paper_id
     assert data["model"] == "gemini-2.0-flash"
     assert data["objective"] == "Test objective"
@@ -111,19 +111,13 @@ def test_summary_returns_structured_response(client, temp_db):
 
 def test_summary_cached_on_second_call(client, temp_db):
     """Test GET /papers/{paper_id}/summary returns cached=True on second call."""
-    # Create a paper in the database
     conn = get_connection(temp_db)
     paper_id = save_paper(conn, "test.pdf", "hash123")
-
-    # Create minimal chunks
-    chunks = [{"text": "test content", "page_start": 1, "page_end": 1, "chunk_index": 0, "qdrant_id": "qid1", "token_count": 10}]
-    save_chunks(conn, paper_id, chunks)
+    save_chunks(conn, paper_id, _make_chunks())
     conn.close()
 
-    # Mock the LLM and summarizer
     mock_llm = MagicMock()
     mock_llm.__class__.__name__ = "GeminiClient"
-
     mock_summarizer = AsyncMock()
     mock_summarizer.summarize = AsyncMock(return_value={
         "objective": "Test objective",
@@ -132,23 +126,122 @@ def test_summary_cached_on_second_call(client, temp_db):
         "limitations": "Test limitations",
         "keywords": ["test", "keyword"],
     })
-
     client.app.state.llm = mock_llm
     client.app.state.summarizer = mock_summarizer
 
-    # First call - should generate and cache
     response1 = client.get(f"/papers/{paper_id}/summary")
     assert response1.status_code == 200
-    data1 = response1.json()
-    assert data1["cached"] is False
+    assert response1.json()["cached"] is False
 
-    # Second call - should return cached
     response2 = client.get(f"/papers/{paper_id}/summary")
     assert response2.status_code == 200
     data2 = response2.json()
     assert data2["cached"] is True
-    assert data2["objective"] == data1["objective"]
-    assert data2["method"] == data1["method"]
-
-    # Summarizer should only be called once
+    assert data2["objective"] == response1.json()["objective"]
     assert mock_summarizer.summarize.call_count == 1
+
+
+# --- New tests ---
+
+def test_summary_force_regenerate(client, temp_db):
+    """Test GET /papers/{paper_id}/summary?force=true bypasses cache."""
+    conn = get_connection(temp_db)
+    paper_id = save_paper(conn, "force.pdf", "hash_force")
+    save_chunks(conn, paper_id, [
+        {
+            "text": "force test content",
+            "page_start": 1,
+            "page_end": 1,
+            "chunk_index": 0,
+            "qdrant_id": "qid_force",
+            "token_count": 10,
+        }
+    ])
+    conn.close()
+
+    mock_llm = MagicMock()
+    mock_llm.__class__.__name__ = "GeminiClient"
+    mock_summarizer = AsyncMock()
+    mock_summarizer.summarize = AsyncMock(return_value={
+        "objective": "obj",
+        "method": "meth",
+        "results": "res",
+        "limitations": "lim",
+        "keywords": ["k"],
+    })
+    client.app.state.llm = mock_llm
+    client.app.state.summarizer = mock_summarizer
+
+    # First call — generates and caches
+    r1 = client.get(f"/papers/{paper_id}/summary")
+    assert r1.status_code == 200
+    assert r1.json()["cached"] is False
+
+    # Second call with force=true — must regenerate, not serve cache
+    r2 = client.get(f"/papers/{paper_id}/summary?force=true")
+    assert r2.status_code == 200
+    assert r2.json()["cached"] is False
+    assert mock_summarizer.summarize.call_count == 2
+
+
+def test_summary_ollama_model_naming(client, temp_db):
+    """Test GET /papers/{paper_id}/summary returns 'ollama/<model>' for OllamaClient."""
+    conn = get_connection(temp_db)
+    paper_id = save_paper(conn, "ollama.pdf", "hash_ollama")
+    save_chunks(conn, paper_id, [
+        {
+            "text": "ollama test",
+            "page_start": 1,
+            "page_end": 1,
+            "chunk_index": 0,
+            "qdrant_id": "qid_ollama",
+            "token_count": 10,
+        }
+    ])
+    conn.close()
+
+    mock_llm = MagicMock()
+    mock_llm.__class__.__name__ = "OllamaClient"
+    mock_llm.model = "qwen2.5:7b"
+    mock_summarizer = AsyncMock()
+    mock_summarizer.summarize = AsyncMock(return_value={
+        "objective": "obj",
+        "method": "meth",
+        "results": "res",
+        "limitations": "lim",
+        "keywords": [],
+    })
+    client.app.state.llm = mock_llm
+    client.app.state.summarizer = mock_summarizer
+
+    response = client.get(f"/papers/{paper_id}/summary")
+    assert response.status_code == 200
+    assert response.json()["model"] == "ollama/qwen2.5:7b"
+
+
+def test_summary_error_returns_400(client, temp_db):
+    """Test GET /papers/{paper_id}/summary returns 400 when summarization raises."""
+    conn = get_connection(temp_db)
+    paper_id = save_paper(conn, "err.pdf", "hash_err")
+    save_chunks(conn, paper_id, [
+        {
+            "text": "error test",
+            "page_start": 1,
+            "page_end": 1,
+            "chunk_index": 0,
+            "qdrant_id": "qid_err",
+            "token_count": 10,
+        }
+    ])
+    conn.close()
+
+    mock_llm = MagicMock()
+    mock_llm.__class__.__name__ = "GeminiClient"
+    mock_summarizer = AsyncMock()
+    mock_summarizer.summarize = AsyncMock(side_effect=Exception("LLM timeout"))
+    client.app.state.llm = mock_llm
+    client.app.state.summarizer = mock_summarizer
+
+    response = client.get(f"/papers/{paper_id}/summary")
+    assert response.status_code == 400
+    assert "Summarization error" in response.json()["detail"]
