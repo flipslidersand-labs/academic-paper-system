@@ -17,6 +17,10 @@ on:
         description: "API base URL"
         default: "http://localhost:8020"
         required: false
+      summarize:
+        description: "Run bulk summarization after collection (true/false)"
+        default: "true"
+        required: false
 
 jobs:
   collect:
@@ -24,7 +28,7 @@ jobs:
     # To register the runner: Settings > Actions > Runners > New self-hosted runner
     # and add the label "minipc" to the runner.
     runs-on: [self-hosted, minipc]
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +58,51 @@ jobs:
             --max "$MAX" \
             --api-url "$API_URL" \
             --summary-file summary.json
+
+      - name: Trigger bulk summarization
+        if: ${{ github.event.inputs.summarize != 'false' }}
+        run: |
+          API_URL="${{ github.event.inputs.api_url || 'http://localhost:8020' }}"
+
+          # POST /jobs/summarize-all — capture HTTP status and body separately
+          HTTP_CODE=$(curl -s -o /tmp/job_response.json -w "%{http_code}" \
+            -X POST "$API_URL/jobs/summarize-all")
+
+          if [ "$HTTP_CODE" = "202" ]; then
+            JOB_ID=$(python3 -c "import json; print(json.load(open('/tmp/job_response.json'))['job_id'])")
+            echo "Summarize job started: $JOB_ID"
+
+            # Poll until done or timeout (5 minutes)
+            STATUS="pending"
+            DEADLINE=$((SECONDS + 300))
+            while [ $SECONDS -lt $DEADLINE ]; do
+              STATUS=$(curl -sf "$API_URL/jobs/$JOB_ID" \
+                | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+              echo "Job status: $STATUS"
+              if [ "$STATUS" = "done" ] || [ "$STATUS" = "failed" ]; then
+                break
+              fi
+              sleep 10
+            done
+
+            # Print final job details
+            echo "=== Final job details ==="
+            curl -sf "$API_URL/jobs/$JOB_ID" | python3 -m json.tool
+
+            if [ "$STATUS" = "failed" ]; then
+              echo "Summarize job failed"
+              exit 1
+            fi
+
+          elif [ "$HTTP_CODE" = "409" ]; then
+            echo "Warning: A summarize job is already running — skipping"
+          elif [ "$HTTP_CODE" = "503" ]; then
+            echo "Warning: LLM not configured — skipping summarization"
+          else
+            echo "Unexpected response from /jobs/summarize-all: HTTP $HTTP_CODE"
+            cat /tmp/job_response.json
+            exit 1
+          fi
 
       - name: Upload run summary
         if: always()
