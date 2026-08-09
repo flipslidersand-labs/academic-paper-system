@@ -14,8 +14,8 @@ from academic_paper.db import (
     save_chunks,
     save_paper,
     save_summary,
-    upsert_job,
     update_paper_status,
+    upsert_job,
 )
 from academic_paper.jobs import Job, JobStore, job_store
 from academic_paper.server import app
