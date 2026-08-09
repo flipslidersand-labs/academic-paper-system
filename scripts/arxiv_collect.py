@@ -3,6 +3,8 @@
 
 Fetches recent papers from arXiv Atom API by category and ingests them
 into the academic-paper-system API via POST /papers/ingest.
+Authors, categories, and publication dates are parsed from the feed and
+saved as structured metadata.
 
 Usage:
     python scripts/arxiv_collect.py
@@ -34,13 +36,8 @@ def fetch_recent_papers(
 ) -> list[dict]:
     """Fetch recent papers from arXiv Atom API.
 
-    Args:
-        categories: List of arXiv category codes (e.g. ["cs.AI", "cs.LG"]).
-        max_results: Maximum number of papers to return.
-        timeout: HTTP timeout in seconds.
-
-    Returns:
-        List of dicts with arxiv_id, title, pdf_url, file_name.
+    Returns dicts with: arxiv_id, title, authors, categories,
+    published_date, pdf_url, file_name.
     """
     query = " OR ".join(f"cat:{c}" for c in categories)
     url = (
@@ -54,18 +51,44 @@ def fetch_recent_papers(
 
     root = ET.fromstring(resp.text)
     ns = {"atom": "http://www.w3.org/2005/Atom"}
+
     papers = []
     for entry in root.findall("atom:entry", ns):
         id_elem = entry.find("atom:id", ns)
         title_elem = entry.find("atom:title", ns)
         if id_elem is None or title_elem is None:
             continue
+
         arxiv_id = id_elem.text.strip().split("/abs/")[-1]
         title = title_elem.text.strip().replace("\n", " ")
+
+        # Authors
+        authors = []
+        for author_elem in entry.findall("atom:author", ns):
+            name_elem = author_elem.find("atom:name", ns)
+            if name_elem is not None and name_elem.text:
+                authors.append(name_elem.text.strip())
+
+        # Categories (all <category> tags)
+        cats = []
+        for cat_elem in entry.findall("atom:category", ns):
+            term = cat_elem.get("term", "")
+            if term:
+                cats.append(term)
+
+        # Published date (YYYY-MM-DD)
+        published_elem = entry.find("atom:published", ns)
+        published_date = None
+        if published_elem is not None and published_elem.text:
+            published_date = published_elem.text.strip()[:10]
+
         safe_id = arxiv_id.replace("/", "_")
         papers.append({
             "arxiv_id": arxiv_id,
             "title": title,
+            "authors": authors,
+            "categories": cats,
+            "published_date": published_date,
             "pdf_url": f"{ARXIV_PDF_BASE}/{arxiv_id}.pdf",
             "file_name": f"arxiv_{safe_id}.pdf",
         })
@@ -78,23 +101,20 @@ def ingest_paper(
     api_url: str,
     pdf_timeout: int = 60,
 ) -> dict:
-    """Download PDF and POST to /papers/ingest.
-
-    Args:
-        client: Shared httpx.Client for ingest requests.
-        paper: Paper dict with pdf_url and file_name.
-        api_url: Base URL of the academic-paper-system API.
-        pdf_timeout: Timeout for PDF download in seconds.
-
-    Returns:
-        Dict with status key: "ingested", "duplicate", or raises on error.
-    """
+    """Download PDF and POST to /papers/ingest with metadata."""
     pdf_resp = httpx.get(paper["pdf_url"], timeout=pdf_timeout, follow_redirects=True)
     pdf_resp.raise_for_status()
 
     resp = client.post(
         f"{api_url}/papers/ingest",
         files={"file": (paper["file_name"], io.BytesIO(pdf_resp.content), "application/pdf")},
+        data={
+            "title": paper["title"],
+            "authors": json.dumps(paper["authors"]),
+            "categories": json.dumps(paper["categories"]),
+            "published_date": paper["published_date"] or "",
+            "source": "arxiv",
+        },
         timeout=30,
     )
     if resp.status_code == 409:
@@ -105,14 +125,14 @@ def ingest_paper(
     return data
 
 
-def build_summary(results: dict, papers: list[dict]) -> str:
-    """Build a human-readable and machine-parseable run summary."""
+def build_summary(counts: dict, papers: list[dict]) -> str:
+    """Build a human-readable run summary."""
     lines = [
         "## arXiv Daily Collect Summary",
         f"- Fetched : {len(papers)}",
-        f"- Ingested: {results['ingested']}",
-        f"- Skipped (duplicate): {results['duplicate']}",
-        f"- Failed  : {results['failed']}",
+        f"- Ingested: {counts['ingested']}",
+        f"- Skipped (duplicate): {counts['duplicate']}",
+        f"- Failed  : {counts['failed']}",
     ]
     return "\n".join(lines)
 
@@ -120,28 +140,19 @@ def build_summary(results: dict, papers: list[dict]) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="arXiv daily paper collector")
     parser.add_argument(
-        "--categories",
-        nargs="+",
-        default=["cs.AI", "cs.LG", "cs.CL"],
-        metavar="CAT",
-        help="arXiv category codes to collect (default: cs.AI cs.LG cs.CL)",
+        "--categories", nargs="+", default=["cs.AI", "cs.LG", "cs.CL"],
+        metavar="CAT", help="arXiv category codes (default: cs.AI cs.LG cs.CL)",
     )
     parser.add_argument(
-        "--max",
-        type=int,
-        default=20,
-        dest="max_results",
-        metavar="N",
+        "--max", type=int, default=20, dest="max_results", metavar="N",
         help="Maximum papers to fetch per run (default: 20)",
     )
     parser.add_argument(
-        "--api-url",
-        default="http://localhost:8020",
+        "--api-url", default="http://localhost:8020",
         help="academic-paper-system API base URL (default: http://localhost:8020)",
     )
     parser.add_argument(
-        "--summary-file",
-        default=None,
+        "--summary-file", default=None,
         help="Write run summary JSON to this path (optional)",
     )
     args = parser.parse_args()
@@ -168,8 +179,10 @@ def main() -> None:
                 counts[status] = counts.get(status, 0) + 1
                 label = "OK  " if status == "ingested" else "SKIP"
                 pid = result.get("paper_id", "-")
-                title_short = paper["title"][:70]
-                print(f"  {label} [{arxiv_id}] paper_id={pid} {title_short}")
+                authors_short = ", ".join(paper["authors"][:2])
+                if len(paper["authors"]) > 2:
+                    authors_short += " et al."
+                print(f"  {label} [{arxiv_id}] id={pid} | {paper['title'][:50]} | {authors_short}")
                 detail.append({"arxiv_id": arxiv_id, "status": status, "paper_id": pid})
             except Exception as exc:
                 counts["failed"] += 1
