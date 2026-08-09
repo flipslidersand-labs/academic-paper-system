@@ -85,9 +85,11 @@ jobs:
               sleep 10
             done
 
-            # Print final job details
+            # Print and save final job details
             echo "=== Final job details ==="
             curl -sf "$API_URL/jobs/$JOB_ID" | python3 -m json.tool
+            curl -sf "$API_URL/jobs/$JOB_ID" > summarize-result.json 2>/dev/null \
+              || echo '{"status":"unknown","processed":0,"failed":0}' > summarize-result.json
 
             if [ "$STATUS" = "failed" ]; then
               echo "Summarize job failed"
@@ -96,11 +98,14 @@ jobs:
 
           elif [ "$HTTP_CODE" = "409" ]; then
             echo "Warning: A summarize job is already running — skipping"
+            echo '{"status":"skipped","processed":0,"failed":0}' > summarize-result.json
           elif [ "$HTTP_CODE" = "503" ]; then
             echo "Warning: LLM not configured — skipping summarization"
+            echo '{"status":"no-llm","processed":0,"failed":0}' > summarize-result.json
           else
             echo "Unexpected response from /jobs/summarize-all: HTTP $HTTP_CODE"
             cat /tmp/job_response.json
+            echo '{"status":"error","processed":0,"failed":0}' > summarize-result.json
             exit 1
           fi
 
@@ -112,3 +117,72 @@ jobs:
           path: summary.json
           if-no-files-found: ignore
           retention-days: 30
+
+      - name: Notify Discord
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          python3 - <<'EOF'
+          import json, os, sys
+          import urllib.request
+
+          webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "")
+          if not webhook_url:
+              print("DISCORD_WEBHOOK_URL not set, skipping")
+              sys.exit(0)
+
+          collect = {}
+          try:
+              with open("summary.json") as f:
+                  collect = json.load(f)
+          except FileNotFoundError:
+              pass
+
+          summ = {}
+          try:
+              with open("summarize-result.json") as f:
+                  summ = json.load(f)
+          except FileNotFoundError:
+              pass
+
+          fetched = collect.get("fetched", "?")
+          ingested = collect.get("ingested", "?")
+          duplicate = collect.get("duplicate", "?")
+          failed_collect = collect.get("failed", 0)
+
+          s_processed = summ.get("processed", "-")
+          s_failed = summ.get("failed", "-")
+          s_status = summ.get("status", "-")
+
+          ok = failed_collect == 0 and s_status in ("done", "skipped", "no-llm", "-")
+          color = 0x00b894 if ok else 0xe17055
+
+          embed = {
+              "title": "\U0001f9e0 arXiv Daily Collect",
+              "color": color,
+              "fields": [
+                  {
+                      "name": "\U0001f4c4 収集",
+                      "value": f"取得: {fetched} | 新規: {ingested} | 重複: {duplicate} | 失敗: {failed_collect}",
+                      "inline": False,
+                  },
+                  {
+                      "name": "\U0001f52c 要約ジョブ",
+                      "value": f"処理: {s_processed} | 失敗: {s_failed} | ステータス: {s_status}",
+                      "inline": False,
+                  },
+              ],
+              "footer": {"text": "flipslidersand/academic-paper-system"},
+          }
+
+          payload = json.dumps({"embeds": [embed]}).encode()
+          req = urllib.request.Request(
+              webhook_url,
+              data=payload,
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=10) as resp:
+              print(f"Discord notified: HTTP {resp.status}")
+          EOF
