@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Academic Paper System</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen" x-data="app()" x-init="init()" x-cloak>
+
+  <!-- Header -->
+  <header class="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="text-xl">&#x1F9E0;</span>
+      <h1 class="text-base font-bold tracking-tight">Academic Paper System</h1>
+    </div>
+    <div class="flex gap-5 text-sm text-gray-400">
+      <span>&#x1F4C4; <span class="text-white font-semibold" x-text="stats.papers ?? '-'"></span></span>
+      <span>&#x1F9E9; <span class="text-white font-semibold" x-text="stats.chunks ?? '-'"></span> chunks</span>
+      <span>&#x1F535; <span class="text-white font-semibold" x-text="stats.qdrant_points ?? '-'"></span> vectors</span>
+    </div>
+  </header>
+
+  <!-- Search bar -->
+  <div class="bg-gray-900 border-b border-gray-800 px-6 py-3 space-y-2">
+    <div class="flex gap-2">
+      <input
+        type="text"
+        placeholder="論文を検索..."
+        x-model="query"
+        @keyup.enter="doSearch()"
+        class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-blue-500 placeholder-gray-600"
+      >
+      <select x-model="searchMode" class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none text-gray-300">
+        <option value="hybrid">hybrid</option>
+        <option value="vector">vector</option>
+        <option value="keyword">keyword</option>
+      </select>
+      <button @click="doSearch()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors">検索</button>
+      <button @click="clearSearch()" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg text-sm transition-colors">&#x2715;</button>
+    </div>
+    <div class="flex gap-2 text-sm">
+      <input type="text" placeholder="著者フィルタ" x-model="filterAuthor" @change="loadPapers()" class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 placeholder-gray-600 w-44">
+      <input type="text" placeholder="カテゴリ (例: cs.AI)" x-model="filterCategory" @change="loadPapers()" class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 placeholder-gray-600 w-48">
+    </div>
+  </div>
+
+  <!-- Main -->
+  <main class="px-6 py-4 max-w-5xl mx-auto">
+
+    <!-- Loading -->
+    <div x-show="loading" class="text-center py-16 text-gray-600 text-sm">読み込み中...</div>
+
+    <!-- Search results -->
+    <div x-show="!loading && searchResults.length > 0">
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-xs text-gray-500">検索結果 <span class="text-gray-300" x-text="searchResults.length"></span> 件 &mdash; mode: <span x-text="searchMode"></span></p>
+        <button @click="clearSearch()" class="text-xs text-blue-400 hover:text-blue-300">一覧に戻る</button>
+      </div>
+      <div class="space-y-2">
+        <template x-for="r in searchResults" :key="r.paper_id + '-' + r.chunk_index">
+          <div class="bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-lg p-4 transition-colors">
+            <div class="flex gap-4 items-start">
+              <div class="flex-1 min-w-0">
+                <p class="text-sm text-gray-300 line-clamp-2" x-text="r.snippet"></p>
+                <div class="mt-1.5 flex gap-3 text-xs text-gray-600">
+                  <span>paper <span class="text-blue-400" x-text="r.paper_id"></span></span>
+                  <span>rank <span x-text="r.rank"></span></span>
+                  <span>score <span x-text="typeof r.score === 'number' ? r.score.toFixed(4) : r.score"></span></span>
+                  <span x-show="r.page_start != null">p.<span x-text="r.page_start"></span></span>
+                </div>
+              </div>
+              <button @click="openSummary(r.paper_id)" class="shrink-0 text-xs bg-gray-700 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-colors">要約</button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Paper list -->
+    <div x-show="!loading && searchResults.length === 0">
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-xs text-gray-500">全 <span class="text-gray-300" x-text="total"></span> 件</p>
+        <div class="flex items-center gap-2">
+          <button @click="prevPage()" :disabled="offset === 0" class="text-xs px-3 py-1.5 bg-gray-800 rounded-lg disabled:opacity-30 hover:bg-gray-700 transition-colors">&#x2190; 前</button>
+          <span class="text-xs text-gray-600" x-text="(Math.floor(offset/limit)+1) + ' / ' + (Math.ceil(total/limit) || 1)"></span>
+          <button @click="nextPage()" :disabled="offset + limit >= total" class="text-xs px-3 py-1.5 bg-gray-800 rounded-lg disabled:opacity-30 hover:bg-gray-700 transition-colors">次 &#x2192;</button>
+        </div>
+      </div>
+      <div class="space-y-2">
+        <template x-for="p in papers" :key="p.id">
+          <div class="bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-lg p-4 transition-colors">
+            <div class="flex gap-4 items-start">
+              <div class="flex-1 min-w-0">
+                <h3 class="text-sm font-medium truncate" x-text="p.title || p.file_name"></h3>
+                <div class="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                  <span x-show="p.authors?.length" x-text="p.authors.slice(0,2).join(', ') + (p.authors.length > 2 ? ' et al.' : '')"></span>
+                  <span x-show="p.published_date" class="text-gray-600" x-text="p.published_date"></span>
+                  <template x-for="cat in (p.categories || []).slice(0,4)" :key="cat">
+                    <span class="bg-gray-800 text-gray-400 px-2 py-0.5 rounded text-xs" x-text="cat"></span>
+                  </template>
+                  <span class="ml-auto text-xs" :class="p.status === 'indexed' ? 'text-green-500' : 'text-yellow-500'" x-text="p.status"></span>
+                </div>
+              </div>
+              <button @click="openSummary(p.id)" class="shrink-0 text-xs bg-gray-700 hover:bg-blue-700 px-3 py-1.5 rounded-lg transition-colors">要約</button>
+            </div>
+          </div>
+        </template>
+        <div x-show="papers.length === 0" class="text-center py-12 text-gray-600 text-sm">論文がありません</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Summary Modal -->
+  <div
+    x-show="modal.open"
+    x-transition:enter="transition ease-out duration-150"
+    x-transition:enter-start="opacity-0"
+    x-transition:enter-end="opacity-100"
+    x-transition:leave="transition ease-in duration-100"
+    x-transition:leave-start="opacity-100"
+    x-transition:leave-end="opacity-0"
+    class="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50"
+    @click.self="modal.open = false"
+    @keydown.escape.window="modal.open = false"
+  >
+    <div class="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-2xl max-h-[82vh] overflow-y-auto">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-gray-800 sticky top-0 bg-gray-900">
+        <h2 class="font-semibold text-sm truncate pr-4" x-text="modal.title || '要約'"></h2>
+        <button @click="modal.open = false" class="text-gray-500 hover:text-white text-lg leading-none shrink-0">&#x2715;</button>
+      </div>
+      <div class="px-6 py-4">
+        <div x-show="modal.loading" class="text-center py-10 text-gray-500 text-sm">生成中...</div>
+        <div x-show="modal.error" class="text-red-400 text-sm py-4" x-text="modal.error"></div>
+        <div x-show="!modal.loading && !modal.error && modal.summary" class="space-y-5 text-sm">
+          <div>
+            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">目的・研究課題</p>
+            <p class="text-gray-300 leading-relaxed" x-text="modal.summary?.objective"></p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">手法</p>
+            <p class="text-gray-300 leading-relaxed" x-text="modal.summary?.method"></p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">結果</p>
+            <p class="text-gray-300 leading-relaxed" x-text="modal.summary?.results"></p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">限界・今後の課題</p>
+            <p class="text-gray-300 leading-relaxed" x-text="modal.summary?.limitations"></p>
+          </div>
+          <div x-show="modal.summary?.keywords?.length">
+            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">キーワード</p>
+            <div class="flex flex-wrap gap-1.5">
+              <template x-for="kw in modal.summary?.keywords || []" :key="kw">
+                <span class="bg-gray-800 text-blue-400 text-xs px-2.5 py-1 rounded-full" x-text="kw"></span>
+              </template>
+            </div>
+          </div>
+          <div class="pt-3 border-t border-gray-800 flex items-center justify-between text-xs text-gray-600">
+            <span x-text="'model: ' + modal.summary?.model"></span>
+            <span x-text="modal.summary?.cached ? 'cached' : 'generated'"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function app() {
+      return {
+        stats: {},
+        papers: [],
+        total: 0,
+        offset: 0,
+        limit: 20,
+        loading: false,
+        query: '',
+        searchMode: 'hybrid',
+        filterAuthor: '',
+        filterCategory: '',
+        searchResults: [],
+        modal: { open: false, loading: false, summary: null, title: '', error: '' },
+
+        async init() {
+          await Promise.all([this.loadStats(), this.loadPapers()]);
+        },
+
+        async loadStats() {
+          try {
+            const r = await fetch('/stats');
+            this.stats = await r.json();
+          } catch (_) {}
+        },
+
+        async loadPapers() {
+          this.loading = true;
+          this.searchResults = [];
+          try {
+            const p = new URLSearchParams({ limit: this.limit, offset: this.offset });
+            if (this.filterAuthor) p.set('author', this.filterAuthor);
+            if (this.filterCategory) p.set('category', this.filterCategory);
+            const r = await fetch('/papers?' + p);
+            const data = await r.json();
+            this.papers = data.papers;
+            this.total = data.total;
+          } catch (_) {}
+          finally { this.loading = false; }
+        },
+
+        async doSearch() {
+          if (!this.query.trim()) { this.clearSearch(); return; }
+          this.loading = true;
+          try {
+            const p = new URLSearchParams({ q: this.query, mode: this.searchMode, limit: 20 });
+            const r = await fetch('/search?' + p);
+            if (!r.ok) throw new Error(await r.text());
+            const data = await r.json();
+            this.searchResults = data.results;
+          } catch (e) {
+            alert('検索エラー: ' + e.message);
+          } finally { this.loading = false; }
+        },
+
+        clearSearch() {
+          this.query = '';
+          this.searchResults = [];
+          this.loadPapers();
+        },
+
+        async openSummary(paperId) {
+          this.modal = { open: true, loading: true, summary: null, title: '', error: '' };
+          try {
+            const [pr, sr] = await Promise.all([
+              fetch('/papers/' + paperId),
+              fetch('/papers/' + paperId + '/summary'),
+            ]);
+            const paper = await pr.json();
+            this.modal.title = paper.title || paper.file_name;
+            if (sr.status === 503) {
+              this.modal.error = 'LLM 未設定のため要約できません（LLM を設定して再試行してください）';
+              return;
+            }
+            if (!sr.ok) { this.modal.error = 'エラー ' + sr.status; return; }
+            this.modal.summary = await sr.json();
+          } catch (e) {
+            this.modal.error = e.message;
+          } finally { this.modal.loading = false; }
+        },
+
+        prevPage() {
+          if (this.offset > 0) { this.offset = Math.max(0, this.offset - this.limit); this.loadPapers(); }
+        },
+        nextPage() {
+          if (this.offset + this.limit < this.total) { this.offset += this.limit; this.loadPapers(); }
+        },
+      };
+    }
+  </script>
+</body>
+</html>
