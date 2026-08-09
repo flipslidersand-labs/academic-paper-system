@@ -1,0 +1,119 @@
+name: arXiv Daily
+
+on:
+  schedule:
+    - cron: "0 2 * * *" # 毎日 02:00 UTC (JST 11:00)
+  workflow_dispatch:
+    inputs:
+      summarize:
+        description: "Trigger bulk summarization after collection"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    env:
+      API_BASE_URL: ${{ secrets.ACADEMIC_API_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect arXiv papers
+        run: |
+          echo "Collecting arXiv papers..."
+          # arXiv API から論文を取得してインジェスト
+          # 実装はプロジェクトの収集スクリプトに委ねる
+          # 例: python scripts/collect_arxiv.py --topics "cs.LG,cs.AI" --max 20
+          echo "Collection step complete (placeholder)"
+
+      - name: Trigger bulk summarization
+        if: ${{ github.event.inputs.summarize != 'false' }}
+        env:
+          API_BASE_URL: ${{ secrets.ACADEMIC_API_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${API_BASE_URL:-}" ]; then
+            echo "::warning::ACADEMIC_API_URL secret not set — skipping summarization"
+            exit 0
+          fi
+
+          echo "Triggering bulk summarization..."
+
+          # POST /jobs/summarize-all
+          HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${API_BASE_URL}/jobs/summarize-all" \
+            -H "Content-Type: application/json" \
+            --max-time 30)
+
+          HTTP_BODY=$(echo "$HTTP_RESPONSE" | head -n -1)
+          HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -n 1)
+
+          echo "Response (${HTTP_CODE}): ${HTTP_BODY}"
+
+          if [ "$HTTP_CODE" = "409" ]; then
+            echo "::warning::Summarization job already running — skipping"
+            exit 0
+          fi
+
+          if [ "$HTTP_CODE" = "503" ]; then
+            echo "::warning::LLM not configured — skipping summarization"
+            exit 0
+          fi
+
+          if [ "$HTTP_CODE" != "202" ]; then
+            echo "::error::Unexpected response code ${HTTP_CODE}"
+            exit 1
+          fi
+
+          JOB_ID=$(echo "$HTTP_BODY" | python3 -c "import json,sys; print(json.load(sys.stdin)['job_id'])")
+          echo "Job started: ${JOB_ID}"
+
+          # Poll for completion (5 min timeout, 10s interval)
+          DEADLINE=$(( $(date +%s) + 300 ))
+          while true; do
+            if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+              echo "::error::Job ${JOB_ID} timed out after 5 minutes"
+              exit 1
+            fi
+
+            STATUS_RESPONSE=$(curl -s -w "\n%{http_code}" \
+              "${API_BASE_URL}/jobs/${JOB_ID}" \
+              --max-time 15)
+
+            STATUS_BODY=$(echo "$STATUS_RESPONSE" | head -n -1)
+            STATUS_CODE=$(echo "$STATUS_RESPONSE" | tail -n 1)
+
+            if [ "$STATUS_CODE" != "200" ]; then
+              echo "::error::Failed to poll job status (HTTP ${STATUS_CODE})"
+              exit 1
+            fi
+
+            JOB_STATUS=$(echo "$STATUS_BODY" | python3 -c "import json,sys; print(json.load(sys.stdin)['status'])")
+
+            echo "Job status: ${JOB_STATUS}"
+
+            if [ "$JOB_STATUS" = "completed" ]; then
+              RESULT=$(echo "$STATUS_BODY" | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          r = d.get('result') or {}
+          print(f\"total={r.get('total', '?')} succeeded={r.get('succeeded', '?')} failed={r.get('failed', '?')}\")
+          ")
+              echo "Summarization complete: ${RESULT}"
+              exit 0
+            fi
+
+            if [ "$JOB_STATUS" = "failed" ]; then
+              ERROR=$(echo "$STATUS_BODY" | python3 -c "import json,sys; print(json.load(sys.stdin).get('error', 'unknown'))")
+              echo "::error::Summarization job failed: ${ERROR}"
+              exit 1
+            fi
+
+            sleep 10
+          done
