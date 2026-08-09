@@ -1,12 +1,8 @@
 """Tests for JobStore persistence."""
 
-import sqlite3
-import tempfile
-from pathlib import Path
-
 import pytest
 
-from academic_paper.db import init_db, upsert_job, load_all_jobs, get_connection
+from academic_paper.db import get_connection, init_db, load_all_jobs, upsert_job
 from academic_paper.jobs import JobStore
 
 
