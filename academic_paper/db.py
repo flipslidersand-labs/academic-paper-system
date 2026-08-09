@@ -16,7 +16,7 @@ def get_connection(db_path: str) -> sqlite3.Connection:
 def init_db(db_path: str) -> None:
     """Initialize database schema (idempotent).
 
-    Creates tables: papers, chunks, summaries, and FTS5 virtual table.
+    Creates tables: papers, chunks, summaries, jobs, and FTS5 virtual table.
     Runs ALTER TABLE migrations for columns added after v1.
     """
     conn = get_connection(db_path)
@@ -69,6 +69,19 @@ def init_db(db_path: str) -> None:
             keywords TEXT,
             raw_json TEXT,
             created_at TEXT NOT NULL
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS jobs (
+            id TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'pending',
+            total INTEGER NOT NULL DEFAULT 0,
+            processed INTEGER NOT NULL DEFAULT 0,
+            failed INTEGER NOT NULL DEFAULT 0,
+            errors TEXT NOT NULL DEFAULT '[]',
+            started_at REAL NOT NULL,
+            finished_at REAL
         )
     """)
 
@@ -376,3 +389,41 @@ def save_summary(conn: sqlite3.Connection, paper_id: int, model: str, summary: d
         keywords_json, raw_json, created_at,
     ))
     conn.commit()
+
+
+def upsert_job(
+    conn: sqlite3.Connection,
+    job_id: str,
+    status: str,
+    total: int,
+    processed: int,
+    failed: int,
+    errors: list[str],
+    started_at: float,
+    finished_at: float | None,
+) -> None:
+    """Insert or update a job row."""
+    conn.execute("""
+        INSERT INTO jobs (id, status, total, processed, failed, errors, started_at, finished_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            status = excluded.status,
+            total = excluded.total,
+            processed = excluded.processed,
+            failed = excluded.failed,
+            errors = excluded.errors,
+            finished_at = excluded.finished_at
+    """, (job_id, status, total, processed, failed, json.dumps(errors), started_at, finished_at))
+    conn.commit()
+
+
+def load_all_jobs(conn: sqlite3.Connection) -> list[dict]:
+    """Load all job rows ordered by start time (oldest first)."""
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM jobs ORDER BY started_at ASC")
+    rows = []
+    for row in cursor.fetchall():
+        d = dict(row)
+        d["errors"] = json.loads(d["errors"])
+        rows.append(d)
+    return rows

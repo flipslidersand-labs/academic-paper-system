@@ -35,10 +35,57 @@ class Job:
 class JobStore:
     def __init__(self) -> None:
         self._jobs: dict[str, Job] = {}
+        self._db_path: str | None = None
+
+    def init(self, db_path: str) -> None:
+        """Load existing jobs from SQLite into memory on startup.
+
+        Jobs that were 'running' at last shutdown are converted to 'failed'.
+        """
+        from academic_paper.db import get_connection, load_all_jobs, upsert_job
+
+        self._db_path = db_path
+        conn = get_connection(db_path)
+        for row in load_all_jobs(conn):
+            status = row["status"]
+            errors = list(row["errors"])
+            if status == "running":
+                status = "failed"
+                errors.append("Server restarted while job was running")
+                upsert_job(
+                    conn, row["id"], status, row["total"], row["processed"],
+                    row["failed"], errors, row["started_at"], row["finished_at"],
+                )
+            job = Job(
+                id=row["id"],
+                status=status,
+                total=row["total"],
+                processed=row["processed"],
+                failed=row["failed"],
+                errors=errors,
+                started_at=row["started_at"],
+                finished_at=row["finished_at"],
+            )
+            self._jobs[job.id] = job
+        conn.close()
+
+    def _persist(self, job: Job) -> None:
+        """Write current job state to SQLite."""
+        if not self._db_path:
+            return
+        from academic_paper.db import get_connection, upsert_job
+
+        conn = get_connection(self._db_path)
+        upsert_job(
+            conn, job.id, job.status, job.total, job.processed,
+            job.failed, job.errors, job.started_at, job.finished_at,
+        )
+        conn.close()
 
     def create(self) -> Job:
         job = Job(id=str(uuid.uuid4()), status="pending")
         self._jobs[job.id] = job
+        self._persist(job)
         return job
 
     def get(self, job_id: str) -> Job | None:
@@ -49,6 +96,10 @@ class JobStore:
 
     def has_running(self) -> bool:
         return any(j.status == "running" for j in self._jobs.values())
+
+    def persist(self, job: Job) -> None:
+        """Persist job state to SQLite (call on status transitions)."""
+        self._persist(job)
 
 
 job_store = JobStore()

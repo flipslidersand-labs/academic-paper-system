@@ -53,6 +53,7 @@ async def lifespan(app: FastAPI):
     """Initialize database and services on startup."""
     setup_telemetry(app, settings.otel_endpoint)
     init_db(settings.academic_db)
+    job_store.init(settings.academic_db)
     app.state.embedder = EmbedderClient()
     app.state.vector_store = QdrantStore()
     llm_client = get_llm_client()
@@ -294,6 +295,7 @@ async def _run_summarize_all(job_id: str) -> None:
         return
 
     job.status = "running"
+    job_store.persist(job)
     try:
         conn = get_connection(settings.academic_db)
         cursor = conn.cursor()
@@ -335,6 +337,7 @@ async def _run_summarize_all(job_id: str) -> None:
         job.errors.append(str(e))
     finally:
         job.finished_at = time.time()
+        job_store.persist(job)
 
 
 @app.post("/jobs/summarize-all", status_code=202)
