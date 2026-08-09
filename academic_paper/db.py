@@ -3,7 +3,6 @@
 import json
 import sqlite3
 from datetime import datetime
-from pathlib import Path
 
 
 def get_connection(db_path: str) -> sqlite3.Connection:
@@ -163,12 +162,7 @@ def load_all_jobs(conn: sqlite3.Connection) -> list[dict]:
     return jobs
 
 
-def save_paper(
-    conn: sqlite3.Connection,
-    file_name: str,
-    file_hash: str,
-    **kwargs
-) -> int:
+def save_paper(conn: sqlite3.Connection, file_name: str, file_hash: str, **kwargs) -> int:
     """Save paper to database and return paper_id.
 
     Args:
@@ -196,10 +190,13 @@ def save_paper(
     if authors:
         authors_json = json.dumps(authors)
 
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO papers (file_name, file_hash, title, authors, year, pages, ingested_at, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (file_name, file_hash, title, authors_json, year, pages, ingested_at, status))
+    """,
+        (file_name, file_hash, title, authors_json, year, pages, ingested_at, status),
+    )
 
     conn.commit()
     return cursor.lastrowid
@@ -214,17 +211,16 @@ def update_paper_status(conn: sqlite3.Connection, paper_id: int, status: str) ->
         status: New status ('pending', 'indexed', 'failed', etc.).
     """
     cursor = conn.cursor()
-    cursor.execute("""
+    cursor.execute(
+        """
         UPDATE papers SET status = ? WHERE id = ?
-    """, (status, paper_id))
+    """,
+        (status, paper_id),
+    )
     conn.commit()
 
 
-def save_chunks(
-    conn: sqlite3.Connection,
-    paper_id: int,
-    chunks: list[dict]
-) -> None:
+def save_chunks(conn: sqlite3.Connection, paper_id: int, chunks: list[dict]) -> None:
     """Save chunks to database and FTS5 index.
 
     Args:
@@ -242,26 +238,32 @@ def save_chunks(
 
     for chunk in chunks:
         # Insert into chunks table
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO chunks (paper_id, chunk_index, page_start, page_end, text, token_count, qdrant_id)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            paper_id,
-            chunk["chunk_index"],
-            chunk["page_start"],
-            chunk["page_end"],
-            chunk["text"],
-            chunk["token_count"],
-            chunk["qdrant_id"]
-        ))
+        """,
+            (
+                paper_id,
+                chunk["chunk_index"],
+                chunk["page_start"],
+                chunk["page_end"],
+                chunk["text"],
+                chunk["token_count"],
+                chunk["qdrant_id"],
+            ),
+        )
 
         chunk_id = cursor.lastrowid
 
         # Insert into FTS5
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO chunks_fts(rowid, text)
             VALUES (?, ?)
-        """, (chunk_id, chunk["text"]))
+        """,
+            (chunk_id, chunk["text"]),
+        )
 
     conn.commit()
 
@@ -326,20 +328,18 @@ def get_chunks(conn: sqlite3.Connection, paper_id: int) -> list[dict]:
         List of chunk dictionaries.
     """
     cursor = conn.cursor()
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT * FROM chunks WHERE paper_id = ? ORDER BY chunk_index
-    """, (paper_id,))
+    """,
+        (paper_id,),
+    )
     rows = cursor.fetchall()
 
     return [dict(row) for row in rows]
 
 
-def search_fts(
-    conn: sqlite3.Connection,
-    query: str,
-    limit: int = 10,
-    paper_id: int | None = None
-) -> list[dict]:
+def search_fts(conn: sqlite3.Connection, query: str, limit: int = 10, paper_id: int | None = None) -> list[dict]:
     """Search chunks using FTS5 with BM25 ranking.
 
     Args:
@@ -358,23 +358,29 @@ def search_fts(
     cursor = conn.cursor()
 
     if paper_id is None:
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT c.id as chunk_id, c.paper_id, c.text, bm25(chunks_fts) as rank
             FROM chunks_fts
             JOIN chunks c ON chunks_fts.rowid = c.id
             WHERE chunks_fts MATCH ?
             ORDER BY rank
             LIMIT ?
-        """, (query, limit))
+        """,
+            (query, limit),
+        )
     else:
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT c.id as chunk_id, c.paper_id, c.text, bm25(chunks_fts) as rank
             FROM chunks_fts
             JOIN chunks c ON chunks_fts.rowid = c.id
             WHERE chunks_fts MATCH ? AND c.paper_id = ?
             ORDER BY rank
             LIMIT ?
-        """, (query, paper_id, limit))
+        """,
+            (query, paper_id, limit),
+        )
 
     rows = cursor.fetchall()
     return [dict(row) for row in rows]
@@ -391,11 +397,14 @@ def get_summary(conn: sqlite3.Connection, paper_id: int) -> dict | None:
         Summary dictionary or None if not cached.
     """
     cursor = conn.cursor()
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT model, objective, method, results, limitations, keywords, raw_json, created_at
         FROM summaries
         WHERE paper_id = ?
-    """, (paper_id,))
+    """,
+        (paper_id,),
+    )
     row = cursor.fetchone()
 
     if row is None:
@@ -435,7 +444,8 @@ def save_summary(conn: sqlite3.Connection, paper_id: int, model: str, summary: d
     # Store raw summary as JSON for debugging
     raw_json = json.dumps(summary)
 
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO summaries (paper_id, model, objective, method, results, limitations, keywords, raw_json, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(paper_id) DO UPDATE SET
@@ -447,16 +457,18 @@ def save_summary(conn: sqlite3.Connection, paper_id: int, model: str, summary: d
             keywords = excluded.keywords,
             raw_json = excluded.raw_json,
             created_at = excluded.created_at
-    """, (
-        paper_id,
-        model,
-        summary.get("objective", ""),
-        summary.get("method", ""),
-        summary.get("results", ""),
-        summary.get("limitations", ""),
-        keywords_json,
-        raw_json,
-        created_at
-    ))
+    """,
+        (
+            paper_id,
+            model,
+            summary.get("objective", ""),
+            summary.get("method", ""),
+            summary.get("results", ""),
+            summary.get("limitations", ""),
+            keywords_json,
+            raw_json,
+            created_at,
+        ),
+    )
 
     conn.commit()

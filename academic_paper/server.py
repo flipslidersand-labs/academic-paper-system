@@ -1,39 +1,34 @@
 """FastAPI server for academic paper ingestion and retrieval."""
 
-import asyncio
-import httpx
-import sqlite3
 import tempfile
-import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 
+import httpx
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, UploadFile
 
 from academic_paper.chunker import chunk_pages
 from academic_paper.config import settings
 from academic_paper.db import (
     get_connection,
+    get_paper,
+    get_summary,
     init_db,
+    list_papers,
     save_chunks,
     save_paper,
-    update_paper_status,
-    list_papers,
-    get_paper,
-    get_chunks,
-    search_fts,
-    get_summary,
     save_summary,
+    search_fts,
+    update_paper_status,
 )
-from academic_paper.extractor import extract_text, hash_file
 from academic_paper.embedder import EmbedderClient
-from academic_paper.vector_store import QdrantStore, make_qdrant_id
+from academic_paper.extractor import extract_text, hash_file
 from academic_paper.hybrid import rrf_merge
+from academic_paper.jobs import JobStore
 from academic_paper.llm import get_llm_client
 from academic_paper.summarizer import RAGSummarizer
-from academic_paper.jobs import JobStore
-from academic_paper.telemetry import setup_telemetry, get_tracer
-
+from academic_paper.telemetry import get_tracer, setup_telemetry
+from academic_paper.vector_store import QdrantStore, make_qdrant_id
 
 tracer = get_tracer()
 job_store = JobStore()
@@ -128,16 +123,18 @@ async def ingest_paper(file: UploadFile = File(...)):
             for idx, (chunk, embedding) in enumerate(zip(chunks_list, embeddings)):
                 qdrant_id = make_qdrant_id(file_hash, idx)
                 chunk["qdrant_id"] = qdrant_id
-                points.append({
-                    "id": qdrant_id,
-                    "vector": embedding,
-                    "payload": {
-                        "paper_id": paper_id,
-                        "chunk_index": idx,
-                        "text": chunk["text"],
-                        "file_name": file.filename or "unknown.pdf",
+                points.append(
+                    {
+                        "id": qdrant_id,
+                        "vector": embedding,
+                        "payload": {
+                            "paper_id": paper_id,
+                            "chunk_index": idx,
+                            "text": chunk["text"],
+                            "file_name": file.filename or "unknown.pdf",
+                        },
                     }
-                })
+                )
 
             # Upsert to Qdrant
             with tracer.start_as_current_span("qdrant.upsert"):
@@ -170,9 +167,7 @@ async def ingest_paper(file: UploadFile = File(...)):
 
 
 @app.get("/papers")
-def list_papers_endpoint(
-    limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)
-):
+def list_papers_endpoint(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)):
     """List papers with pagination.
 
     Args:
@@ -388,14 +383,16 @@ async def search(
                 # Extract snippet
                 snippet = result["text"][:200]
 
-                results.append({
-                    "rank": rank,
-                    "score": result["rank"],  # FTS5 BM25 score
-                    "paper_id": paper_id_res,
-                    "chunk_index": result.get("chunk_index", 0),
-                    "page_start": page_start,
-                    "snippet": snippet,
-                })
+                results.append(
+                    {
+                        "rank": rank,
+                        "score": result["rank"],  # FTS5 BM25 score
+                        "paper_id": paper_id_res,
+                        "chunk_index": result.get("chunk_index", 0),
+                        "page_start": page_start,
+                        "snippet": snippet,
+                    }
+                )
 
             conn.close()
             return {
@@ -434,14 +431,16 @@ async def search(
                 # Extract snippet
                 snippet = payload["text"][:200]
 
-                results.append({
-                    "rank": rank,
-                    "score": score,
-                    "paper_id": paper_id_res,
-                    "chunk_index": chunk_idx,
-                    "page_start": page_start,
-                    "snippet": snippet,
-                })
+                results.append(
+                    {
+                        "rank": rank,
+                        "score": score,
+                        "paper_id": paper_id_res,
+                        "chunk_index": chunk_idx,
+                        "page_start": page_start,
+                        "snippet": snippet,
+                    }
+                )
 
             conn.close()
             return {
@@ -513,14 +512,16 @@ async def search(
                 # Extract snippet
                 snippet = result["text"][:200]
 
-                results.append({
-                    "rank": rank,
-                    "score": rrf_score,
-                    "paper_id": paper_id_res,
-                    "chunk_index": chunk_idx,
-                    "page_start": page_start,
-                    "snippet": snippet,
-                })
+                results.append(
+                    {
+                        "rank": rank,
+                        "score": rrf_score,
+                        "paper_id": paper_id_res,
+                        "chunk_index": chunk_idx,
+                        "page_start": page_start,
+                        "snippet": snippet,
+                    }
+                )
 
             conn.close()
             return {
@@ -538,14 +539,14 @@ async def health():
     """Qdrant / embedding-svc 疎通チェック"""
     status = {"qdrant": "ok", "embedding_svc": "ok"}
     overall = "ok"
-    
+
     # Qdrant ping
     try:
         app.state.vector_store.client.get_collections()
     except Exception:
         status["qdrant"] = "error"
         overall = "degraded"
-    
+
     # embedding-svc ping (GET /health)
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
@@ -555,7 +556,7 @@ async def health():
     except Exception:
         status["embedding_svc"] = "error"
         overall = "degraded"
-    
+
     return {"status": overall, **status}
 
 
@@ -611,7 +612,11 @@ async def _run_summarize_all(job_id: str) -> None:
             try:
                 summary = await app.state.summarizer.summarize(paper_id, paper["file_hash"])
                 llm_class = app.state.llm.__class__.__name__
-                model = "gemini-2.0-flash" if llm_class == "GeminiClient" else f"ollama/{getattr(app.state.llm, 'model', 'unknown')}"
+                model = (
+                    "gemini-2.0-flash"
+                    if llm_class == "GeminiClient"
+                    else f"ollama/{getattr(app.state.llm, 'model', 'unknown')}"
+                )
                 conn = get_connection(settings.academic_db)
                 save_summary(conn, paper_id, model, summary)
                 conn.close()
