@@ -1,4 +1,4 @@
-"""Tests for POST /jobs/summarize-all, GET /jobs, GET /jobs/{job_id}."""
+"""Tests for POST /jobs/summarize-all, GET /jobs, GET /jobs/{job_id}, and job persistence."""
 
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -10,20 +10,15 @@ from academic_paper.config import settings
 from academic_paper.db import (
     get_connection,
     init_db,
+    load_all_jobs,
     save_chunks,
     save_paper,
     save_summary,
     update_paper_status,
+    upsert_job,
 )
-from academic_paper.jobs import Job, job_store
+from academic_paper.jobs import Job, JobStore, job_store
 from academic_paper.server import app
-
-
-@pytest.fixture(autouse=True)
-def reset_job_store():
-    job_store._jobs.clear()
-    yield
-    job_store._jobs.clear()
 
 
 @pytest.fixture
@@ -32,6 +27,16 @@ def temp_db():
         db_path = f.name
     init_db(db_path)
     yield db_path
+
+
+@pytest.fixture(autouse=True)
+def reset_job_store(temp_db):
+    """Reset job store state and point it at the test DB between tests."""
+    job_store._jobs.clear()
+    job_store._db_path = temp_db
+    yield
+    job_store._jobs.clear()
+    job_store._db_path = None
 
 
 @pytest.fixture
@@ -78,6 +83,8 @@ def client_no_llm(temp_db):
             c.app.state.summarizer = None
             yield c
 
+
+# --- API tests ---
 
 def test_start_summarize_all_no_papers(client):
     """POST /jobs/summarize-all with no papers returns job with total=0 and status=done."""
@@ -198,3 +205,62 @@ def test_summarize_all_records_per_paper_errors(client, temp_db, mock_summarizer
     assert job["failed"] == 2
     assert len(job["errors"]) == 2
     assert "LLM timeout" in job["errors"][0]
+
+
+# --- Persistence tests ---
+
+def test_completed_job_persisted_to_sqlite(client, temp_db):
+    """A completed job is written to the jobs table in SQLite."""
+    resp = client.post("/jobs/summarize-all")
+    assert resp.status_code == 202
+    job_id = resp.json()["job_id"]
+
+    conn = get_connection(temp_db)
+    rows = load_all_jobs(conn)
+    conn.close()
+
+    assert len(rows) == 1
+    assert rows[0]["id"] == job_id
+    assert rows[0]["status"] == "done"
+    assert rows[0]["finished_at"] is not None
+
+
+def test_job_store_init_loads_existing_jobs(temp_db):
+    """JobStore.init() loads previously persisted jobs from SQLite."""
+    import time as time_mod
+
+    conn = get_connection(temp_db)
+    upsert_job(conn, "job-abc", "done", 3, 3, 0, [], time_mod.time(), time_mod.time())
+    conn.close()
+
+    store = JobStore()
+    store.init(temp_db)
+
+    job = store.get("job-abc")
+    assert job is not None
+    assert job.status == "done"
+    assert job.total == 3
+    assert job.processed == 3
+
+
+def test_running_job_converted_to_failed_on_init(temp_db):
+    """Jobs with status='running' are converted to 'failed' when JobStore reloads."""
+    import time as time_mod
+
+    conn = get_connection(temp_db)
+    upsert_job(conn, "job-crash", "running", 5, 2, 0, [], time_mod.time(), None)
+    conn.close()
+
+    store = JobStore()
+    store.init(temp_db)
+
+    job = store.get("job-crash")
+    assert job is not None
+    assert job.status == "failed"
+    assert any("restarted" in e for e in job.errors)
+
+    # Also verify the DB was updated
+    conn = get_connection(temp_db)
+    rows = load_all_jobs(conn)
+    conn.close()
+    assert rows[0]["status"] == "failed"
