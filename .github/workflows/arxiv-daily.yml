@@ -1,0 +1,65 @@
+name: arXiv Daily Collect
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # 00:00 UTC = 09:00 JST
+  workflow_dispatch:
+    inputs:
+      categories:
+        description: "arXiv categories (space-separated)"
+        default: "cs.AI cs.LG cs.CL"
+        required: false
+      max_results:
+        description: "Max papers to fetch"
+        default: "20"
+        required: false
+      api_url:
+        description: "API base URL"
+        default: "http://localhost:8020"
+        required: false
+
+jobs:
+  collect:
+    # Runs on MINIPC self-hosted runner which has access to localhost:8020.
+    # To register the runner: Settings > Actions > Runners > New self-hosted runner
+    # and add the label "minipc" to the runner.
+    runs-on: [self-hosted, minipc]
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install httpx
+
+      - name: Wait for API health
+        run: |
+          API_URL="${{ github.event.inputs.api_url || 'http://localhost:8020' }}"
+          echo "Checking $API_URL/health ..."
+          timeout 30 bash -c "until curl -sf $API_URL/health > /dev/null; do sleep 3; done"
+          echo "API is healthy"
+
+      - name: Collect arXiv papers
+        run: |
+          CATEGORIES="${{ github.event.inputs.categories || 'cs.AI cs.LG cs.CL' }}"
+          MAX="${{ github.event.inputs.max_results || '20' }}"
+          API_URL="${{ github.event.inputs.api_url || 'http://localhost:8020' }}"
+          python scripts/arxiv_collect.py \
+            --categories $CATEGORIES \
+            --max "$MAX" \
+            --api-url "$API_URL" \
+            --summary-file summary.json
+
+      - name: Upload run summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arxiv-collect-summary-${{ github.run_number }}
+          path: summary.json
+          if-no-files-found: ignore
+          retention-days: 30
