@@ -4,9 +4,11 @@ import json
 import tempfile
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi.staticfiles import StaticFiles
 
 from academic_paper.chunker import chunk_pages
 from academic_paper.config import settings
@@ -511,3 +513,9 @@ def stats():
         return {"papers": papers, "chunks": chunks, "qdrant_points": qdrant_points, "db": settings.academic_db}
     finally:
         conn.close()
+
+
+# Serve frontend at /ui — must be mounted after all API routes
+_frontend_dir = Path(__file__).parent.parent / "frontend"
+if _frontend_dir.exists():
+    app.mount("/ui", StaticFiles(directory=str(_frontend_dir), html=True), name="ui")
