@@ -57,6 +57,15 @@ class Settings(BaseSettings):
         default="",
         description="OpenTelemetry endpoint"
     )
+    preferred_categories: str = Field(
+        default="cs.AI,cs.LG,cs.CL",
+        description="Comma-separated preferred arXiv categories for scoring"
+    )
+
+    @property
+    def preferred_categories_list(self) -> list[str]:
+        """Parse preferred_categories CSV into a list."""
+        return [c.strip() for c in self.preferred_categories.split(",") if c.strip()]
 
     model_config = SettingsConfigDict(env_file=".env")
 

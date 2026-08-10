@@ -41,6 +41,7 @@ def init_db(db_path: str) -> None:
         ("categories", "TEXT"),
         ("published_date", "TEXT"),
         ("source", "TEXT"),
+        ("score", "REAL"),
     ])
 
     cursor.execute("""
@@ -163,6 +164,13 @@ def update_paper_status(conn: sqlite3.Connection, paper_id: int, status: str) ->
     conn.commit()
 
 
+def update_paper_score(conn: sqlite3.Connection, paper_id: int, score: float) -> None:
+    """Update computed relevance score for a paper."""
+    cursor = conn.cursor()
+    cursor.execute("UPDATE papers SET score = ? WHERE id = ?", (score, paper_id))
+    conn.commit()
+
+
 def save_chunks(conn: sqlite3.Connection, paper_id: int, chunks: list[dict]) -> None:
     """Save chunks to database and FTS5 index."""
     cursor = conn.cursor()
@@ -207,10 +215,9 @@ def list_papers_filtered(
     offset: int = 0,
     author: str | None = None,
     category: str | None = None,
+    sort: str = "ingested_at",
 ) -> tuple[int, list[dict]]:
-    """List papers with optional author/category filters and pagination.
-
-    Filters use LIKE substring match against the JSON-serialised list columns.
+    """List papers with optional author/category filters, pagination, and sort.
 
     Args:
         conn: Database connection.
@@ -218,6 +225,8 @@ def list_papers_filtered(
         offset: Rows to skip.
         author: Substring to match against the authors JSON column.
         category: Substring to match against the categories JSON column.
+        sort: Sort field — 'ingested_at' (default) or 'score' (highest first,
+              unscored papers last).
 
     Returns:
         (total, papers) where total is the unfiltered count.
@@ -235,15 +244,30 @@ def list_papers_filtered(
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
+    order_by = "COALESCE(score, -1) DESC" if sort == "score" else "ingested_at DESC"
+
     cursor.execute(f"SELECT COUNT(*) FROM papers {where}", params)
     total = cursor.fetchone()[0]
 
     cursor.execute(
-        f"SELECT * FROM papers {where} ORDER BY ingested_at DESC LIMIT ? OFFSET ?",
+        f"SELECT * FROM papers {where} ORDER BY {order_by} LIMIT ? OFFSET ?",
         params + [limit, offset],
     )
     papers = [_deserialize_paper(row) for row in cursor.fetchall()]
     return total, papers
+
+
+def get_all_papers_for_scoring(conn: sqlite3.Connection) -> list[dict]:
+    """Fetch minimal paper data needed for score computation."""
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, categories, published_date FROM papers")
+    rows = []
+    for row in cursor.fetchall():
+        d = dict(row)
+        if d.get("categories"):
+            d["categories"] = json.loads(d["categories"])
+        rows.append(d)
+    return rows
 
 
 def get_paper(conn: sqlite3.Connection, paper_id: int) -> dict | None:
