@@ -87,6 +87,14 @@
       <div class="flex items-center justify-between mb-3">
         <p class="text-xs text-gray-500">全 <span class="text-gray-300" x-text="total"></span> 件</p>
         <div class="flex items-center gap-2">
+          <!-- Sort toggle -->
+          <button
+            @click="toggleSort()"
+            class="text-xs px-3 py-1.5 rounded-lg border transition-colors"
+            :class="sort === 'score' ? 'border-blue-500 text-blue-400 bg-blue-950' : 'border-gray-700 text-gray-400 bg-gray-800 hover:bg-gray-700'"
+          >
+            <span x-text="sort === 'score' ? '&#x2B50; スコア順' : '新着順'"></span>
+          </button>
           <button @click="prevPage()" :disabled="offset === 0" class="text-xs px-3 py-1.5 bg-gray-800 rounded-lg disabled:opacity-30 hover:bg-gray-700 transition-colors">&#x2190; 前</button>
           <span class="text-xs text-gray-600" x-text="(Math.floor(offset/limit)+1) + ' / ' + (Math.ceil(total/limit) || 1)"></span>
           <button @click="nextPage()" :disabled="offset + limit >= total" class="text-xs px-3 py-1.5 bg-gray-800 rounded-lg disabled:opacity-30 hover:bg-gray-700 transition-colors">次 &#x2192;</button>
@@ -97,8 +105,17 @@
           <div class="bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-lg p-4 transition-colors">
             <div class="flex gap-4 items-start">
               <div class="flex-1 min-w-0">
-                <h3 class="text-sm font-medium truncate" x-text="p.title || p.file_name"></h3>
-                <div class="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                <div class="flex items-center gap-2 mb-1">
+                  <h3 class="text-sm font-medium truncate" x-text="p.title || p.file_name"></h3>
+                  <!-- Score badge -->
+                  <span
+                    x-show="p.score != null"
+                    class="shrink-0 text-xs font-mono px-1.5 py-0.5 rounded"
+                    :class="p.score >= 0.7 ? 'bg-green-900 text-green-400' : p.score >= 0.4 ? 'bg-yellow-900 text-yellow-400' : 'bg-gray-800 text-gray-500'"
+                    x-text="p.score != null ? p.score.toFixed(2) : ''"
+                  ></span>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
                   <span x-show="p.authors?.length" x-text="p.authors.slice(0,2).join(', ') + (p.authors.length > 2 ? ' et al.' : '')"></span>
                   <span x-show="p.published_date" class="text-gray-600" x-text="p.published_date"></span>
                   <template x-for="cat in (p.categories || []).slice(0,4)" :key="cat">
@@ -180,6 +197,7 @@
         offset: 0,
         limit: 20,
         loading: false,
+        sort: 'ingested_at',
         query: '',
         searchMode: 'hybrid',
         filterAuthor: '',
@@ -202,7 +220,7 @@
           this.loading = true;
           this.searchResults = [];
           try {
-            const p = new URLSearchParams({ limit: this.limit, offset: this.offset });
+            const p = new URLSearchParams({ limit: this.limit, offset: this.offset, sort: this.sort });
             if (this.filterAuthor) p.set('author', this.filterAuthor);
             if (this.filterCategory) p.set('category', this.filterCategory);
             const r = await fetch('/papers?' + p);
@@ -211,6 +229,12 @@
             this.total = data.total;
           } catch (_) {}
           finally { this.loading = false; }
+        },
+
+        toggleSort() {
+          this.sort = this.sort === 'ingested_at' ? 'score' : 'ingested_at';
+          this.offset = 0;
+          this.loadPapers();
         },
 
         async doSearch() {

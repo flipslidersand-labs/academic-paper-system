@@ -5,6 +5,7 @@ import tempfile
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
@@ -13,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from academic_paper.chunker import chunk_pages
 from academic_paper.config import settings
 from academic_paper.db import (
+    get_all_papers_for_scoring,
     get_connection,
     get_paper,
     get_summary,
@@ -23,6 +25,7 @@ from academic_paper.db import (
     save_paper,
     save_summary,
     search_fts,
+    update_paper_score,
     update_paper_status,
 )
 from academic_paper.embedder import EmbedderClient
@@ -30,6 +33,7 @@ from academic_paper.extractor import extract_text, hash_file
 from academic_paper.hybrid import rrf_merge
 from academic_paper.jobs import job_store
 from academic_paper.llm import get_llm_client
+from academic_paper.scorer import compute_score
 from academic_paper.summarizer import RAGSummarizer
 from academic_paper.telemetry import get_tracer, setup_telemetry
 from academic_paper.vector_store import QdrantStore, make_qdrant_id
@@ -186,10 +190,13 @@ def list_papers_endpoint(
     offset: int = Query(0, ge=0),
     author: str | None = Query(None, description="Filter by author name (substring match)"),
     category: str | None = Query(None, description="Filter by category code e.g. cs.AI"),
+    sort: Literal["ingested_at", "score"] = Query("ingested_at", description="Sort order"),
 ):
-    """List papers with pagination and optional author/category filters."""
+    """List papers with pagination, optional filters, and sort."""
     conn = get_connection(settings.academic_db)
-    total, papers = list_papers_filtered(conn, limit=limit, offset=offset, author=author, category=category)
+    total, papers = list_papers_filtered(
+        conn, limit=limit, offset=offset, author=author, category=category, sort=sort
+    )
     conn.close()
     return {"total": total, "papers": papers}
 
@@ -270,20 +277,49 @@ async def get_summary_endpoint(paper_id: int, force: bool = Query(False)):
         raise HTTPException(status_code=400, detail=f"Summarization error: {str(e)}")
 
 
+@app.post("/papers/score-all")
+def score_all_papers():
+    """Compute and store relevance scores for all papers.
+
+    Score = freshness (30-day half-life, 0–0.5) + category match (0–0.5).
+    Preferred categories are configured via PREFERRED_CATEGORIES env var.
+
+    Returns:
+        JSON with total and scored counts.
+    """
+    preferred = settings.preferred_categories_list
+    conn = get_connection(settings.academic_db)
+    papers = get_all_papers_for_scoring(conn)
+    scored = 0
+    for paper in papers:
+        score = compute_score(paper, preferred)
+        update_paper_score(conn, paper["id"], score)
+        scored += 1
+    conn.close()
+    return {"total": len(papers), "scored": scored, "preferred_categories": preferred}
+
+
+@app.post("/papers/{paper_id}/score")
+def score_paper(paper_id: int):
+    """Compute and store relevance score for a single paper."""
+    conn = get_connection(settings.academic_db)
+    paper = get_paper(conn, paper_id)
+    if paper is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Paper not found")
+    preferred = settings.preferred_categories_list
+    score = compute_score(paper, preferred)
+    update_paper_score(conn, paper_id, score)
+    conn.close()
+    return {"paper_id": paper_id, "score": score}
+
+
 @app.get("/summaries")
 def list_summaries_endpoint(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
-    """List all paper summaries with associated paper metadata.
-
-    Args:
-        limit: Number of summaries to return (1-100, default 20).
-        offset: Number of summaries to skip (default 0).
-
-    Returns:
-        JSON with total count and list of summaries including paper info.
-    """
+    """List all paper summaries with associated paper metadata."""
     conn = get_connection(settings.academic_db)
     total, summaries = list_summaries(conn, limit=limit, offset=offset)
     conn.close()
@@ -344,15 +380,7 @@ async def _run_summarize_all(job_id: str) -> None:
 
 @app.post("/jobs/summarize-all", status_code=202)
 async def start_summarize_all(background_tasks: BackgroundTasks):
-    """Start a background job to summarize all papers without a cached summary.
-
-    Returns:
-        JSON with job_id and initial status.
-
-    Raises:
-        HTTPException 409: A summarize-all job is already running.
-        HTTPException 503: LLM or Summarizer not configured.
-    """
+    """Start a background job to summarize all papers without a cached summary."""
     if job_store.has_running():
         raise HTTPException(status_code=409, detail="A summarize-all job is already running")
     if app.state.llm is None or app.state.summarizer is None:
