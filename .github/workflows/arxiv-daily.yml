@@ -109,6 +109,18 @@ jobs:
             exit 1
           fi
 
+      - name: Score papers
+        run: |
+          API_URL="${{ github.event.inputs.api_url || 'http://localhost:8020' }}"
+          HTTP_CODE=$(curl -s -o /tmp/score_response.json -w "%{http_code}" \
+            -X POST "$API_URL/papers/score-all")
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "=== Score results ==="
+            cat /tmp/score_response.json | python3 -m json.tool
+          else
+            echo "Warning: scoring failed (HTTP $HTTP_CODE) — continuing"
+          fi
+
       - name: Upload run summary
         if: always()
         uses: actions/upload-artifact@v4
@@ -122,6 +134,7 @@ jobs:
         if: always()
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          JOB_STATUS: ${{ job.status }}
         run: |
           python3 - <<'EOF'
           import json, os, sys
@@ -146,6 +159,13 @@ jobs:
           except FileNotFoundError:
               pass
 
+          score_info = {}
+          try:
+              with open("/tmp/score_response.json") as f:
+                  score_info = json.load(f)
+          except FileNotFoundError:
+              pass
+
           fetched = collect.get("fetched", "?")
           ingested = collect.get("ingested", "?")
           duplicate = collect.get("duplicate", "?")
@@ -155,7 +175,10 @@ jobs:
           s_failed = summ.get("failed", "-")
           s_status = summ.get("status", "-")
 
-          ok = failed_collect == 0 and s_status in ("done", "skipped", "no-llm", "-")
+          scored = score_info.get("scored", "-")
+
+          job_status = os.environ.get("JOB_STATUS", "success")
+          ok = job_status == "success" and failed_collect == 0 and s_status in ("done", "skipped", "no-llm", "-")
           color = 0x00b894 if ok else 0xe17055
 
           embed = {
@@ -170,6 +193,11 @@ jobs:
                   {
                       "name": "\U0001f52c 要約ジョブ",
                       "value": f"処理: {s_processed} | 失敗: {s_failed} | ステータス: {s_status}",
+                      "inline": False,
+                  },
+                  {
+                      "name": "⭐ スコアリング",
+                      "value": f"更新: {scored} 件",
                       "inline": False,
                   },
               ],
