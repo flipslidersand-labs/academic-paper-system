@@ -10,7 +10,7 @@ on:
         default: "cs.AI cs.LG cs.CL"
         required: false
       max_results:
-        description: "Max papers to fetch"
+        description: "Max papers to fetch per source"
         default: "20"
         required: false
       api_url:
@@ -28,7 +28,7 @@ jobs:
     # To register the runner: Settings > Actions > Runners > New self-hosted runner
     # and add the label "minipc" to the runner.
     runs-on: [self-hosted, minipc]
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +57,34 @@ jobs:
             --categories $CATEGORIES \
             --max "$MAX" \
             --api-url "$API_URL" \
-            --summary-file summary.json
+            --summary-file summary-arxiv.json
+
+      - name: Collect Semantic Scholar papers
+        continue-on-error: true
+        env:
+          SEMANTIC_SCHOLAR_API_KEY: ${{ secrets.SEMANTIC_SCHOLAR_API_KEY }}
+        run: |
+          API_URL="${{ github.event.inputs.api_url || 'http://localhost:8020' }}"
+          MAX="${{ github.event.inputs.max_results || '20' }}"
+          python scripts/semantic_scholar_collect.py \
+            --topics "machine learning" "deep learning" "natural language processing" \
+            --max "$MAX" \
+            --api-url "$API_URL" \
+            --summary-file summary-s2.json \
+            ${SEMANTIC_SCHOLAR_API_KEY:+--api-key "$SEMANTIC_SCHOLAR_API_KEY"}
+
+      - name: Collect PubMed papers
+        continue-on-error: true
+        env:
+          NCBI_API_KEY: ${{ secrets.NCBI_API_KEY }}
+        run: |
+          API_URL="${{ github.event.inputs.api_url || 'http://localhost:8020' }}"
+          python scripts/pubmed_collect.py \
+            --terms "artificial intelligence" "machine learning" \
+            --max 5 \
+            --api-url "$API_URL" \
+            --summary-file summary-pubmed.json \
+            ${NCBI_API_KEY:+--api-key "$NCBI_API_KEY"}
 
       - name: Trigger bulk summarization
         if: ${{ github.event.inputs.summarize != 'false' }}
@@ -121,12 +148,15 @@ jobs:
             echo "Warning: scoring failed (HTTP $HTTP_CODE) — continuing"
           fi
 
-      - name: Upload run summary
+      - name: Upload run summaries
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: arxiv-collect-summary-${{ github.run_number }}
-          path: summary.json
+          name: collect-summaries-${{ github.run_number }}
+          path: |
+            summary-arxiv.json
+            summary-s2.json
+            summary-pubmed.json
           if-no-files-found: ignore
           retention-days: 30
 
@@ -145,19 +175,17 @@ jobs:
               print("DISCORD_WEBHOOK_URL not set, skipping")
               sys.exit(0)
 
-          collect = {}
-          try:
-              with open("summary.json") as f:
-                  collect = json.load(f)
-          except FileNotFoundError:
-              pass
+          def load_summary(path):
+              try:
+                  with open(path) as f:
+                      return json.load(f)
+              except FileNotFoundError:
+                  return {}
 
-          summ = {}
-          try:
-              with open("summarize-result.json") as f:
-                  summ = json.load(f)
-          except FileNotFoundError:
-              pass
+          arxiv = load_summary("summary-arxiv.json")
+          s2 = load_summary("summary-s2.json")
+          pubmed = load_summary("summary-pubmed.json")
+          summ = load_summary("summarize-result.json")
 
           score_info = {}
           try:
@@ -166,33 +194,29 @@ jobs:
           except FileNotFoundError:
               pass
 
-          fetched = collect.get("fetched", "?")
-          ingested = collect.get("ingested", "?")
-          duplicate = collect.get("duplicate", "?")
-          failed_collect = collect.get("failed", 0)
+          def fmt(d):
+              i = d.get("ingested", "-")
+              dup = d.get("duplicate", "-")
+              fail = d.get("failed", "-")
+              return f"新規:{i} / 重複:{dup} / 失敗:{fail}"
 
-          s_processed = summ.get("processed", "-")
-          s_failed = summ.get("failed", "-")
           s_status = summ.get("status", "-")
-
           scored = score_info.get("scored", "-")
 
           job_status = os.environ.get("JOB_STATUS", "success")
-          ok = job_status == "success" and failed_collect == 0 and s_status in ("done", "skipped", "no-llm", "-")
+          ok = job_status == "success"
           color = 0x00b894 if ok else 0xe17055
 
           embed = {
-              "title": "\U0001f9e0 arXiv Daily Collect",
+              "title": "\U0001f9e0 Daily Collect",
               "color": color,
               "fields": [
-                  {
-                      "name": "\U0001f4c4 収集",
-                      "value": f"取得: {fetched} | 新規: {ingested} | 重複: {duplicate} | 失敗: {failed_collect}",
-                      "inline": False,
-                  },
+                  {"name": "arXiv", "value": fmt(arxiv), "inline": False},
+                  {"name": "Semantic Scholar", "value": fmt(s2), "inline": False},
+                  {"name": "PubMed", "value": fmt(pubmed), "inline": False},
                   {
                       "name": "\U0001f52c 要約ジョブ",
-                      "value": f"処理: {s_processed} | 失敗: {s_failed} | ステータス: {s_status}",
+                      "value": f"処理:{summ.get('processed','-')} / 失敗:{summ.get('failed','-')} / {s_status}",
                       "inline": False,
                   },
                   {
