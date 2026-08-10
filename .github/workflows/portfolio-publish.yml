@@ -1,0 +1,35 @@
+name: Portfolio Publish
+
+on:
+  schedule:
+    - cron: "0 1 * * 0" # 10:00 JST Sunday
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: [self-hosted, minipc]
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for API
+        run: |
+          timeout 30 bash -c 'until curl -sf http://localhost:8020/health > /dev/null; do sleep 3; done'
+          echo "API ready"
+
+      - name: Generate portfolio
+        run: python scripts/generate_portfolio.py --api-url http://localhost:8020 --output-dir docs
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "chore: update portfolio [skip ci]"
+          git push
