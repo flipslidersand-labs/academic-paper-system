@@ -10,6 +10,14 @@ Usage:
     python scripts/arxiv_collect.py
     python scripts/arxiv_collect.py --categories cs.AI cs.LG --max 30
     python scripts/arxiv_collect.py --api-url http://localhost:8020
+    python scripts/arxiv_collect.py --from-date 2025-02-01 --until-date 2025-08-01
+
+Date filtering notes:
+    arXiv's submittedDate filter can be unreliable under rate limits.
+    This script adds the date range to the query AND post-filters results
+    by published_date as a fallback. When a date range is given, --max is
+    the target *after* filtering; the raw fetch is multiplied by FETCH_FACTOR
+    (default 5) to compensate for filtered-out entries.
 
 Exit codes:
     0 — all papers processed (new + duplicate)
@@ -27,24 +35,50 @@ import httpx
 
 ARXIV_API = "https://export.arxiv.org/api/query"
 ARXIV_PDF_BASE = "https://arxiv.org/pdf"
+FETCH_FACTOR = 5  # multiply max_results when date-filtering to fill the target
 
 
-def fetch_recent_papers(
+def _date_to_arxiv(date_str: str, end_of_day: bool = False) -> str:
+    """Convert YYYY-MM-DD to arXiv submittedDate format YYYYMMDDHHII."""
+    d = date_str.replace("-", "")
+    suffix = "2359" if end_of_day else "0000"
+    return d + suffix
+
+
+def fetch_papers(
     categories: list[str],
     max_results: int,
+    from_date: str = "",
+    until_date: str = "",
     timeout: int = 30,
 ) -> list[dict]:
-    """Fetch recent papers from arXiv Atom API.
+    """Fetch papers from arXiv Atom API.
+
+    When from_date / until_date are provided:
+    - Adds submittedDate filter to the arXiv query (best-effort).
+    - Fetches max_results * FETCH_FACTOR raw entries.
+    - Post-filters by published_date and returns up to max_results papers.
 
     Returns dicts with: arxiv_id, title, authors, categories,
     published_date, pdf_url, file_name.
     """
-    query = " OR ".join(f"cat:{c}" for c in categories)
+    cat_query = " OR ".join(f"cat:{c}" for c in categories)
+
+    if from_date or until_date:
+        lo = _date_to_arxiv(from_date) if from_date else "000000000000"
+        hi = _date_to_arxiv(until_date, end_of_day=True) if until_date else "999999992359"
+        date_filter = f"submittedDate:[{lo} TO {hi}]"
+        search_query = f"({cat_query}) AND {date_filter}"
+        fetch_max = max_results * FETCH_FACTOR
+    else:
+        search_query = cat_query
+        fetch_max = max_results
+
     url = (
         f"{ARXIV_API}"
-        f"?search_query={quote(query)}"
+        f"?search_query={quote(search_query)}"
         f"&sortBy=submittedDate&sortOrder=descending"
-        f"&max_results={max_results}"
+        f"&max_results={fetch_max}"
     )
     resp = httpx.get(url, timeout=timeout)
     resp.raise_for_status()
@@ -62,25 +96,29 @@ def fetch_recent_papers(
         arxiv_id = id_elem.text.strip().split("/abs/")[-1]
         title = title_elem.text.strip().replace("\n", " ")
 
-        # Authors
         authors = []
         for author_elem in entry.findall("atom:author", ns):
             name_elem = author_elem.find("atom:name", ns)
             if name_elem is not None and name_elem.text:
                 authors.append(name_elem.text.strip())
 
-        # Categories (all <category> tags)
         cats = []
         for cat_elem in entry.findall("atom:category", ns):
             term = cat_elem.get("term", "")
             if term:
                 cats.append(term)
 
-        # Published date (YYYY-MM-DD)
         published_elem = entry.find("atom:published", ns)
         published_date = None
         if published_elem is not None and published_elem.text:
             published_date = published_elem.text.strip()[:10]
+
+        # Post-filter by date range (fallback when API-side filter is unreliable)
+        if published_date:
+            if from_date and published_date < from_date:
+                continue
+            if until_date and published_date > until_date:
+                continue
 
         safe_id = arxiv_id.replace("/", "_")
         papers.append({
@@ -92,6 +130,10 @@ def fetch_recent_papers(
             "pdf_url": f"{ARXIV_PDF_BASE}/{arxiv_id}.pdf",
             "file_name": f"arxiv_{safe_id}.pdf",
         })
+
+        if len(papers) >= max_results:
+            break
+
     return papers
 
 
@@ -148,6 +190,14 @@ def main() -> None:
         help="Maximum papers to fetch per run (default: 20)",
     )
     parser.add_argument(
+        "--from-date", default="", metavar="YYYY-MM-DD",
+        help="Filter papers published on or after this date (inclusive)",
+    )
+    parser.add_argument(
+        "--until-date", default="", metavar="YYYY-MM-DD",
+        help="Filter papers published on or before this date (inclusive)",
+    )
+    parser.add_argument(
         "--api-url", default="http://localhost:8020",
         help="academic-paper-system API base URL (default: http://localhost:8020)",
     )
@@ -157,10 +207,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    print(f"[arxiv-collect] categories={args.categories} max={args.max_results} api={args.api_url}")
+    date_range = ""
+    if args.from_date or args.until_date:
+        date_range = f" [{args.from_date or '*'} → {args.until_date or '*'}]"
+    print(f"[arxiv-collect] categories={args.categories} max={args.max_results}{date_range} api={args.api_url}")
 
     try:
-        papers = fetch_recent_papers(args.categories, args.max_results)
+        papers = fetch_papers(
+            args.categories,
+            args.max_results,
+            from_date=args.from_date,
+            until_date=args.until_date,
+        )
     except Exception as exc:
         print(f"[arxiv-collect] ERROR fetching arXiv: {exc}", file=sys.stderr)
         sys.exit(1)
