@@ -43,6 +43,7 @@ dev = [
     "pytest-anyio>=0.0.0",
     "ruff>=0.4",
     "respx>=0.21",
+    "fpdf2>=2.7",
 ]
 
 [project.urls]
