@@ -15,8 +15,14 @@ from collections import Counter
 
 
 def split_sentences(text: str) -> list[str]:
-    """Split text into sentences on '. ', '? ', '! ' boundaries."""
-    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    """Split text into sentences on punctuation boundaries.
+
+    Handles both normal text ('word. Next') and PDF-extracted text where
+    spaces after punctuation are missing ('word.Next' or 'word.nextWord').
+    """
+    # Split on: punctuation followed by optional whitespace then an uppercase letter.
+    # This catches both 'end. Start' and 'end.Start' (PDF extraction artefact).
+    parts = re.split(r"(?<=[.!?])\s*(?=[A-Z])", text.strip())
     return [p.strip() for p in parts if p.strip()]
 
 
