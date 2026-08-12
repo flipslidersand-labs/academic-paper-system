@@ -69,3 +69,42 @@ def test_extract_nuggets_top_k_respected():
     # top_k=2 → at most 2 sentences returned
     sentences = [s.strip() for s in nugget.split(".") if s.strip()]
     assert len(sentences) <= 2
+
+
+# --- PDF extraction artefact cases ---
+
+
+def test_split_sentences_no_space_after_period():
+    """PDF-extracted text often has no space between sentences."""
+    text = "KV cache reduces latency.Grayblocksrepresent precomputed caches.Yellow blocks are online."
+    parts = split_sentences(text)
+    assert len(parts) == 3
+
+
+def test_split_sentences_mixed_spacing():
+    """Mix of normal and no-space boundaries."""
+    text = "First sentence ends here. Second starts normally.Third has no space before it."
+    parts = split_sentences(text)
+    assert len(parts) == 3
+
+
+def test_split_sentences_real_pdf_text():
+    """Representative chunk from MINIPC paper_id=25 chunk_index=3."""
+    text = (
+        "Grayblocksrepresent KVcachesprecomputedoffline,whereeachtokenattendstoallprevioustokens"
+        "withinthesamechunk.Yellowblocksrepresent KVcachescomputedonlineduringinference."
+        "Toreplicatetheonlineextractionandcomposition."
+    )
+    parts = split_sentences(text)
+    assert len(parts) >= 2
+
+
+def test_extract_nuggets_pdf_text_shorter_than_full():
+    """Nugget from PDF-style text must be shorter than the full chunk."""
+    text = (
+        "KV cache reduces prefill cost.Grayblocksrepresent precomputed caches offline."
+        "Yellowblocksrepresent online computed caches during inference."
+        "CoinRAG uses nugget-based retrieval to minimize context length."
+    )
+    nugget = extract_nuggets("KV cache inference", text, top_k=2)
+    assert len(nugget.split()) < len(text.split())
