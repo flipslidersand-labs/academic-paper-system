@@ -22,8 +22,12 @@ def extract_text(pdf_path: str) -> list[dict]:
     pages = []
     with pdfplumber.open(pdf_path) as pdf:
         for page_num, page in enumerate(pdf.pages, start=1):
-            text = page.extract_text()
-            if text and text.strip():
+            # extract_words() guarantees a space between every token, which avoids
+            # the word-merging artefact that extract_text() produces on 2-column PDFs
+            # (e.g. 'KVcachesprecomputedoffline' instead of 'KV caches precomputed offline').
+            words = page.extract_words(x_tolerance=3, y_tolerance=3)
+            text = " ".join(w["text"] for w in words)
+            if text.strip():
                 pages.append({"page": page_num, "text": text})
     return pages
 
