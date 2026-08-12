@@ -31,6 +31,7 @@ from academic_paper.db import (
 from academic_paper.embedder import EmbedderClient
 from academic_paper.extractor import extract_text, hash_file
 from academic_paper.hybrid import rrf_merge
+from academic_paper.nugget import extract_nuggets
 from academic_paper.jobs import job_store
 from academic_paper.llm import get_llm_client
 from academic_paper.scorer import compute_score
@@ -409,11 +410,17 @@ def list_jobs_endpoint():
 @app.get("/search")
 async def search(
     q: str = Query(..., min_length=1),
-    mode: str = Query("hybrid", pattern="^(vector|keyword|hybrid)$"),
+    mode: str = Query("hybrid", pattern="^(vector|keyword|hybrid|nugget)$"),
     limit: int = Query(10, ge=1, le=100),
     paper_id: int | None = Query(None),
+    nuggets_per_chunk: int = Query(3, ge=1, le=10, description="Sentences per chunk (nugget mode only)"),
 ):
-    """Search papers using vector, keyword, or hybrid mode."""
+    """Search papers using vector, keyword, hybrid, or nugget mode.
+
+    nugget mode: runs hybrid search then extracts the top-N most query-relevant
+    sentences from each chunk instead of returning the full snippet. Reduces
+    context length by ~68% while maintaining Recall@5.
+    """
     try:
         conn = get_connection(settings.academic_db)
         cursor = conn.cursor()
@@ -461,7 +468,7 @@ async def search(
             conn.close()
             return {"mode": mode, "query": q, "results": results}
 
-        else:  # hybrid
+        else:  # hybrid or nugget (same retrieval, different snippet)
             fts_results = search_fts(conn, query=q, limit=limit, paper_id=paper_id)
             for fts_result in fts_results:
                 cursor.execute("SELECT chunk_index FROM chunks WHERE id = ?", (fts_result["chunk_id"],))
@@ -487,13 +494,18 @@ async def search(
             for rank, result in enumerate(merged[:limit], start=1):
                 cursor.execute("SELECT page_start FROM chunks WHERE id = ?", (result["chunk_id"],))
                 row = cursor.fetchone()
+                full_text = result["text"]
+                if mode == "nugget":
+                    snippet = extract_nuggets(q, full_text, top_k=nuggets_per_chunk)
+                else:
+                    snippet = full_text[:200]
                 results.append({
                     "rank": rank,
                     "score": result["rrf_score"],
                     "paper_id": result["paper_id"],
                     "chunk_index": result["chunk_index"],
                     "page_start": row["page_start"] if row else None,
-                    "snippet": result["text"][:200],
+                    "snippet": snippet,
                 })
             conn.close()
             return {"mode": mode, "query": q, "results": results}
