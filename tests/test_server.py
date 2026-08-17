@@ -33,8 +33,10 @@ def client(temp_db):
         mock_qdrant = MagicMock()
 
         # Patch and create client
-        with patch("academic_paper.server.EmbedderClient", return_value=mock_embedder), \
-             patch("academic_paper.server.QdrantStore", return_value=mock_qdrant):
+        with (
+            patch("academic_paper.server.EmbedderClient", return_value=mock_embedder),
+            patch("academic_paper.server.QdrantStore", return_value=mock_qdrant),
+        ):
             client = TestClient(app)
             # Manually set the mocked services since lifespan is patched
             client.app.state.embedder = mock_embedder
@@ -296,6 +298,7 @@ def test_stats_returns_counts(client):
 
 # --- New tests ---
 
+
 def test_get_paper_by_id_success(client):
     """Test GET /papers/{paper_id} returns paper details."""
     pdf_content = create_minimal_pdf()
@@ -374,8 +377,10 @@ def test_ingest_no_chunks(client):
     """Test POST /papers/ingest returns 400 when chunker produces no chunks."""
     pdf_content = create_minimal_pdf()
 
-    with patch("academic_paper.server.extract_text") as mock_extract, \
-         patch("academic_paper.server.chunk_pages") as mock_chunk:
+    with (
+        patch("academic_paper.server.extract_text") as mock_extract,
+        patch("academic_paper.server.chunk_pages") as mock_chunk,
+    ):
         mock_extract.return_value = [{"page": 1, "text": "Some text"}]
         mock_chunk.return_value = []
 
@@ -393,9 +398,7 @@ def test_ingest_embedding_failure(client):
 
     with patch("academic_paper.server.extract_text") as mock_extract:
         mock_extract.return_value = [{"page": 1, "text": "Test Document content"}]
-        client.app.state.embedder.embed = AsyncMock(
-            side_effect=Exception("Embedding service unavailable")
-        )
+        client.app.state.embedder.embed = AsyncMock(side_effect=Exception("Embedding service unavailable"))
 
         response = client.post(
             "/papers/ingest",

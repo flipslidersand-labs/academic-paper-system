@@ -1,7 +1,5 @@
 """Tests for nugget extraction module."""
 
-import pytest
-
 from academic_paper.nugget import bm25_scores, extract_nuggets, split_sentences
 
 

@@ -7,9 +7,7 @@ from academic_paper.chunker import chunk_pages
 
 def test_chunk_pages_basic() -> None:
     """Test that short text fits in a single chunk."""
-    pages = [
-        {"page": 1, "text": "This is a short text."}
-    ]
+    pages = [{"page": 1, "text": "This is a short text."}]
 
     chunks = chunk_pages(pages, chunk_size=512, overlap=64)
 
@@ -93,16 +91,20 @@ def test_chunk_pages_overlap_validation() -> None:
 def test_chunk_pages_multipage_boundary() -> None:
     """Test chunking across page boundaries with small chunk size."""
     # Create pages with many small paragraphs to force splitting
-    page1_text = "\n\n".join([
-        "First paragraph with several words in it.",
-        "Second paragraph also has multiple words.",
-        "Third paragraph continues the content here.",
-    ])
-    page2_text = "\n\n".join([
-        "Page two starts with new content here.",
-        "Another paragraph on page two now.",
-        "Final paragraph with more information.",
-    ])
+    page1_text = "\n\n".join(
+        [
+            "First paragraph with several words in it.",
+            "Second paragraph also has multiple words.",
+            "Third paragraph continues the content here.",
+        ]
+    )
+    page2_text = "\n\n".join(
+        [
+            "Page two starts with new content here.",
+            "Another paragraph on page two now.",
+            "Final paragraph with more information.",
+        ]
+    )
 
     pages = [
         {"page": 1, "text": page1_text},
@@ -127,9 +129,7 @@ def test_chunk_pages_multipage_boundary() -> None:
 
 def test_chunk_pages_token_count_matches() -> None:
     """Test that token_count matches actual word count in text."""
-    pages = [
-        {"page": 1, "text": "The quick brown fox jumps over the lazy dog"}
-    ]
+    pages = [{"page": 1, "text": "The quick brown fox jumps over the lazy dog"}]
 
     chunks = chunk_pages(pages, chunk_size=512, overlap=64)
 
@@ -140,9 +140,7 @@ def test_chunk_pages_token_count_matches() -> None:
 
 def test_chunk_pages_whitespace_handling() -> None:
     """Test that whitespace is properly handled in chunking."""
-    pages = [
-        {"page": 1, "text": "Line one.\n\nParagraph two with\nmultiple lines.\n\nFinal paragraph."}
-    ]
+    pages = [{"page": 1, "text": "Line one.\n\nParagraph two with\nmultiple lines.\n\nFinal paragraph."}]
 
     chunks = chunk_pages(pages, chunk_size=512, overlap=64)
 

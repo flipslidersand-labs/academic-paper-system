@@ -27,17 +27,19 @@ import time
 import httpx
 
 OPENALEX_API = "https://api.openalex.org/works"
-FIELDS = ",".join([
-    "id",
-    "title",
-    "publication_date",
-    "authorships",
-    "topics",
-    "abstract_inverted_index",
-    "ids",
-    "open_access",
-    "primary_location",
-])
+FIELDS = ",".join(
+    [
+        "id",
+        "title",
+        "publication_date",
+        "authorships",
+        "topics",
+        "abstract_inverted_index",
+        "ids",
+        "open_access",
+        "primary_location",
+    ]
+)
 
 
 def reconstruct_abstract(inverted_index: dict | None) -> str:
@@ -172,15 +174,14 @@ def ingest_paper(
     file_name = f"oa_{arxiv_id or work_id_short}.pdf"
 
     title = (work.get("title") or "").replace("\n", " ").strip()
-    authors = [
-        (a.get("author") or {}).get("display_name", "")
-        for a in (work.get("authorships") or [])
-    ]
-    topics = list({
-        (t.get("field") or {}).get("display_name", "")
-        for t in (work.get("topics") or [])
-        if (t.get("field") or {}).get("display_name")
-    })
+    authors = [(a.get("author") or {}).get("display_name", "") for a in (work.get("authorships") or [])]
+    topics = list(
+        {
+            (t.get("field") or {}).get("display_name", "")
+            for t in (work.get("topics") or [])
+            if (t.get("field") or {}).get("display_name")
+        }
+    )
     pub_date = (work.get("publication_date") or "")[:10] or None
 
     resp = client.post(
@@ -206,31 +207,40 @@ def ingest_paper(
 def main() -> None:
     parser = argparse.ArgumentParser(description="OpenAlex paper collector")
     parser.add_argument(
-        "--query", default="large language model",
+        "--query",
+        default="large language model",
         help="Title search keyword (default: 'large language model')",
     )
     parser.add_argument(
-        "--from-date", default="",
+        "--from-date",
+        default="",
         help="Start date YYYY-MM-DD (inclusive). Example: 2025-02-01",
     )
     parser.add_argument(
-        "--until-date", default="",
+        "--until-date",
+        default="",
         help="End date YYYY-MM-DD (inclusive). Example: 2025-08-01",
     )
     parser.add_argument(
-        "--max", type=int, default=10, dest="max_results",
+        "--max",
+        type=int,
+        default=10,
+        dest="max_results",
         help="Max papers to ingest (default: 10)",
     )
     parser.add_argument(
-        "--api-url", default="http://localhost:8020",
+        "--api-url",
+        default="http://localhost:8020",
         help="academic-paper-system API base URL",
     )
     parser.add_argument(
-        "--summary-file", default=None,
+        "--summary-file",
+        default=None,
         help="Write run summary JSON to this path",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Fetch and list papers without ingesting",
     )
     args = parser.parse_args()

@@ -10,8 +10,16 @@ def test_rrf_merge_combines_results():
         {"chunk_id": 2, "paper_id": 1, "chunk_index": 1, "text": "Neural networks", "rank": -3.0},
     ]
     vector_results = [
-        {"id": "vec-1", "score": 0.95, "payload": {"chunk_id": 2, "paper_id": 1, "chunk_index": 1, "text": "Neural networks"}},
-        {"id": "vec-2", "score": 0.80, "payload": {"chunk_id": 3, "paper_id": 1, "chunk_index": 2, "text": "Deep learning models"}},
+        {
+            "id": "vec-1",
+            "score": 0.95,
+            "payload": {"chunk_id": 2, "paper_id": 1, "chunk_index": 1, "text": "Neural networks"},
+        },
+        {
+            "id": "vec-2",
+            "score": 0.80,
+            "payload": {"chunk_id": 3, "paper_id": 1, "chunk_index": 2, "text": "Deep learning models"},
+        },
     ]
 
     result = rrf_merge(fts_results, vector_results, k=60)
@@ -28,8 +36,16 @@ def test_rrf_merge_both_sources_boost_score():
         {"chunk_id": 1, "paper_id": 1, "chunk_index": 0, "text": "Test chunk", "rank": -5.0},
     ]
     vector_results = [
-        {"id": "vec-1", "score": 0.95, "payload": {"chunk_id": 1, "paper_id": 1, "chunk_index": 0, "text": "Test chunk"}},
-        {"id": "vec-2", "score": 0.80, "payload": {"chunk_id": 2, "paper_id": 1, "chunk_index": 1, "text": "Other chunk"}},
+        {
+            "id": "vec-1",
+            "score": 0.95,
+            "payload": {"chunk_id": 1, "paper_id": 1, "chunk_index": 0, "text": "Test chunk"},
+        },
+        {
+            "id": "vec-2",
+            "score": 0.80,
+            "payload": {"chunk_id": 2, "paper_id": 1, "chunk_index": 1, "text": "Other chunk"},
+        },
     ]
 
     result = rrf_merge(fts_results, vector_results, k=60)

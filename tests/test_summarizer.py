@@ -16,35 +16,28 @@ async def test_summarize_returns_structured_dict():
     mock_qdrant = MagicMock()
 
     # Valid JSON response from LLM
-    valid_response = json.dumps({
-        "objective": "To investigate the effects of deep learning on image classification",
-        "method": "We used convolutional neural networks and trained on ImageNet dataset with multiple augmentations",
-        "results": "Achieved 95% accuracy on test set, 3% improvement over baseline methods",
-        "limitations": "Limited to RGB images, requires significant computational resources",
-        "keywords": ["deep learning", "CNN", "image classification", "neural networks", "ImageNet", "computer vision"]
-    })
+    valid_response = json.dumps(
+        {
+            "objective": "To investigate the effects of deep learning on image classification",
+            "method": "We used convolutional neural networks and trained on ImageNet dataset with multiple augmentations",
+            "results": "Achieved 95% accuracy on test set, 3% improvement over baseline methods",
+            "limitations": "Limited to RGB images, requires significant computational resources",
+            "keywords": [
+                "deep learning",
+                "CNN",
+                "image classification",
+                "neural networks",
+                "ImageNet",
+                "computer vision",
+            ],
+        }
+    )
     mock_llm.generate.return_value = valid_response
 
     # Mock Qdrant chunks
     chunks = [
-        {
-            "id": "1",
-            "score": 0.9,
-            "payload": {
-                "paper_id": 1,
-                "page_start": 1,
-                "text": "Sample chunk text for page 1"
-            }
-        },
-        {
-            "id": "2",
-            "score": 0.85,
-            "payload": {
-                "paper_id": 1,
-                "page_start": 2,
-                "text": "Sample chunk text for page 2"
-            }
-        }
+        {"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "Sample chunk text for page 1"}},
+        {"id": "2", "score": 0.85, "payload": {"paper_id": 1, "page_start": 2, "text": "Sample chunk text for page 2"}},
     ]
     mock_qdrant.search.return_value = chunks
 
@@ -78,17 +71,7 @@ async def test_summarize_raises_on_invalid_json():
     mock_llm.generate.return_value = "This is not valid JSON {]"
 
     # Mock chunks
-    chunks = [
-        {
-            "id": "1",
-            "score": 0.9,
-            "payload": {
-                "paper_id": 1,
-                "page_start": 1,
-                "text": "Sample chunk text"
-            }
-        }
-    ]
+    chunks = [{"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "Sample chunk text"}}]
     mock_qdrant.search.return_value = chunks
 
     # Create summarizer and test
@@ -107,13 +90,15 @@ async def test_summarize_calls_llm_with_context():
     mock_qdrant = MagicMock()
 
     # Valid response
-    valid_response = json.dumps({
-        "objective": "Research goal",
-        "method": "Methodology approach",
-        "results": "Key findings",
-        "limitations": "Future work",
-        "keywords": ["term1", "term2", "term3"]
-    })
+    valid_response = json.dumps(
+        {
+            "objective": "Research goal",
+            "method": "Methodology approach",
+            "results": "Key findings",
+            "limitations": "Future work",
+            "keywords": ["term1", "term2", "term3"],
+        }
+    )
     mock_llm.generate.return_value = valid_response
 
     # Mock chunks
@@ -121,11 +106,7 @@ async def test_summarize_calls_llm_with_context():
         {
             "id": "1",
             "score": 0.9,
-            "payload": {
-                "paper_id": 1,
-                "page_start": 1,
-                "text": "Important paper content for context"
-            }
+            "payload": {"paper_id": 1, "page_start": 1, "text": "Important paper content for context"},
         }
     ]
     mock_qdrant.search.return_value = chunks

@@ -10,10 +10,7 @@ from academic_paper.embedder import EmbedderClient
 @pytest.mark.anyio
 async def test_embed_returns_vectors():
     """Test that embed returns list of vectors."""
-    client = EmbedderClient(
-        base_url="http://localhost:9092",
-        api_key="test-key"
-    )
+    client = EmbedderClient(base_url="http://localhost:9092", api_key="test-key")
 
     with respx.mock:
         # embedding-svc returns {"vector": [...]} per request (one request per text)
@@ -35,10 +32,7 @@ async def test_embed_returns_vectors():
 @pytest.mark.anyio
 async def test_embed_single_returns_vector():
     """Test that embed_single returns single vector."""
-    client = EmbedderClient(
-        base_url="http://localhost:9092",
-        api_key="test-key"
-    )
+    client = EmbedderClient(base_url="http://localhost:9092", api_key="test-key")
 
     with respx.mock:
         respx.post("http://localhost:9092/embed").mock(
@@ -54,10 +48,7 @@ async def test_embed_single_returns_vector():
 @pytest.mark.anyio
 async def test_embed_sends_correct_headers():
     """Test that embed sends correct headers including API key."""
-    client = EmbedderClient(
-        base_url="http://localhost:9092",
-        api_key="test-api-key"
-    )
+    client = EmbedderClient(base_url="http://localhost:9092", api_key="test-api-key")
 
     with respx.mock:
         # Create a route that captures the request

@@ -37,12 +37,16 @@ def init_db(db_path: str) -> None:
     """)
 
     # Migration: add columns introduced after v1
-    _migrate_add_columns(cursor, "papers", [
-        ("categories", "TEXT"),
-        ("published_date", "TEXT"),
-        ("source", "TEXT"),
-        ("score", "REAL"),
-    ])
+    _migrate_add_columns(
+        cursor,
+        "papers",
+        [
+            ("categories", "TEXT"),
+            ("published_date", "TEXT"),
+            ("source", "TEXT"),
+            ("score", "REAL"),
+        ],
+    )
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS chunks (
@@ -135,24 +139,27 @@ def save_paper(
     categories = kwargs.get("categories")
     categories_json = json.dumps(categories) if categories else None
 
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO papers
             (file_name, file_hash, title, authors, year, pages, ingested_at, status,
              categories, published_date, source)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        file_name,
-        file_hash,
-        kwargs.get("title"),
-        authors_json,
-        kwargs.get("year"),
-        kwargs.get("pages"),
-        ingested_at,
-        "pending",
-        categories_json,
-        kwargs.get("published_date"),
-        kwargs.get("source"),
-    ))
+    """,
+        (
+            file_name,
+            file_hash,
+            kwargs.get("title"),
+            authors_json,
+            kwargs.get("year"),
+            kwargs.get("pages"),
+            ingested_at,
+            "pending",
+            categories_json,
+            kwargs.get("published_date"),
+            kwargs.get("source"),
+        ),
+    )
     conn.commit()
     return cursor.lastrowid
 
@@ -175,18 +182,21 @@ def save_chunks(conn: sqlite3.Connection, paper_id: int, chunks: list[dict]) -> 
     """Save chunks to database and FTS5 index."""
     cursor = conn.cursor()
     for chunk in chunks:
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO chunks (paper_id, chunk_index, page_start, page_end, text, token_count, qdrant_id)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            paper_id,
-            chunk["chunk_index"],
-            chunk["page_start"],
-            chunk["page_end"],
-            chunk["text"],
-            chunk["token_count"],
-            chunk["qdrant_id"],
-        ))
+        """,
+            (
+                paper_id,
+                chunk["chunk_index"],
+                chunk["page_start"],
+                chunk["page_end"],
+                chunk["text"],
+                chunk["token_count"],
+                chunk["qdrant_id"],
+            ),
+        )
         chunk_id = cursor.lastrowid
         cursor.execute("INSERT INTO chunks_fts(rowid, text) VALUES (?, ?)", (chunk_id, chunk["text"]))
     conn.commit()
@@ -294,33 +304,42 @@ def search_fts(
     """Search chunks using FTS5 with BM25 ranking."""
     cursor = conn.cursor()
     if paper_id is None:
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT c.id as chunk_id, c.paper_id, c.text, bm25(chunks_fts) as rank
             FROM chunks_fts
             JOIN chunks c ON chunks_fts.rowid = c.id
             WHERE chunks_fts MATCH ?
             ORDER BY rank
             LIMIT ?
-        """, (query, limit))
+        """,
+            (query, limit),
+        )
     else:
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT c.id as chunk_id, c.paper_id, c.text, bm25(chunks_fts) as rank
             FROM chunks_fts
             JOIN chunks c ON chunks_fts.rowid = c.id
             WHERE chunks_fts MATCH ? AND c.paper_id = ?
             ORDER BY rank
             LIMIT ?
-        """, (query, paper_id, limit))
+        """,
+            (query, paper_id, limit),
+        )
     return [dict(row) for row in cursor.fetchall()]
 
 
 def get_summary(conn: sqlite3.Connection, paper_id: int) -> dict | None:
     """Get cached summary for a paper."""
     cursor = conn.cursor()
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT model, objective, method, results, limitations, keywords, raw_json, created_at
         FROM summaries WHERE paper_id = ?
-    """, (paper_id,))
+    """,
+        (paper_id,),
+    )
     row = cursor.fetchone()
     if row is None:
         return None
@@ -351,7 +370,8 @@ def list_summaries(
     cursor.execute("SELECT COUNT(*) FROM summaries")
     total = cursor.fetchone()[0]
 
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT
             s.paper_id,
             s.model,
@@ -371,7 +391,9 @@ def list_summaries(
         JOIN papers p ON s.paper_id = p.id
         ORDER BY s.created_at DESC
         LIMIT ? OFFSET ?
-    """, (limit, offset))
+    """,
+        (limit, offset),
+    )
 
     items = []
     for row in cursor.fetchall():
@@ -392,7 +414,8 @@ def save_summary(conn: sqlite3.Connection, paper_id: int, model: str, summary: d
     created_at = datetime.utcnow().isoformat()
     keywords_json = json.dumps(summary.get("keywords", []))
     raw_json = json.dumps(summary)
-    cursor.execute("""
+    cursor.execute(
+        """
         INSERT INTO summaries (paper_id, model, objective, method, results, limitations, keywords, raw_json, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(paper_id) DO UPDATE SET
@@ -404,14 +427,19 @@ def save_summary(conn: sqlite3.Connection, paper_id: int, model: str, summary: d
             keywords = excluded.keywords,
             raw_json = excluded.raw_json,
             created_at = excluded.created_at
-    """, (
-        paper_id, model,
-        summary.get("objective", ""),
-        summary.get("method", ""),
-        summary.get("results", ""),
-        summary.get("limitations", ""),
-        keywords_json, raw_json, created_at,
-    ))
+    """,
+        (
+            paper_id,
+            model,
+            summary.get("objective", ""),
+            summary.get("method", ""),
+            summary.get("results", ""),
+            summary.get("limitations", ""),
+            keywords_json,
+            raw_json,
+            created_at,
+        ),
+    )
     conn.commit()
 
 
@@ -427,7 +455,8 @@ def upsert_job(
     finished_at: float | None,
 ) -> None:
     """Insert or update a job row."""
-    conn.execute("""
+    conn.execute(
+        """
         INSERT INTO jobs (id, status, total, processed, failed, errors, started_at, finished_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
@@ -437,7 +466,9 @@ def upsert_job(
             failed = excluded.failed,
             errors = excluded.errors,
             finished_at = excluded.finished_at
-    """, (job_id, status, total, processed, failed, json.dumps(errors), started_at, finished_at))
+    """,
+        (job_id, status, total, processed, failed, json.dumps(errors), started_at, finished_at),
+    )
     conn.commit()
 
 
