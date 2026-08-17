@@ -34,8 +34,10 @@ def client(temp_db):
         mock_embedder = MagicMock()
         mock_embedder.embed = AsyncMock(return_value=[[0.1] * 768])
         mock_qdrant = MagicMock()
-        with patch("academic_paper.server.EmbedderClient", return_value=mock_embedder), \
-             patch("academic_paper.server.QdrantStore", return_value=mock_qdrant):
+        with (
+            patch("academic_paper.server.EmbedderClient", return_value=mock_embedder),
+            patch("academic_paper.server.QdrantStore", return_value=mock_qdrant),
+        ):
             c = TestClient(app)
             c.app.state.embedder = mock_embedder
             c.app.state.vector_store = mock_qdrant
@@ -44,11 +46,14 @@ def client(temp_db):
 
 # --- DB layer ---
 
+
 def test_save_paper_with_metadata(temp_db):
     """Test save_paper stores authors, categories, published_date, source."""
     conn = get_connection(temp_db)
     paper_id = save_paper(
-        conn, "paper.pdf", "hash_meta",
+        conn,
+        "paper.pdf",
+        "hash_meta",
         title="Test Paper",
         authors=["Alice", "Bob"],
         categories=["cs.AI", "cs.LG"],
@@ -105,11 +110,23 @@ def test_list_summaries_returns_paper_info(temp_db):
     """Test list_summaries joins paper metadata."""
     conn = get_connection(temp_db)
     pid = save_paper(conn, "s.pdf", "hs1", title="Summary Paper", authors=["Dave"])
-    save_chunks(conn, pid, [{"text": "t", "page_start": 1, "page_end": 1, "chunk_index": 0, "qdrant_id": "q1", "token_count": 1}])
-    save_summary(conn, pid, "gemini-2.0-flash", {
-        "objective": "obj", "method": "meth", "results": "res",
-        "limitations": "lim", "keywords": ["kw"],
-    })
+    save_chunks(
+        conn,
+        pid,
+        [{"text": "t", "page_start": 1, "page_end": 1, "chunk_index": 0, "qdrant_id": "q1", "token_count": 1}],
+    )
+    save_summary(
+        conn,
+        pid,
+        "gemini-2.0-flash",
+        {
+            "objective": "obj",
+            "method": "meth",
+            "results": "res",
+            "limitations": "lim",
+            "keywords": ["kw"],
+        },
+    )
     conn.close()
 
     conn = get_connection(temp_db)
@@ -126,6 +143,7 @@ def test_list_summaries_returns_paper_info(temp_db):
 
 
 # --- API layer ---
+
 
 def _make_minimal_pdf() -> bytes:
     return (
@@ -207,11 +225,23 @@ def test_list_summaries_with_data(client, temp_db):
     """Test GET /summaries returns summaries with paper metadata."""
     conn = get_connection(temp_db)
     pid = save_paper(conn, "z.pdf", "hz1", title="Z Paper", authors=["Eve"], categories=["cs.LG"])
-    save_chunks(conn, pid, [{"text": "t", "page_start": 1, "page_end": 1, "chunk_index": 0, "qdrant_id": "qz1", "token_count": 1}])
-    save_summary(conn, pid, "gemini-2.0-flash", {
-        "objective": "o", "method": "m", "results": "r",
-        "limitations": "l", "keywords": ["deep learning"],
-    })
+    save_chunks(
+        conn,
+        pid,
+        [{"text": "t", "page_start": 1, "page_end": 1, "chunk_index": 0, "qdrant_id": "qz1", "token_count": 1}],
+    )
+    save_summary(
+        conn,
+        pid,
+        "gemini-2.0-flash",
+        {
+            "objective": "o",
+            "method": "m",
+            "results": "r",
+            "limitations": "l",
+            "keywords": ["deep learning"],
+        },
+    )
     conn.close()
 
     resp = client.get("/summaries")
@@ -231,8 +261,23 @@ def test_list_summaries_pagination(client, temp_db):
     conn = get_connection(temp_db)
     for i in range(3):
         pid = save_paper(conn, f"p{i}.pdf", f"hp{i}")
-        save_chunks(conn, pid, [{"text": f"text{i}", "page_start": 1, "page_end": 1, "chunk_index": 0, "qdrant_id": f"qp{i}", "token_count": 1}])
-        save_summary(conn, pid, "model", {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": []})
+        save_chunks(
+            conn,
+            pid,
+            [
+                {
+                    "text": f"text{i}",
+                    "page_start": 1,
+                    "page_end": 1,
+                    "chunk_index": 0,
+                    "qdrant_id": f"qp{i}",
+                    "token_count": 1,
+                }
+            ],
+        )
+        save_summary(
+            conn, pid, "model", {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": []}
+        )
     conn.close()
 
     resp = client.get("/summaries?limit=1&offset=0")

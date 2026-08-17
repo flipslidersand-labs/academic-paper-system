@@ -52,6 +52,7 @@ class RAGSummarizer:
             try:
                 from academic_paper.config import settings
                 from academic_paper.db import get_chunks, get_connection
+
                 conn = get_connection(settings.academic_db)
                 chunks_db = get_chunks(conn, paper_id)
                 conn.close()
@@ -62,13 +63,15 @@ class RAGSummarizer:
                 # Convert database chunks to Qdrant-like format
                 chunks = []
                 for chunk in chunks_db[:top_k]:
-                    chunks.append({
-                        "payload": {
-                            "paper_id": paper_id,
-                            "page_start": chunk.get("page_start", "unknown"),
-                            "text": chunk["text"]
+                    chunks.append(
+                        {
+                            "payload": {
+                                "paper_id": paper_id,
+                                "page_start": chunk.get("page_start", "unknown"),
+                                "text": chunk["text"],
+                            }
                         }
-                    })
+                    )
             except (sqlite3.OperationalError, FileNotFoundError):
                 raise ValueError(f"No chunks found for paper {paper_id}")
 
@@ -109,7 +112,7 @@ Please respond ONLY with valid JSON in this exact format:
         # Parse JSON response
         try:
             # Try to extract JSON from response
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            json_match = re.search(r"\{.*\}", response, re.DOTALL)
             if json_match:
                 summary_data = json.loads(json_match.group())
             else:

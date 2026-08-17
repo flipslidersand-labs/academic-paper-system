@@ -53,8 +53,15 @@ class JobStore:
                 status = "failed"
                 errors.append("Server restarted while job was running")
                 upsert_job(
-                    conn, row["id"], status, row["total"], row["processed"],
-                    row["failed"], errors, row["started_at"], row["finished_at"],
+                    conn,
+                    row["id"],
+                    status,
+                    row["total"],
+                    row["processed"],
+                    row["failed"],
+                    errors,
+                    row["started_at"],
+                    row["finished_at"],
                 )
             job = Job(
                 id=row["id"],
@@ -77,8 +84,15 @@ class JobStore:
 
         conn = get_connection(self._db_path)
         upsert_job(
-            conn, job.id, job.status, job.total, job.processed,
-            job.failed, job.errors, job.started_at, job.finished_at,
+            conn,
+            job.id,
+            job.status,
+            job.total,
+            job.processed,
+            job.failed,
+            job.errors,
+            job.started_at,
+            job.finished_at,
         )
         conn.close()
 

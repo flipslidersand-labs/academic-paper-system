@@ -12,7 +12,7 @@ def test_make_qdrant_id_is_deterministic():
 
 def test_ensure_collection_creates_when_missing():
     """コレクションが存在しない場合にcreate_collectionが呼ばれることを確認"""
-    with patch('academic_paper.vector_store.QdrantClient') as MockClient:  # noqa: N806
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
         mock_client = MagicMock()
         MockClient.return_value = mock_client
 
@@ -24,13 +24,13 @@ def test_ensure_collection_creates_when_missing():
 
         mock_client.create_collection.assert_called_once()
         call_kwargs = mock_client.create_collection.call_args[1]
-        assert call_kwargs['collection_name'] == 'test-collection'
-        assert call_kwargs['vectors_config'].size == 768
+        assert call_kwargs["collection_name"] == "test-collection"
+        assert call_kwargs["vectors_config"].size == 768
 
 
 def test_ensure_collection_skips_when_exists():
     """コレクションが既に存在する場合はcreate_collectionが呼ばれないことを確認"""
-    with patch('academic_paper.vector_store.QdrantClient') as MockClient:  # noqa: N806
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
         mock_client = MagicMock()
         MockClient.return_value = mock_client
 
@@ -47,7 +47,7 @@ def test_ensure_collection_skips_when_exists():
 
 def test_search_with_paper_id_filter():
     """paper_id_filterを指定してsearchが呼ばれることを確認"""
-    with patch('academic_paper.vector_store.QdrantClient') as MockClient:  # noqa: N806
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
         mock_client = MagicMock()
         MockClient.return_value = mock_client
 
@@ -66,6 +66,6 @@ def test_search_with_paper_id_filter():
         # Verify query_points was called with filter
         assert mock_client.query_points.called
         call_kwargs = mock_client.query_points.call_args[1]
-        assert call_kwargs['query_filter'] is not None
+        assert call_kwargs["query_filter"] is not None
         assert len(results) == 1
-        assert results[0]['score'] == 0.95
+        assert results[0]["score"] == 0.95

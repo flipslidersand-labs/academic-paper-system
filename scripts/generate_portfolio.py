@@ -1,4 +1,5 @@
 """Generate a static portfolio page from the paper API."""
+
 import argparse
 import html
 import json
@@ -49,7 +50,7 @@ def source_link(paper: dict) -> str:
         arxiv_id = fname.replace(".pdf", "").replace("_", "/") if fname else ""
         if arxiv_id:
             return f'<a href="https://arxiv.org/abs/{arxiv_id}" target="_blank" rel="noopener" class="hover:underline text-blue-700">{title}</a>'
-    return f'<span>{title}</span>'
+    return f"<span>{title}</span>"
 
 
 def category_badges(cats) -> str:
@@ -79,15 +80,15 @@ def build_html(papers: list, summaries_by_id: dict, updated: str) -> str:
     <article class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-2">
       <div class="flex items-start justify-between gap-3">
         <h2 class="text-sm font-semibold text-gray-900 leading-snug flex-1">{source_link(p)}</h2>
-        {score_badge(p.get('score'))}
+        {score_badge(p.get("score"))}
       </div>
-      {f'<p class="text-xs text-gray-500">{authors_str}</p>' if authors_str else ''}
+      {f'<p class="text-xs text-gray-500">{authors_str}</p>' if authors_str else ""}
       <div class="flex items-center gap-2 text-xs text-gray-400">
-        {f'<span>{pub_date}</span>' if pub_date else ''}
-        {f'<span class="uppercase tracking-wide font-medium text-gray-300">{source_label}</span>' if source_label else ''}
+        {f"<span>{pub_date}</span>" if pub_date else ""}
+        {f'<span class="uppercase tracking-wide font-medium text-gray-300">{source_label}</span>' if source_label else ""}
       </div>
-      {category_badges(p.get('categories'))}
-      {f'<p class="text-xs text-gray-600 mt-2 line-clamp-3">{objective}</p>' if objective else ''}
+      {category_badges(p.get("categories"))}
+      {f'<p class="text-xs text-gray-600 mt-2 line-clamp-3">{objective}</p>' if objective else ""}
     </article>"""
         cards.append(card)
 
@@ -147,6 +148,7 @@ def main():
     print(f"  {len(summaries)} summaries", file=sys.stderr)
 
     from datetime import date
+
     updated = date.today().isoformat()
 
     html_content = build_html(papers, summaries_by_id, updated)
