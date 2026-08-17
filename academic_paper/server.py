@@ -31,9 +31,9 @@ from academic_paper.db import (
 from academic_paper.embedder import EmbedderClient
 from academic_paper.extractor import extract_text, hash_file
 from academic_paper.hybrid import rrf_merge
-from academic_paper.nugget import extract_nuggets
 from academic_paper.jobs import job_store
 from academic_paper.llm import get_llm_client
+from academic_paper.nugget import extract_nuggets
 from academic_paper.scorer import compute_score
 from academic_paper.summarizer import RAGSummarizer
 from academic_paper.telemetry import get_tracer, setup_telemetry
@@ -149,16 +149,18 @@ async def ingest_paper(
             for idx, (chunk, embedding) in enumerate(zip(chunks_list, embeddings)):
                 qdrant_id = make_qdrant_id(file_hash, idx)
                 chunk["qdrant_id"] = qdrant_id
-                points.append({
-                    "id": qdrant_id,
-                    "vector": embedding,
-                    "payload": {
-                        "paper_id": paper_id,
-                        "chunk_index": idx,
-                        "text": chunk["text"],
-                        "file_name": file.filename or "unknown.pdf",
-                    },
-                })
+                points.append(
+                    {
+                        "id": qdrant_id,
+                        "vector": embedding,
+                        "payload": {
+                            "paper_id": paper_id,
+                            "chunk_index": idx,
+                            "text": chunk["text"],
+                            "file_name": file.filename or "unknown.pdf",
+                        },
+                    }
+                )
 
             with tracer.start_as_current_span("qdrant.upsert"):
                 app.state.vector_store.upsert(points)
@@ -195,9 +197,7 @@ def list_papers_endpoint(
 ):
     """List papers with pagination, optional filters, and sort."""
     conn = get_connection(settings.academic_db)
-    total, papers = list_papers_filtered(
-        conn, limit=limit, offset=offset, author=author, category=category, sort=sort
-    )
+    total, papers = list_papers_filtered(conn, limit=limit, offset=offset, author=author, category=category, sort=sort)
     conn.close()
     return {"total": total, "papers": papers}
 
@@ -434,14 +434,16 @@ async def search(
                 cursor.execute("SELECT page_start FROM chunks WHERE id = ?", (chunk_id,))
                 row = cursor.fetchone()
                 page_start = row["page_start"] if row else None
-                results.append({
-                    "rank": rank,
-                    "score": result["rank"],
-                    "paper_id": paper_id_res,
-                    "chunk_index": result.get("chunk_index", 0),
-                    "page_start": page_start,
-                    "snippet": result["text"][:200],
-                })
+                results.append(
+                    {
+                        "rank": rank,
+                        "score": result["rank"],
+                        "paper_id": paper_id_res,
+                        "chunk_index": result.get("chunk_index", 0),
+                        "page_start": page_start,
+                        "snippet": result["text"][:200],
+                    }
+                )
             conn.close()
             return {"mode": mode, "query": q, "results": results}
 
@@ -457,14 +459,16 @@ async def search(
                 payload = result["payload"]
                 cursor.execute("SELECT page_start FROM chunks WHERE qdrant_id = ?", (qdrant_id,))
                 row = cursor.fetchone()
-                results.append({
-                    "rank": rank,
-                    "score": result["score"],
-                    "paper_id": payload["paper_id"],
-                    "chunk_index": payload["chunk_index"],
-                    "page_start": row["page_start"] if row else None,
-                    "snippet": payload["text"][:200],
-                })
+                results.append(
+                    {
+                        "rank": rank,
+                        "score": result["score"],
+                        "paper_id": payload["paper_id"],
+                        "chunk_index": payload["chunk_index"],
+                        "page_start": row["page_start"] if row else None,
+                        "snippet": payload["text"][:200],
+                    }
+                )
             conn.close()
             return {"mode": mode, "query": q, "results": results}
 
@@ -499,14 +503,16 @@ async def search(
                     snippet = extract_nuggets(q, full_text, top_k=nuggets_per_chunk)
                 else:
                     snippet = full_text[:200]
-                results.append({
-                    "rank": rank,
-                    "score": result["rrf_score"],
-                    "paper_id": result["paper_id"],
-                    "chunk_index": result["chunk_index"],
-                    "page_start": row["page_start"] if row else None,
-                    "snippet": snippet,
-                })
+                results.append(
+                    {
+                        "rank": rank,
+                        "score": result["rrf_score"],
+                        "paper_id": result["paper_id"],
+                        "chunk_index": result["chunk_index"],
+                        "page_start": row["page_start"] if row else None,
+                        "snippet": snippet,
+                    }
+                )
             conn.close()
             return {"mode": mode, "query": q, "results": results}
 

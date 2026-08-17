@@ -7,9 +7,11 @@ from academic_paper.config import settings
 
 PAPER_NS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
+
 def make_qdrant_id(file_hash: str, chunk_index: int) -> str:
     """UUID5でQdrant point IDを生成（冪等性確保）"""
     return str(uuid.uuid5(PAPER_NS, f"{file_hash}:{chunk_index}"))
+
 
 class QdrantStore:
     def __init__(self, url: str | None = None, api_key: str | None = None, collection: str | None = None):
@@ -47,9 +49,7 @@ class QdrantStore:
         """
         query_filter = None
         if paper_id_filter is not None:
-            query_filter = Filter(
-                must=[FieldCondition(key="paper_id", match=MatchValue(value=paper_id_filter))]
-            )
+            query_filter = Filter(must=[FieldCondition(key="paper_id", match=MatchValue(value=paper_id_filter))])
         results = self.client.query_points(
             collection_name=self.collection,
             query=query_vector,

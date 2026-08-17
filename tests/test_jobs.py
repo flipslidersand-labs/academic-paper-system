@@ -42,10 +42,15 @@ def reset_job_store(temp_db):
 @pytest.fixture
 def mock_summarizer():
     s = MagicMock()
-    s.summarize = AsyncMock(return_value={
-        "objective": "obj", "method": "meth", "results": "res",
-        "limitations": "lim", "keywords": ["kw"],
-    })
+    s.summarize = AsyncMock(
+        return_value={
+            "objective": "obj",
+            "method": "meth",
+            "results": "res",
+            "limitations": "lim",
+            "keywords": ["kw"],
+        }
+    )
     return s
 
 
@@ -56,10 +61,12 @@ def client(temp_db, mock_summarizer):
         mock_qdrant = MagicMock()
         mock_llm = MagicMock()
         mock_llm.__class__ = type("GeminiClient", (), {})
-        with patch("academic_paper.server.EmbedderClient", return_value=mock_embedder), \
-             patch("academic_paper.server.QdrantStore", return_value=mock_qdrant), \
-             patch("academic_paper.server.get_llm_client", return_value=mock_llm), \
-             patch("academic_paper.server.RAGSummarizer", return_value=mock_summarizer):
+        with (
+            patch("academic_paper.server.EmbedderClient", return_value=mock_embedder),
+            patch("academic_paper.server.QdrantStore", return_value=mock_qdrant),
+            patch("academic_paper.server.get_llm_client", return_value=mock_llm),
+            patch("academic_paper.server.RAGSummarizer", return_value=mock_summarizer),
+        ):
             c = TestClient(app)
             c.app.state.embedder = mock_embedder
             c.app.state.vector_store = mock_qdrant
@@ -73,9 +80,11 @@ def client_no_llm(temp_db):
     with patch.object(settings, "academic_db", temp_db):
         mock_embedder = MagicMock()
         mock_qdrant = MagicMock()
-        with patch("academic_paper.server.EmbedderClient", return_value=mock_embedder), \
-             patch("academic_paper.server.QdrantStore", return_value=mock_qdrant), \
-             patch("academic_paper.server.get_llm_client", return_value=None):
+        with (
+            patch("academic_paper.server.EmbedderClient", return_value=mock_embedder),
+            patch("academic_paper.server.QdrantStore", return_value=mock_qdrant),
+            patch("academic_paper.server.get_llm_client", return_value=None),
+        ):
             c = TestClient(app)
             c.app.state.embedder = mock_embedder
             c.app.state.vector_store = mock_qdrant
@@ -85,6 +94,7 @@ def client_no_llm(temp_db):
 
 
 # --- API tests ---
+
 
 def test_start_summarize_all_no_papers(client):
     """POST /jobs/summarize-all with no papers returns job with total=0 and status=done."""
@@ -104,8 +114,11 @@ def test_start_summarize_all_processes_indexed_papers(client, temp_db):
     """POST /jobs/summarize-all summarizes indexed papers without cached summaries."""
     conn = get_connection(temp_db)
     pid = save_paper(conn, "p.pdf", "h_bulk1")
-    save_chunks(conn, pid, [{"text": "t", "page_start": 1, "page_end": 1,
-                              "chunk_index": 0, "qdrant_id": "qb1", "token_count": 1}])
+    save_chunks(
+        conn,
+        pid,
+        [{"text": "t", "page_start": 1, "page_end": 1, "chunk_index": 0, "qdrant_id": "qb1", "token_count": 1}],
+    )
     update_paper_status(conn, pid, "indexed")
     conn.close()
 
@@ -124,12 +137,15 @@ def test_start_summarize_all_skips_already_summarized(client, temp_db):
     """POST /jobs/summarize-all skips papers that already have a cached summary."""
     conn = get_connection(temp_db)
     pid = save_paper(conn, "p.pdf", "h_bulk2")
-    save_chunks(conn, pid, [{"text": "t", "page_start": 1, "page_end": 1,
-                              "chunk_index": 0, "qdrant_id": "qb2", "token_count": 1}])
+    save_chunks(
+        conn,
+        pid,
+        [{"text": "t", "page_start": 1, "page_end": 1, "chunk_index": 0, "qdrant_id": "qb2", "token_count": 1}],
+    )
     update_paper_status(conn, pid, "indexed")
-    save_summary(conn, pid, "model", {
-        "objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": []
-    })
+    save_summary(
+        conn, pid, "model", {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": []}
+    )
     conn.close()
 
     resp = client.post("/jobs/summarize-all")
@@ -187,8 +203,11 @@ def test_summarize_all_records_per_paper_errors(client, temp_db, mock_summarizer
     conn = get_connection(temp_db)
     for i in range(2):
         pid = save_paper(conn, f"p{i}.pdf", f"h_err_{i}")
-        save_chunks(conn, pid, [{"text": "t", "page_start": 1, "page_end": 1,
-                                  "chunk_index": 0, "qdrant_id": f"qe{i}", "token_count": 1}])
+        save_chunks(
+            conn,
+            pid,
+            [{"text": "t", "page_start": 1, "page_end": 1, "chunk_index": 0, "qdrant_id": f"qe{i}", "token_count": 1}],
+        )
         update_paper_status(conn, pid, "indexed")
     conn.close()
 
@@ -208,6 +227,7 @@ def test_summarize_all_records_per_paper_errors(client, temp_db, mock_summarizer
 
 
 # --- Persistence tests ---
+
 
 def test_completed_job_persisted_to_sqlite(client, temp_db):
     """A completed job is written to the jobs table in SQLite."""

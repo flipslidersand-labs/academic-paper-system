@@ -168,24 +168,31 @@ def ingest_paper(
 def main() -> None:
     parser = argparse.ArgumentParser(description="PubMed Central paper collector")
     parser.add_argument(
-        "--terms", nargs="+",
+        "--terms",
+        nargs="+",
         default=["artificial intelligence", "machine learning"],
         help="Search terms (default: artificial intelligence, machine learning)",
     )
     parser.add_argument(
-        "--max", type=int, default=5, dest="max_results",
+        "--max",
+        type=int,
+        default=5,
+        dest="max_results",
         help="Max papers to ingest (default: 5)",
     )
     parser.add_argument(
-        "--api-url", default="http://localhost:8020",
+        "--api-url",
+        default="http://localhost:8020",
         help="academic-paper-system API base URL",
     )
     parser.add_argument(
-        "--api-key", default="",
+        "--api-key",
+        default="",
         help="NCBI API key (optional; raises rate limit to 10 req/sec)",
     )
     parser.add_argument(
-        "--summary-file", default=None,
+        "--summary-file",
+        default=None,
         help="Write run summary JSON to this path",
     )
     args = parser.parse_args()

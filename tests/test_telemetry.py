@@ -25,17 +25,19 @@ def test_setup_telemetry_with_endpoint_configures_provider():
     app = MagicMock()
     mock_otlp_module = MagicMock()
 
-    with patch.dict(
-        "sys.modules",
-        {
-            "opentelemetry.exporter.otlp.proto.grpc.trace_exporter": mock_otlp_module,
-        },
-    ), patch("academic_paper.telemetry.TracerProvider") as mock_provider_cls, \
-       patch("academic_paper.telemetry.BatchSpanProcessor"), \
-       patch("academic_paper.telemetry.trace") as mock_trace, \
-       patch("academic_paper.telemetry.FastAPIInstrumentor") as mock_fapi, \
-       patch("academic_paper.telemetry.HTTPXClientInstrumentor") as mock_httpx_inst:
-
+    with (
+        patch.dict(
+            "sys.modules",
+            {
+                "opentelemetry.exporter.otlp.proto.grpc.trace_exporter": mock_otlp_module,
+            },
+        ),
+        patch("academic_paper.telemetry.TracerProvider") as mock_provider_cls,
+        patch("academic_paper.telemetry.BatchSpanProcessor"),
+        patch("academic_paper.telemetry.trace") as mock_trace,
+        patch("academic_paper.telemetry.FastAPIInstrumentor") as mock_fapi,
+        patch("academic_paper.telemetry.HTTPXClientInstrumentor") as mock_httpx_inst,
+    ):
         mock_provider = MagicMock()
         mock_provider_cls.return_value = mock_provider
 

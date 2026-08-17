@@ -57,10 +57,7 @@ def rrf_merge(
             }
 
     # Build result list with rrf_score and sort by score descending
-    merged_results = [
-        {"rrf_score": scores[chunk_id], **meta[chunk_id]}
-        for chunk_id in scores.keys()
-    ]
+    merged_results = [{"rrf_score": scores[chunk_id], **meta[chunk_id]} for chunk_id in scores.keys()]
     merged_results.sort(key=lambda x: x["rrf_score"], reverse=True)
 
     return merged_results

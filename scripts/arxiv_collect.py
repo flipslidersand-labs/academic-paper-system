@@ -121,15 +121,17 @@ def fetch_papers(
                 continue
 
         safe_id = arxiv_id.replace("/", "_")
-        papers.append({
-            "arxiv_id": arxiv_id,
-            "title": title,
-            "authors": authors,
-            "categories": cats,
-            "published_date": published_date,
-            "pdf_url": f"{ARXIV_PDF_BASE}/{arxiv_id}.pdf",
-            "file_name": f"arxiv_{safe_id}.pdf",
-        })
+        papers.append(
+            {
+                "arxiv_id": arxiv_id,
+                "title": title,
+                "authors": authors,
+                "categories": cats,
+                "published_date": published_date,
+                "pdf_url": f"{ARXIV_PDF_BASE}/{arxiv_id}.pdf",
+                "file_name": f"arxiv_{safe_id}.pdf",
+            }
+        )
 
         if len(papers) >= max_results:
             break
@@ -182,27 +184,40 @@ def build_summary(counts: dict, papers: list[dict]) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="arXiv daily paper collector")
     parser.add_argument(
-        "--categories", nargs="+", default=["cs.AI", "cs.LG", "cs.CL"],
-        metavar="CAT", help="arXiv category codes (default: cs.AI cs.LG cs.CL)",
+        "--categories",
+        nargs="+",
+        default=["cs.AI", "cs.LG", "cs.CL"],
+        metavar="CAT",
+        help="arXiv category codes (default: cs.AI cs.LG cs.CL)",
     )
     parser.add_argument(
-        "--max", type=int, default=20, dest="max_results", metavar="N",
+        "--max",
+        type=int,
+        default=20,
+        dest="max_results",
+        metavar="N",
         help="Maximum papers to fetch per run (default: 20)",
     )
     parser.add_argument(
-        "--from-date", default="", metavar="YYYY-MM-DD",
+        "--from-date",
+        default="",
+        metavar="YYYY-MM-DD",
         help="Filter papers published on or after this date (inclusive)",
     )
     parser.add_argument(
-        "--until-date", default="", metavar="YYYY-MM-DD",
+        "--until-date",
+        default="",
+        metavar="YYYY-MM-DD",
         help="Filter papers published on or before this date (inclusive)",
     )
     parser.add_argument(
-        "--api-url", default="http://localhost:8020",
+        "--api-url",
+        default="http://localhost:8020",
         help="academic-paper-system API base URL (default: http://localhost:8020)",
     )
     parser.add_argument(
-        "--summary-file", default=None,
+        "--summary-file",
+        default=None,
         help="Write run summary JSON to this path (optional)",
     )
     args = parser.parse_args()

@@ -33,8 +33,10 @@ def client(temp_db):
         mock_qdrant = MagicMock()
 
         # Patch and create client
-        with patch("academic_paper.server.EmbedderClient", return_value=mock_embedder), \
-             patch("academic_paper.server.QdrantStore", return_value=mock_qdrant):
+        with (
+            patch("academic_paper.server.EmbedderClient", return_value=mock_embedder),
+            patch("academic_paper.server.QdrantStore", return_value=mock_qdrant),
+        ):
             client = TestClient(app)
             # Manually set the mocked services since lifespan is patched
             client.app.state.embedder = mock_embedder
@@ -54,7 +56,7 @@ def test_search_returns_results(client):
                 "chunk_index": 0,
                 "chunk_id": 1,
                 "text": "This is a test document about machine learning and AI systems.",
-            }
+            },
         },
         {
             "id": "qdrant-id-2",
@@ -64,8 +66,8 @@ def test_search_returns_results(client):
                 "chunk_index": 1,
                 "chunk_id": 2,
                 "text": "Deep learning models require significant computational resources.",
-            }
-        }
+            },
+        },
     ]
     client.app.state.vector_store.search = MagicMock(return_value=mock_search_results)
 
@@ -109,7 +111,7 @@ def test_search_vector_mode(client):
                 "paper_id": 1,
                 "chunk_index": 0,
                 "text": "This is a test document.",
-            }
+            },
         }
     ]
     client.app.state.vector_store.search = MagicMock(return_value=mock_search_results)
@@ -141,7 +143,7 @@ def test_search_with_paper_id_filter(client):
                 "paper_id": 1,
                 "chunk_index": 0,
                 "text": "This is a test document.",
-            }
+            },
         }
     ]
     client.app.state.vector_store.search = MagicMock(return_value=mock_search_results)
@@ -182,7 +184,7 @@ def test_search_hybrid_mode(client):
                 "chunk_index": 1,
                 "chunk_id": 2,
                 "text": "Neural networks",
-            }
+            },
         },
         {
             "id": "qdrant-id-3",
@@ -192,15 +194,17 @@ def test_search_hybrid_mode(client):
                 "chunk_index": 2,
                 "chunk_id": 3,
                 "text": "Deep learning",
-            }
-        }
+            },
+        },
     ]
 
     # Mock vector store search
     client.app.state.vector_store.search = MagicMock(return_value=mock_vector_results)
 
-    with patch("academic_paper.server.search_fts") as mock_search_fts, \
-         patch("academic_paper.server.get_connection") as mock_get_conn:
+    with (
+        patch("academic_paper.server.search_fts") as mock_search_fts,
+        patch("academic_paper.server.get_connection") as mock_get_conn,
+    ):
         mock_search_fts.return_value = mock_fts_results
 
         mock_conn = MagicMock()
@@ -212,9 +216,9 @@ def test_search_hybrid_mode(client):
         mock_cursor.fetchone.side_effect = [
             {"chunk_index": 0},  # For FTS chunk_id enrichment for chunk_id=1
             {"chunk_index": 1},  # For FTS chunk_id enrichment for chunk_id=2
-            {"page_start": 1},   # For final result lookup
-            {"page_start": 2},   # For final result lookup
-            {"page_start": 3},   # For final result lookup
+            {"page_start": 1},  # For final result lookup
+            {"page_start": 2},  # For final result lookup
+            {"page_start": 3},  # For final result lookup
         ]
 
         response = client.get("/search?q=machine learning&mode=hybrid")
@@ -234,8 +238,10 @@ def test_search_keyword_mode(client):
         {"chunk_id": 2, "paper_id": 1, "text": "Neural networks", "rank": -3.0, "chunk_index": 1},
     ]
 
-    with patch("academic_paper.server.search_fts") as mock_search_fts, \
-         patch("academic_paper.server.get_connection") as mock_get_conn:
+    with (
+        patch("academic_paper.server.search_fts") as mock_search_fts,
+        patch("academic_paper.server.get_connection") as mock_get_conn,
+    ):
         mock_search_fts.return_value = mock_fts_results
 
         mock_conn = MagicMock()

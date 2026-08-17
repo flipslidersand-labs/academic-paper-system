@@ -145,36 +145,50 @@ def ingest_paper(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Semantic Scholar paper collector")
     parser.add_argument(
-        "--query", default="machine learning",
+        "--query",
+        default="machine learning",
         help="Search keyword (default: 'machine learning')",
     )
     # Legacy alias kept for backward compatibility
     parser.add_argument(
-        "--topics", nargs="+", dest="topics", default=None,
+        "--topics",
+        nargs="+",
+        dest="topics",
+        default=None,
         help="[deprecated] Use --query instead. If given, joined as single query.",
     )
     parser.add_argument(
-        "--from-date", default="", metavar="YYYY-MM-DD",
+        "--from-date",
+        default="",
+        metavar="YYYY-MM-DD",
         help="Filter papers published on or after this date (inclusive)",
     )
     parser.add_argument(
-        "--until-date", default="", metavar="YYYY-MM-DD",
+        "--until-date",
+        default="",
+        metavar="YYYY-MM-DD",
         help="Filter papers published on or before this date (inclusive)",
     )
     parser.add_argument(
-        "--max", type=int, default=10, dest="max_results",
+        "--max",
+        type=int,
+        default=10,
+        dest="max_results",
         help="Max open-access papers to ingest (default: 10)",
     )
     parser.add_argument(
-        "--api-url", default="http://localhost:8020",
+        "--api-url",
+        default="http://localhost:8020",
         help="academic-paper-system API base URL",
     )
     parser.add_argument(
-        "--api-key", default="",
+        "--api-key",
+        default="",
         help="Semantic Scholar API key (or set SEMANTIC_SCHOLAR_API_KEY env var)",
     )
     parser.add_argument(
-        "--summary-file", default=None,
+        "--summary-file",
+        default=None,
         help="Write run summary JSON to this path",
     )
     args = parser.parse_args()

@@ -32,6 +32,7 @@ class GeminiClient(BaseLLMClient):
         """
         self.api_key = api_key or settings.google_api_key
         from google import genai
+
         self.client = genai.Client(api_key=self.api_key)
 
     async def generate(self, prompt: str, system: str = "") -> str:

@@ -1,4 +1,5 @@
 """Unit tests for academic_paper.scorer."""
+
 from datetime import date, timedelta
 
 import pytest
