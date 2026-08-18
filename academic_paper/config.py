@@ -5,9 +5,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Configuration settings for academic paper system."""
 
-    embedding_svc_url: str = Field(default="http://192.168.68.63:9092", description="Embedding service URL")
+    embedding_svc_url: str = Field(default="http://<internal-host>:9092", description="Embedding service URL")
     embedding_api_key: str = Field(default="", description="API key for embedding service")
-    qdrant_url: str = Field(default="http://192.168.68.63:6333", description="Qdrant vector database URL")
+    qdrant_url: str = Field(default="http://<internal-host>:6333", description="Qdrant vector database URL")
     qdrant_api_key: str = Field(default="", description="API key for Qdrant")
     academic_db: str = Field(default="/data/academic.db", description="Path to academic database")
     chunk_size: int = Field(default=512, description="Size of text chunks for processing")

@@ -181,9 +181,9 @@ file: <PDF file>
 
 | 変数名 | 説明 | デフォルト |
 |--------|------|-----------|
-| `EMBEDDING_SVC_URL` | embedding-svc URL | `http://192.168.68.63:9092` |
+| `EMBEDDING_SVC_URL` | embedding-svc URL | `http://<internal-host>:9092` |
 | `EMBEDDING_API_KEY` | embedding-svc APIキー | (空) |
-| `QDRANT_URL` | Qdrant URL | `http://192.168.68.63:6333` |
+| `QDRANT_URL` | Qdrant URL | `http://<internal-host>:6333` |
 | `QDRANT_API_KEY` | Qdrant APIキー | (空) |
 | `QDRANT_COLLECTION` | Qdrant コレクション名 | `academic-papers` |
 | `ACADEMIC_DB` | SQLite DB パス | `/data/academic.db` |
@@ -291,7 +291,7 @@ academic-paper-system/
 
 ```bash
 # embedding-svc の状態確認 (MINIPC)
-curl http://192.168.68.63:9092/health
+curl http://<internal-host>:9092/health
 
 # または MINIPC への SSH トンネル
 ssh -N -L 9092:localhost:9092 <minipc-host>
@@ -302,10 +302,10 @@ curl http://localhost:9092/health
 
 ```bash
 # Qdrant の状態確認 (MINIPC)
-curl http://192.168.68.63:6333/health
+curl http://<internal-host>:6333/health
 
 # コレクション確認
-curl http://192.168.68.63:6333/collections
+curl http://<internal-host>:6333/collections
 ```
 
 ### SQLite DB が見つからない
