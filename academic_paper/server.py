@@ -413,6 +413,7 @@ async def search(
     mode: str = Query("hybrid", pattern="^(vector|keyword|hybrid|nugget)$"),
     limit: int = Query(10, ge=1, le=100),
     paper_id: int | None = Query(None),
+    snippet_length: int = Query(200, ge=0, description="Max snippet length (0=full text); affects keyword/vector/hybrid only"),
     nuggets_per_chunk: int = Query(3, ge=1, le=10, description="Sentences per chunk (nugget mode only)"),
 ):
     """Search papers using vector, keyword, hybrid, or nugget mode.
@@ -434,6 +435,8 @@ async def search(
                 cursor.execute("SELECT page_start FROM chunks WHERE id = ?", (chunk_id,))
                 row = cursor.fetchone()
                 page_start = row["page_start"] if row else None
+                full_text = result["text"]
+                snippet = full_text[:snippet_length] if snippet_length > 0 else full_text
                 results.append(
                     {
                         "rank": rank,
@@ -441,7 +444,7 @@ async def search(
                         "paper_id": paper_id_res,
                         "chunk_index": result.get("chunk_index", 0),
                         "page_start": page_start,
-                        "snippet": result["text"][:200],
+                        "snippet": snippet,
                     }
                 )
             conn.close()
@@ -459,6 +462,8 @@ async def search(
                 payload = result["payload"]
                 cursor.execute("SELECT page_start FROM chunks WHERE qdrant_id = ?", (qdrant_id,))
                 row = cursor.fetchone()
+                full_text = payload["text"]
+                snippet = full_text[:snippet_length] if snippet_length > 0 else full_text
                 results.append(
                     {
                         "rank": rank,
@@ -466,7 +471,7 @@ async def search(
                         "paper_id": payload["paper_id"],
                         "chunk_index": payload["chunk_index"],
                         "page_start": row["page_start"] if row else None,
-                        "snippet": payload["text"][:200],
+                        "snippet": snippet,
                     }
                 )
             conn.close()
@@ -502,7 +507,7 @@ async def search(
                 if mode == "nugget":
                     snippet = extract_nuggets(q, full_text, top_k=nuggets_per_chunk)
                 else:
-                    snippet = full_text[:200]
+                    snippet = full_text[:snippet_length] if snippet_length > 0 else full_text
                 results.append(
                     {
                         "rank": rank,
