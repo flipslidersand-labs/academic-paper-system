@@ -115,6 +115,63 @@ def test_ingest_valid_pdf(client):
         assert data["chunks"] > 0
 
 
+def test_ingest_cleans_up_tmpfile(client):
+    """Temp file must be deleted after successful ingest."""
+    pdf_content = create_minimal_pdf()
+    captured = {}
+
+    original_mkstemp_ctx = tempfile.NamedTemporaryFile
+
+    def fake_ntf(**kwargs):
+        ctx = original_mkstemp_ctx(**kwargs)
+        captured["path"] = ctx.name
+        return ctx
+
+    with (
+        patch("academic_paper.server.tempfile.NamedTemporaryFile", side_effect=fake_ntf),
+        patch("academic_paper.server.extract_text") as mock_extract,
+    ):
+        mock_extract.return_value = [{"page": 1, "text": "Test Document content"}]
+        response = client.post(
+            "/papers/ingest",
+            files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert response.status_code == 200
+
+    import os
+
+    assert "path" in captured
+    assert not os.path.exists(captured["path"]), "temp file should be deleted after ingest"
+
+
+def test_ingest_cleans_up_tmpfile_on_error(client):
+    """Temp file must be deleted even when extraction fails."""
+    pdf_content = create_minimal_pdf()
+    captured = {}
+
+    original_mkstemp_ctx = tempfile.NamedTemporaryFile
+
+    def fake_ntf(**kwargs):
+        ctx = original_mkstemp_ctx(**kwargs)
+        captured["path"] = ctx.name
+        return ctx
+
+    with (
+        patch("academic_paper.server.tempfile.NamedTemporaryFile", side_effect=fake_ntf),
+        patch("academic_paper.server.extract_text", side_effect=RuntimeError("boom")),
+    ):
+        response = client.post(
+            "/papers/ingest",
+            files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert response.status_code == 400
+
+    import os
+
+    assert "path" in captured
+    assert not os.path.exists(captured["path"]), "temp file should be deleted even on error"
+
+
 def test_ingest_duplicate_pdf(client):
     """Test POST /papers/ingest with duplicate PDF returns 409."""
     pdf_content = create_minimal_pdf()
