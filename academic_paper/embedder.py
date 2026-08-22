@@ -40,7 +40,10 @@ class EmbedderClient:
             for text in texts:
                 vector = await async_with_retry(
                     self._embed_one,
-                    client, text, mode, collection,
+                    client,
+                    text,
+                    mode,
+                    collection,
                     attempts=3,
                     base_delay=1.0,
                     exceptions=_EMBED_RETRYABLE,
@@ -48,9 +51,7 @@ class EmbedderClient:
                 results.append(vector)
         return results
 
-    async def _embed_one(
-        self, client: httpx.AsyncClient, text: str, mode: str, collection: str
-    ) -> list[float]:
+    async def _embed_one(self, client: httpx.AsyncClient, text: str, mode: str, collection: str) -> list[float]:
         response = await client.post(
             f"{self.base_url}/embed",
             json={"text": text, "mode": mode, "collection": collection},

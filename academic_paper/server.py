@@ -428,7 +428,9 @@ async def search(
     mode: str = Query("hybrid", pattern="^(vector|keyword|hybrid|nugget)$"),
     limit: int = Query(10, ge=1, le=100),
     paper_id: int | None = Query(None),
-    snippet_length: int = Query(200, ge=0, description="Max snippet length (0=full text); affects keyword/vector/hybrid only"),
+    snippet_length: int = Query(
+        200, ge=0, description="Max snippet length (0=full text); affects keyword/vector/hybrid only"
+    ),
     nuggets_per_chunk: int = Query(3, ge=1, le=10, description="Sentences per chunk (nugget mode only)"),
     nugget_embed_weight: float = Query(
         0.7,
