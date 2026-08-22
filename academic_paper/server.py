@@ -1,6 +1,7 @@
 """FastAPI server for academic paper ingestion and retrieval."""
 
 import json
+import logging
 import tempfile
 import time
 from contextlib import asynccontextmanager
@@ -33,12 +34,13 @@ from academic_paper.extractor import extract_text, hash_file
 from academic_paper.hybrid import rrf_merge
 from academic_paper.jobs import job_store
 from academic_paper.llm import get_llm_client
-from academic_paper.nugget import extract_nuggets
+from academic_paper.nugget import extract_nuggets, split_sentences
 from academic_paper.scorer import compute_score
 from academic_paper.summarizer import RAGSummarizer
 from academic_paper.telemetry import get_tracer, setup_telemetry
 from academic_paper.vector_store import QdrantStore, make_qdrant_id
 
+logger = logging.getLogger(__name__)
 tracer = get_tracer()
 
 
@@ -177,6 +179,7 @@ async def ingest_paper(
             }
 
         except Exception as e:
+            logger.exception("Embedding or Qdrant error for paper_id=%s", paper_id)
             update_paper_status(conn, paper_id, "failed")
             conn.close()
             raise HTTPException(status_code=400, detail=f"Embedding or Qdrant error: {str(e)}")
@@ -184,6 +187,7 @@ async def ingest_paper(
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception("Unexpected error during paper ingest")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -274,6 +278,7 @@ async def get_summary_endpoint(paper_id: int, force: bool = Query(False)):
         }
 
     except Exception as e:
+        logger.exception("Summarization error for paper_id=%s", paper_id)
         conn.close()
         raise HTTPException(status_code=400, detail=f"Summarization error: {str(e)}")
 
@@ -367,11 +372,13 @@ async def _run_summarize_all(job_id: str) -> None:
                 conn.close()
                 job.processed += 1
             except Exception as e:
+                logger.exception("Background summarize failed for paper_id=%s", paper_id)
                 job.failed += 1
                 job.errors.append(f"paper_id={paper_id}: {e}")
 
         job.status = "done"
     except Exception as e:
+        logger.exception("Background summarize-all job=%s failed", job_id)
         job.status = "failed"
         job.errors.append(str(e))
     finally:
@@ -415,6 +422,13 @@ async def search(
     paper_id: int | None = Query(None),
     snippet_length: int = Query(200, ge=0, description="Max snippet length (0=full text); affects keyword/vector/hybrid only"),
     nuggets_per_chunk: int = Query(3, ge=1, le=10, description="Sentences per chunk (nugget mode only)"),
+    nugget_embed_weight: float = Query(
+        0.7,
+        ge=0.0,
+        le=1.0,
+        description="Embedding weight in nugget hybrid scoring: 0=BM25-only, 1=embed-only "
+        "(nugget mode only; nugget-rag-eval #11 found 0.7 optimal)",
+    ),
 ):
     """Search papers using vector, keyword, hybrid, or nugget mode.
 
@@ -505,7 +519,20 @@ async def search(
                 row = cursor.fetchone()
                 full_text = result["text"]
                 if mode == "nugget":
-                    snippet = extract_nuggets(q, full_text, top_k=nuggets_per_chunk)
+                    sentence_vecs = None
+                    if nugget_embed_weight > 0.0:
+                        sentences = split_sentences(full_text)
+                        if sentences:
+                            with tracer.start_as_current_span("embed.nuggets"):
+                                sentence_vecs = await app.state.embedder.embed(sentences, mode="search")
+                    snippet = extract_nuggets(
+                        q,
+                        full_text,
+                        top_k=nuggets_per_chunk,
+                        embed_weight=nugget_embed_weight,
+                        query_vec=query_vector,
+                        sentence_vecs=sentence_vecs,
+                    )
                 else:
                     snippet = full_text[:snippet_length] if snippet_length > 0 else full_text
                 results.append(
@@ -522,6 +549,7 @@ async def search(
             return {"mode": mode, "query": q, "results": results}
 
     except Exception as e:
+        logger.exception("Search error for query=%r mode=%s", q, mode)
         raise HTTPException(status_code=400, detail=f"Search error: {str(e)}")
 
 
