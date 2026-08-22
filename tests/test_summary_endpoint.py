@@ -268,3 +268,18 @@ def test_summary_error_returns_400(client, temp_db):
     response = client.get(f"/papers/{paper_id}/summary")
     assert response.status_code == 400
     assert "Summarization error" in response.json()["detail"]
+
+
+def test_summary_503_when_summarizer_none(client, temp_db):
+    """Test GET /papers/{paper_id}/summary returns 503 when LLM is set but summarizer is None."""
+    conn = get_connection(temp_db)
+    paper_id = save_paper(conn, "test.pdf", "hash_no_sum")
+    save_chunks(conn, paper_id, _make_chunks())
+    conn.close()
+
+    client.app.state.llm = MagicMock()
+    client.app.state.summarizer = None
+
+    response = client.get(f"/papers/{paper_id}/summary")
+    assert response.status_code == 503
+    assert "Summarizer not initialized" in response.json()["detail"]

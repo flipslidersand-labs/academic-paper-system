@@ -126,3 +126,70 @@ async def test_summarize_calls_llm_with_context():
     assert "Please summarize" in prompt
     assert "Page 1:" in prompt
     assert "Important paper content" in prompt
+
+
+@pytest.mark.anyio
+async def test_summarize_qdrant_attr_error_falls_back_to_db():
+    """When Qdrant.search raises AttributeError the DB fallback path is used."""
+    from unittest.mock import patch
+
+    mock_llm = AsyncMock()
+    mock_llm.generate.return_value = json.dumps(
+        {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
+    )
+    mock_qdrant = MagicMock()
+    mock_qdrant.search.side_effect = AttributeError("no search")
+
+    db_chunks = [{"text": "chunk text from db", "page_start": 1}]
+    mock_conn = MagicMock()
+
+    with patch("academic_paper.db.get_chunks", return_value=db_chunks), patch(
+        "academic_paper.db.get_connection", return_value=mock_conn
+    ):
+        summarizer = RAGSummarizer(mock_llm, mock_qdrant)
+        result = await summarizer.summarize(paper_id=1, file_hash="hash1")
+
+    assert "objective" in result
+
+
+@pytest.mark.anyio
+async def test_summarize_raises_when_no_chunks():
+    """ValueError raised when chunks list is empty."""
+    mock_llm = AsyncMock()
+    mock_qdrant = MagicMock()
+    mock_qdrant.search.return_value = []
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant)
+    with pytest.raises(ValueError, match="No chunks found"):
+        await summarizer.summarize(paper_id=1, file_hash="abc")
+
+
+@pytest.mark.anyio
+async def test_summarize_raises_when_no_valid_text_in_chunks():
+    """ValueError raised when chunks exist but all have empty text."""
+    mock_llm = AsyncMock()
+    mock_qdrant = MagicMock()
+    mock_qdrant.search.return_value = [{"id": "1", "payload": {"paper_id": 1, "page_start": 1, "text": ""}}]
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant)
+    with pytest.raises(ValueError, match="No valid content"):
+        await summarizer.summarize(paper_id=1, file_hash="abc")
+
+
+@pytest.mark.anyio
+async def test_summarize_keywords_not_list_normalized():
+    """When LLM returns keywords as a string it is wrapped in a list."""
+    mock_llm = AsyncMock()
+    mock_qdrant = MagicMock()
+    mock_qdrant.search.return_value = [
+        {"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "sample text"}}
+    ]
+    mock_llm.generate.return_value = json.dumps(
+        {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": "single keyword"}
+    )
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant)
+    result = await summarizer.summarize(paper_id=1, file_hash="abc")
+
+    assert isinstance(result["keywords"], list)
+    assert result["keywords"] == ["single keyword"]

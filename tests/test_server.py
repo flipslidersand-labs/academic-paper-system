@@ -428,3 +428,60 @@ def test_list_papers_pagination(client, temp_db):
     assert data2["total"] == 3
     assert len(data2["papers"]) == 1
     assert data2["papers"][0]["id"] != data["papers"][0]["id"]
+
+
+def test_parse_list_field_comma_separated(client):
+    """_parse_list_field handles comma-separated strings and JSON decode errors."""
+    from academic_paper.server import _parse_list_field
+
+    assert _parse_list_field(None) is None
+    assert _parse_list_field('["a", "b"]') == ["a", "b"]
+    assert _parse_list_field("a,b,c") == ["a", "b", "c"]
+    assert _parse_list_field("not json {[") == ["not json {["]
+
+
+def test_score_all_endpoint(client, temp_db):
+    """POST /papers/score-all computes scores for all papers."""
+    conn = get_connection(temp_db)
+    save_paper(conn, "paper1.pdf", "hash_score1")
+    save_paper(conn, "paper2.pdf", "hash_score2")
+    conn.close()
+
+    response = client.post("/papers/score-all")
+    assert response.status_code == 200
+    data = response.json()
+    assert "scored" in data
+    assert data["scored"] == 2
+
+
+def test_score_paper_success(client, temp_db):
+    """POST /papers/{paper_id}/score returns score for a valid paper."""
+    conn = get_connection(temp_db)
+    paper_id = save_paper(conn, "paper.pdf", "hash_sc1")
+    conn.close()
+
+    response = client.post(f"/papers/{paper_id}/score")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["paper_id"] == paper_id
+    assert "score" in data
+
+
+def test_score_paper_not_found(client):
+    """POST /papers/{paper_id}/score returns 404 for missing paper."""
+    response = client.post("/papers/9999/score")
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+def test_ingest_unexpected_exception(client):
+    """POST /papers/ingest returns 400 on unexpected exception."""
+    pdf_content = create_minimal_pdf()
+
+    with patch("academic_paper.server.hash_file", side_effect=RuntimeError("disk error")):
+        response = client.post(
+            "/papers/ingest",
+            files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+    assert response.status_code == 400
+    assert "disk error" in response.json()["detail"]
