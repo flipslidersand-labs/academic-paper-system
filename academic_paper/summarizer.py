@@ -4,6 +4,7 @@ import json
 import re
 import sqlite3
 
+from academic_paper.embedder import EmbedderClient
 from academic_paper.llm import BaseLLMClient
 from academic_paper.vector_store import QdrantStore
 
@@ -15,23 +16,26 @@ Focus on clarity, accuracy, and extracting key information."""
 class RAGSummarizer:
     """Summarize academic papers using RAG (Retrieval-Augmented Generation)."""
 
-    def __init__(self, llm_client: BaseLLMClient, qdrant_store: QdrantStore):
+    def __init__(self, llm_client: BaseLLMClient, qdrant_store: QdrantStore, embedder: EmbedderClient | None = None):
         """Initialize RAGSummarizer.
 
         Args:
             llm_client: LLM client for generation
             qdrant_store: Qdrant vector store for retrieval
+            embedder: Optional embedder for semantic chunk retrieval
         """
         self.llm = llm_client
         self.qdrant = qdrant_store
+        self.embedder = embedder
 
-    async def summarize(self, paper_id: int, file_hash: str, top_k: int = 5) -> dict:
+    async def summarize(self, paper_id: int, file_hash: str, top_k: int = 5, title: str = "") -> dict:
         """Summarize a paper using RAG.
 
         Args:
             paper_id: ID of the paper to summarize
             file_hash: File hash of the paper (for Qdrant queries)
             top_k: Number of top chunks to use for context (default 5)
+            title: Paper title used as embedding query for semantic retrieval
 
         Returns:
             Dictionary with keys: objective, method, results, limitations, keywords
@@ -39,10 +43,17 @@ class RAGSummarizer:
         Raises:
             ValueError: If no chunks found or LLM returns invalid JSON
         """
+        # Build query vector: embed the title (or a generic fallback) for semantic retrieval
+        if self.embedder is not None:
+            query_text = title if title else "academic paper overview"
+            query_vector = await self.embedder.embed_single(query_text, mode="search", collection="academic-papers")
+        else:
+            query_vector = [0.1] * 768
+
         # Try to retrieve relevant chunks from Qdrant first
         try:
             chunks = self.qdrant.search(
-                query_vector=[0.1] * 768,  # Dummy vector - mocked in tests
+                query_vector=query_vector,
                 limit=top_k,
                 paper_id_filter=paper_id,
             )

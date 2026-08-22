@@ -126,3 +126,70 @@ async def test_summarize_calls_llm_with_context():
     assert "Please summarize" in prompt
     assert "Page 1:" in prompt
     assert "Important paper content" in prompt
+
+
+@pytest.mark.anyio
+async def test_summarize_uses_embedder_when_provided():
+    """With embedder set, embed_single() is called instead of using dummy vector."""
+    mock_llm = AsyncMock()
+    mock_qdrant = MagicMock()
+    mock_embedder = AsyncMock()
+    real_vector = [0.5] * 768
+    mock_embedder.embed_single.return_value = real_vector
+
+    chunks = [{"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "chunk text"}}]
+    mock_qdrant.search.return_value = chunks
+    mock_llm.generate.return_value = json.dumps(
+        {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
+    )
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
+    await summarizer.summarize(paper_id=1, file_hash="abc", title="Deep Learning Paper")
+
+    mock_embedder.embed_single.assert_called_once_with(
+        "Deep Learning Paper", mode="search", collection="academic-papers"
+    )
+    # The real vector (not dummy) was passed to Qdrant
+    call_kwargs = mock_qdrant.search.call_args[1]
+    assert call_kwargs["query_vector"] == real_vector
+
+
+@pytest.mark.anyio
+async def test_summarize_embedder_fallback_on_no_title():
+    """Without title, a generic fallback string is embedded."""
+    mock_llm = AsyncMock()
+    mock_qdrant = MagicMock()
+    mock_embedder = AsyncMock()
+    mock_embedder.embed_single.return_value = [0.3] * 768
+
+    chunks = [{"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "text"}}]
+    mock_qdrant.search.return_value = chunks
+    mock_llm.generate.return_value = json.dumps(
+        {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
+    )
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
+    await summarizer.summarize(paper_id=1, file_hash="abc")  # no title
+
+    mock_embedder.embed_single.assert_called_once_with(
+        "academic paper overview", mode="search", collection="academic-papers"
+    )
+
+
+@pytest.mark.anyio
+async def test_summarize_without_embedder_uses_dummy_vector():
+    """Without embedder, dummy vector [0.1]*768 is used (backward compat)."""
+    mock_llm = AsyncMock()
+    mock_qdrant = MagicMock()
+
+    chunks = [{"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "text"}}]
+    mock_qdrant.search.return_value = chunks
+    mock_llm.generate.return_value = json.dumps(
+        {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
+    )
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant)  # no embedder
+    await summarizer.summarize(paper_id=1, file_hash="abc")
+
+    call_kwargs = mock_qdrant.search.call_args[1]
+    assert call_kwargs["query_vector"] == [0.1] * 768
