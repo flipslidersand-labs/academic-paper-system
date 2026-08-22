@@ -2,7 +2,7 @@
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 def get_connection(db_path: str) -> sqlite3.Connection:
@@ -131,7 +131,7 @@ def save_paper(
         The paper_id of the saved paper.
     """
     cursor = conn.cursor()
-    ingested_at = datetime.utcnow().isoformat()
+    ingested_at = datetime.now(UTC).isoformat()
 
     authors = kwargs.get("authors")
     authors_json = json.dumps(authors) if authors else None
@@ -411,7 +411,7 @@ def list_summaries(
 def save_summary(conn: sqlite3.Connection, paper_id: int, model: str, summary: dict) -> None:
     """Save or update summary for a paper (upsert)."""
     cursor = conn.cursor()
-    created_at = datetime.utcnow().isoformat()
+    created_at = datetime.now(UTC).isoformat()
     keywords_json = json.dumps(summary.get("keywords", []))
     raw_json = json.dumps(summary)
     cursor.execute(
