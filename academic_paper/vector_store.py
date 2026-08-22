@@ -1,11 +1,16 @@
 import uuid
 
+import httpx
 from qdrant_client import QdrantClient
+from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.models import Distance, FieldCondition, Filter, MatchValue, PointStruct, VectorParams
 
 from academic_paper.config import settings
+from academic_paper.retry import with_retry
 
 PAPER_NS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+
+_QDRANT_RETRYABLE = (UnexpectedResponse, httpx.NetworkError, httpx.TimeoutException)
 
 
 def make_qdrant_id(file_hash: str, chunk_index: int) -> str:
@@ -33,27 +38,33 @@ class QdrantStore:
             )
 
     def upsert(self, points: list[dict]) -> None:
-        """チャンクをQdrantにupsertする
+        """チャンクをQdrantにupsertする（失敗時3回リトライ）
         points要素: {"id": str(UUID), "vector": List[float], "payload": dict}
         payload例: {"paper_id": int, "chunk_index": int, "text": str, "file_name": str}
         """
-        self.client.upsert(
-            collection_name=self.collection,
-            points=[PointStruct(id=p["id"], vector=p["vector"], payload=p["payload"]) for p in points],
-        )
+        structs = [PointStruct(id=p["id"], vector=p["vector"], payload=p["payload"]) for p in points]
+
+        def _do():
+            self.client.upsert(collection_name=self.collection, points=structs)
+
+        with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
 
     def search(self, query_vector: list[float], limit: int = 10, paper_id_filter: int | None = None) -> list[dict]:
-        """ベクトル類似検索
+        """ベクトル類似検索（失敗時3回リトライ）
         paper_id_filterが指定された場合はpaper_idでフィルタリング
         Returns: [{"id": str, "score": float, "payload": dict}]
         """
         query_filter = None
         if paper_id_filter is not None:
             query_filter = Filter(must=[FieldCondition(key="paper_id", match=MatchValue(value=paper_id_filter))])
-        results = self.client.query_points(
-            collection_name=self.collection,
-            query=query_vector,
-            limit=limit,
-            query_filter=query_filter,
-        )
+
+        def _do():
+            return self.client.query_points(
+                collection_name=self.collection,
+                query=query_vector,
+                limit=limit,
+                query_filter=query_filter,
+            )
+
+        results = with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
         return [{"id": str(r.id), "score": r.score, "payload": r.payload} for r in results.points]
