@@ -143,8 +143,9 @@ async def test_summarize_qdrant_attr_error_falls_back_to_db():
     db_chunks = [{"text": "chunk text from db", "page_start": 1}]
     mock_conn = MagicMock()
 
-    with patch("academic_paper.db.get_chunks", return_value=db_chunks), patch(
-        "academic_paper.db.get_connection", return_value=mock_conn
+    with (
+        patch("academic_paper.db.get_chunks", return_value=db_chunks),
+        patch("academic_paper.db.get_connection", return_value=mock_conn),
     ):
         summarizer = RAGSummarizer(mock_llm, mock_qdrant)
         result = await summarizer.summarize(paper_id=1, file_hash="hash1")
