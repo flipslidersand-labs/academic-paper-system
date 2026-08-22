@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import tempfile
 import time
 from contextlib import asynccontextmanager
@@ -103,6 +104,7 @@ async def ingest_paper(
         HTTPException 409: File already ingested.
         HTTPException 400: Extraction / chunking / embedding error.
     """
+    tmp_path: str | None = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             content = await file.read()
@@ -189,6 +191,12 @@ async def ingest_paper(
     except Exception as e:
         logger.exception("Unexpected error during paper ingest")
         raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 @app.get("/papers")
