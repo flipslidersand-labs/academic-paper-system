@@ -6,6 +6,7 @@ from academic_paper.config import settings
 from academic_paper.retry import async_with_retry
 
 _EMBED_RETRYABLE = (httpx.NetworkError, httpx.TimeoutException)
+_BATCH_MAX = 256  # embedding-svc /embed/batch hard limit
 
 
 class EmbedderClient:
@@ -22,7 +23,7 @@ class EmbedderClient:
         self.api_key = api_key or settings.embedding_api_key
 
     async def embed(self, texts: list[str], mode: str = "index", collection: str = "facts") -> list[list[float]]:
-        """Embed texts using embedding service (one request per text).
+        """Embed texts using /embed/batch, splitting into chunks of at most 256.
 
         Args:
             texts: List of texts to embed
@@ -30,35 +31,40 @@ class EmbedderClient:
             collection: Qdrant collection name
 
         Returns:
-            List of embedding vectors
+            List of embedding vectors in the same order as texts
 
         Raises:
             httpx.HTTPError: If request fails after retries
         """
-        results = []
+        if not texts:
+            return []
+        results: list[list[float]] = []
         async with httpx.AsyncClient(timeout=30.0) as client:
-            for text in texts:
-                vector = await async_with_retry(
-                    self._embed_one,
+            for i in range(0, len(texts), _BATCH_MAX):
+                chunk = texts[i : i + _BATCH_MAX]
+                vectors = await async_with_retry(
+                    self._embed_batch,
                     client,
-                    text,
+                    chunk,
                     mode,
                     collection,
                     attempts=3,
                     base_delay=1.0,
                     exceptions=_EMBED_RETRYABLE,
                 )
-                results.append(vector)
+                results.extend(vectors)
         return results
 
-    async def _embed_one(self, client: httpx.AsyncClient, text: str, mode: str, collection: str) -> list[float]:
+    async def _embed_batch(
+        self, client: httpx.AsyncClient, texts: list[str], mode: str, collection: str
+    ) -> list[list[float]]:
         response = await client.post(
-            f"{self.base_url}/embed",
-            json={"text": text, "mode": mode, "collection": collection},
+            f"{self.base_url}/embed/batch",
+            json={"texts": texts, "mode": mode, "collection": collection},
             headers={"X-API-Key": self.api_key},
         )
         response.raise_for_status()
-        return response.json()["vector"]
+        return response.json()["vectors"]
 
     async def embed_single(self, text: str, mode: str = "search", collection: str = "facts") -> list[float]:
         """Embed single text using embedding service."""
