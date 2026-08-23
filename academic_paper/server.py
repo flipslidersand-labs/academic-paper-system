@@ -108,6 +108,9 @@ async def ingest_paper(
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             content = await file.read()
+            max_bytes = settings.max_upload_mb * 1024 * 1024
+            if len(content) > max_bytes:
+                raise HTTPException(status_code=413, detail=f"File too large (max {settings.max_upload_mb} MB)")
             tmp.write(content)
             tmp_path = tmp.name
 
@@ -458,13 +461,18 @@ async def search(
 
         if mode == "keyword":
             fts_results = search_fts(conn, query=q, limit=limit, paper_id=paper_id)
+            _kw_ids = [r["chunk_id"] for r in fts_results]
+            if _kw_ids:
+                _ph = ",".join("?" * len(_kw_ids))
+                _ps_rows = cursor.execute(f"SELECT id, page_start FROM chunks WHERE id IN ({_ph})", _kw_ids).fetchall()
+                _kw_page_map = {r["id"]: r["page_start"] for r in _ps_rows}
+            else:
+                _kw_page_map = {}
             results = []
             for rank, result in enumerate(fts_results, start=1):
                 chunk_id = result["chunk_id"]
                 paper_id_res = result["paper_id"]
-                cursor.execute("SELECT page_start FROM chunks WHERE id = ?", (chunk_id,))
-                row = cursor.fetchone()
-                page_start = row["page_start"] if row else None
+                page_start = _kw_page_map.get(chunk_id)
                 full_text = result["text"]
                 snippet = full_text[:snippet_length] if snippet_length > 0 else full_text
                 results.append(
@@ -486,12 +494,19 @@ async def search(
             search_results = app.state.vector_store.search(
                 query_vector=query_vector, limit=limit, paper_id_filter=paper_id
             )
+            _vec_qids = [r["id"] for r in search_results]
+            if _vec_qids:
+                _ph = ",".join("?" * len(_vec_qids))
+                _vec_ps_rows = cursor.execute(
+                    f"SELECT qdrant_id, page_start FROM chunks WHERE qdrant_id IN ({_ph})", _vec_qids
+                ).fetchall()
+                _vec_page_map = {r["qdrant_id"]: r["page_start"] for r in _vec_ps_rows}
+            else:
+                _vec_page_map = {}
             results = []
             for rank, result in enumerate(search_results, start=1):
                 qdrant_id = result["id"]
                 payload = result["payload"]
-                cursor.execute("SELECT page_start FROM chunks WHERE qdrant_id = ?", (qdrant_id,))
-                row = cursor.fetchone()
                 full_text = payload["text"]
                 snippet = full_text[:snippet_length] if snippet_length > 0 else full_text
                 results.append(
@@ -500,7 +515,7 @@ async def search(
                         "score": result["score"],
                         "paper_id": payload["paper_id"],
                         "chunk_index": payload["chunk_index"],
-                        "page_start": row["page_start"] if row else None,
+                        "page_start": _vec_page_map.get(qdrant_id),
                         "snippet": snippet,
                     }
                 )
@@ -509,11 +524,16 @@ async def search(
 
         else:  # hybrid or nugget (same retrieval, different snippet)
             fts_results = search_fts(conn, query=q, limit=limit, paper_id=paper_id)
-            for fts_result in fts_results:
-                cursor.execute("SELECT chunk_index FROM chunks WHERE id = ?", (fts_result["chunk_id"],))
-                row = cursor.fetchone()
-                if row:
-                    fts_result["chunk_index"] = row["chunk_index"]
+            _fts_ids = [r["chunk_id"] for r in fts_results]
+            if _fts_ids:
+                _ph = ",".join("?" * len(_fts_ids))
+                _ci_rows = cursor.execute(
+                    f"SELECT id, chunk_index FROM chunks WHERE id IN ({_ph})", _fts_ids
+                ).fetchall()
+                _ci_map = {r["id"]: r["chunk_index"] for r in _ci_rows}
+                for fts_result in fts_results:
+                    if fts_result["chunk_id"] in _ci_map:
+                        fts_result["chunk_index"] = _ci_map[fts_result["chunk_id"]]
 
             with tracer.start_as_current_span("embed.query"):
                 query_vector = await app.state.embedder.embed_single(q, mode="search")
@@ -521,18 +541,30 @@ async def search(
                 query_vector=query_vector, limit=limit, paper_id_filter=paper_id
             )
 
-            for vec_result in vector_results:
-                if "chunk_id" not in vec_result["payload"]:
-                    cursor.execute("SELECT id FROM chunks WHERE qdrant_id = ?", (vec_result["id"],))
-                    row = cursor.fetchone()
-                    if row:
-                        vec_result["payload"]["chunk_id"] = row["id"]
+            _missing_qids = [v["id"] for v in vector_results if "chunk_id" not in v["payload"]]
+            if _missing_qids:
+                _ph = ",".join("?" * len(_missing_qids))
+                _cid_rows = cursor.execute(
+                    f"SELECT id, qdrant_id FROM chunks WHERE qdrant_id IN ({_ph})", _missing_qids
+                ).fetchall()
+                _qid_to_cid = {r["qdrant_id"]: r["id"] for r in _cid_rows}
+                for vec_result in vector_results:
+                    if "chunk_id" not in vec_result["payload"] and vec_result["id"] in _qid_to_cid:
+                        vec_result["payload"]["chunk_id"] = _qid_to_cid[vec_result["id"]]
 
             merged = rrf_merge(fts_results, vector_results)
+            _merged_slice = merged[:limit]
+            _merged_ids = [r["chunk_id"] for r in _merged_slice]
+            if _merged_ids:
+                _ph = ",".join("?" * len(_merged_ids))
+                _mps_rows = cursor.execute(
+                    f"SELECT id, page_start FROM chunks WHERE id IN ({_ph})", _merged_ids
+                ).fetchall()
+                _merged_page_map = {r["id"]: r["page_start"] for r in _mps_rows}
+            else:
+                _merged_page_map = {}
             results = []
-            for rank, result in enumerate(merged[:limit], start=1):
-                cursor.execute("SELECT page_start FROM chunks WHERE id = ?", (result["chunk_id"],))
-                row = cursor.fetchone()
+            for rank, result in enumerate(_merged_slice, start=1):
                 full_text = result["text"]
                 if mode == "nugget":
                     sentence_vecs = None
@@ -557,7 +589,7 @@ async def search(
                         "score": result["rrf_score"],
                         "paper_id": result["paper_id"],
                         "chunk_index": result["chunk_index"],
-                        "page_start": row["page_start"] if row else None,
+                        "page_start": _merged_page_map.get(result["chunk_id"]),
                         "snippet": snippet,
                     }
                 )

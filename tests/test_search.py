@@ -78,11 +78,10 @@ def test_search_returns_results(client):
         mock_conn.cursor.return_value = mock_cursor
         mock_get_conn.return_value = mock_conn
 
-        # Mock cursor.fetchone() to return page_start
-        # For hybrid mode: need to handle FTS + Vector enrichment
-        mock_cursor.fetchone.side_effect = [
-            {"page_start": 1},
-            {"page_start": 2},
+        # Batch IN-clause query returns all page_start rows at once
+        mock_cursor.execute.return_value.fetchall.return_value = [
+            {"qdrant_id": "qdrant-id-1", "page_start": 1},
+            {"qdrant_id": "qdrant-id-2", "page_start": 2},
         ]
 
         response = client.get("/search?q=machine learning&mode=vector")
