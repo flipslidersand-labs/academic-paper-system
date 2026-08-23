@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     ollama_url: str = Field(default="http://localhost:11434", description="Ollama service URL")
     ollama_model: str = Field(default="mistral", description="Ollama model to use")
     otel_endpoint: str = Field(default="", description="OpenTelemetry endpoint")
+    log_level: str = Field(default="INFO", description="Root log level (DEBUG/INFO/WARNING/ERROR)")
+    log_format: str = Field(default="json", description="Log format: 'json' or 'text'")
     preferred_categories: str = Field(
         default="cs.AI,cs.LG,cs.CL", description="Comma-separated preferred arXiv categories for scoring"
     )

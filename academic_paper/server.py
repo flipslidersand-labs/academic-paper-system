@@ -35,6 +35,7 @@ from academic_paper.extractor import extract_text, hash_file
 from academic_paper.hybrid import rrf_merge
 from academic_paper.jobs import job_store
 from academic_paper.llm import get_llm_client
+from academic_paper.logging_config import configure_logging
 from academic_paper.nugget import extract_nuggets, split_sentences
 from academic_paper.scorer import compute_score
 from academic_paper.summarizer import RAGSummarizer
@@ -61,6 +62,7 @@ def _parse_list_field(value: str | None) -> list[str] | None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize database and services on startup."""
+    configure_logging(level=settings.log_level, fmt=settings.log_format)
     setup_telemetry(app, settings.otel_endpoint)
     init_db(settings.academic_db)
     job_store.init(settings.academic_db)
