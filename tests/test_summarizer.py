@@ -194,3 +194,68 @@ async def test_summarize_keywords_not_list_normalized():
 
     assert isinstance(result["keywords"], list)
     assert result["keywords"] == ["single keyword"]
+
+
+@pytest.mark.anyio
+async def test_summarize_uses_embedder_with_title():
+    """When embedder is provided, embed_single is called with the paper title."""
+    mock_llm = AsyncMock()
+    mock_qdrant = MagicMock()
+    mock_embedder = AsyncMock()
+
+    query_vec = [0.5] * 768
+    mock_embedder.embed_single.return_value = query_vec
+
+    chunks = [{"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "paper text"}}]
+    mock_qdrant.search.return_value = chunks
+    mock_llm.generate.return_value = json.dumps(
+        {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
+    )
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
+    await summarizer.summarize(paper_id=1, file_hash="abc", title="My Paper Title")
+
+    mock_embedder.embed_single.assert_called_once_with("My Paper Title", mode="search")
+    mock_qdrant.search.assert_called_once_with(query_vector=query_vec, limit=5, paper_id_filter=1)
+
+
+@pytest.mark.anyio
+async def test_summarize_uses_filename_when_no_title():
+    """When embedder is provided and title is None, file_name (sans .pdf) is used."""
+    mock_llm = AsyncMock()
+    mock_qdrant = MagicMock()
+    mock_embedder = AsyncMock()
+    mock_embedder.embed_single.return_value = [0.1] * 768
+
+    chunks = [{"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "text"}}]
+    mock_qdrant.search.return_value = chunks
+    mock_llm.generate.return_value = json.dumps(
+        {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
+    )
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
+    await summarizer.summarize(paper_id=1, file_hash="abc", title=None, file_name="my_paper.pdf")
+
+    mock_embedder.embed_single.assert_called_once_with("my_paper", mode="search")
+
+
+@pytest.mark.anyio
+async def test_summarize_falls_back_to_zero_vector_on_embed_failure():
+    """When embed_single raises, summarizer falls back to zero vector and continues."""
+    mock_llm = AsyncMock()
+    mock_qdrant = MagicMock()
+    mock_embedder = AsyncMock()
+    mock_embedder.embed_single.side_effect = RuntimeError("embedding-svc down")
+
+    chunks = [{"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "text"}}]
+    mock_qdrant.search.return_value = chunks
+    mock_llm.generate.return_value = json.dumps(
+        {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
+    )
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
+    result = await summarizer.summarize(paper_id=1, file_hash="abc", title="Test")
+
+    # Should succeed with zero-vector fallback
+    assert "objective" in result
+    mock_qdrant.search.assert_called_once_with(query_vector=[0.0] * 768, limit=5, paper_id_filter=1)
