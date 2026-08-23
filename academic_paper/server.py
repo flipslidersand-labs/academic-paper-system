@@ -458,9 +458,7 @@ async def search(
             _kw_ids = [r["chunk_id"] for r in fts_results]
             if _kw_ids:
                 _ph = ",".join("?" * len(_kw_ids))
-                _ps_rows = cursor.execute(
-                    f"SELECT id, page_start FROM chunks WHERE id IN ({_ph})", _kw_ids
-                ).fetchall()
+                _ps_rows = cursor.execute(f"SELECT id, page_start FROM chunks WHERE id IN ({_ph})", _kw_ids).fetchall()
                 _kw_page_map = {r["id"]: r["page_start"] for r in _ps_rows}
             else:
                 _kw_page_map = {}
