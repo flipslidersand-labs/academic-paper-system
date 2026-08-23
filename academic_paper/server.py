@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from academic_paper.chunker import chunk_pages
 from academic_paper.config import settings
 from academic_paper.db import (
+    db_connection,
     get_all_papers_for_scoring,
     get_connection,
     get_paper,
@@ -112,79 +113,73 @@ async def ingest_paper(
             tmp_path = tmp.name
 
         file_hash = hash_file(tmp_path)
-        conn = get_connection(settings.academic_db)
+        with db_connection(settings.academic_db) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM papers WHERE file_hash = ?", (file_hash,))
+            if cursor.fetchone():
+                raise HTTPException(status_code=409, detail="File already ingested")
 
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM papers WHERE file_hash = ?", (file_hash,))
-        if cursor.fetchone():
-            conn.close()
-            raise HTTPException(status_code=409, detail="File already ingested")
+            with tracer.start_as_current_span("pdf.extract"):
+                pages = extract_text(tmp_path)
+            if not pages:
+                raise HTTPException(status_code=400, detail="No text extracted from PDF")
 
-        with tracer.start_as_current_span("pdf.extract"):
-            pages = extract_text(tmp_path)
-        if not pages:
-            conn.close()
-            raise HTTPException(status_code=400, detail="No text extracted from PDF")
+            chunks_list = chunk_pages(pages, chunk_size=settings.chunk_size, overlap=settings.chunk_overlap)
+            if not chunks_list:
+                raise HTTPException(status_code=400, detail="No chunks generated")
 
-        chunks_list = chunk_pages(pages, chunk_size=settings.chunk_size, overlap=settings.chunk_overlap)
-        if not chunks_list:
-            conn.close()
-            raise HTTPException(status_code=400, detail="No chunks generated")
+            paper_id = save_paper(
+                conn,
+                file.filename or "unknown.pdf",
+                file_hash,
+                title=title,
+                authors=_parse_list_field(authors),
+                categories=_parse_list_field(categories),
+                published_date=published_date or None,
+                source=source or None,
+            )
 
-        paper_id = save_paper(
-            conn,
-            file.filename or "unknown.pdf",
-            file_hash,
-            title=title,
-            authors=_parse_list_field(authors),
-            categories=_parse_list_field(categories),
-            published_date=published_date or None,
-            source=source or None,
-        )
+            try:
+                chunk_texts = [chunk["text"] for chunk in chunks_list]
+                with tracer.start_as_current_span("embed.batch"):
+                    embeddings = await app.state.embedder.embed(chunk_texts, mode="index")
 
-        try:
-            chunk_texts = [chunk["text"] for chunk in chunks_list]
-            with tracer.start_as_current_span("embed.batch"):
-                embeddings = await app.state.embedder.embed(chunk_texts, mode="index")
+                app.state.vector_store.ensure_collection()
 
-            app.state.vector_store.ensure_collection()
+                points = []
+                for idx, (chunk, embedding) in enumerate(zip(chunks_list, embeddings)):
+                    qdrant_id = make_qdrant_id(file_hash, idx)
+                    chunk["qdrant_id"] = qdrant_id
+                    points.append(
+                        {
+                            "id": qdrant_id,
+                            "vector": embedding,
+                            "payload": {
+                                "paper_id": paper_id,
+                                "chunk_index": idx,
+                                "text": chunk["text"],
+                                "file_name": file.filename or "unknown.pdf",
+                            },
+                        }
+                    )
 
-            points = []
-            for idx, (chunk, embedding) in enumerate(zip(chunks_list, embeddings)):
-                qdrant_id = make_qdrant_id(file_hash, idx)
-                chunk["qdrant_id"] = qdrant_id
-                points.append(
-                    {
-                        "id": qdrant_id,
-                        "vector": embedding,
-                        "payload": {
-                            "paper_id": paper_id,
-                            "chunk_index": idx,
-                            "text": chunk["text"],
-                            "file_name": file.filename or "unknown.pdf",
-                        },
-                    }
-                )
+                with tracer.start_as_current_span("qdrant.upsert"):
+                    app.state.vector_store.upsert(points)
 
-            with tracer.start_as_current_span("qdrant.upsert"):
-                app.state.vector_store.upsert(points)
+                save_chunks(conn, paper_id, chunks_list)
+                update_paper_status(conn, paper_id, "indexed")
 
-            save_chunks(conn, paper_id, chunks_list)
-            update_paper_status(conn, paper_id, "indexed")
-            conn.close()
+                return {
+                    "paper_id": paper_id,
+                    "file_name": file.filename or "unknown.pdf",
+                    "chunks": len(chunks_list),
+                    "status": "indexed",
+                }
 
-            return {
-                "paper_id": paper_id,
-                "file_name": file.filename or "unknown.pdf",
-                "chunks": len(chunks_list),
-                "status": "indexed",
-            }
-
-        except Exception as e:
-            logger.exception("Embedding or Qdrant error for paper_id=%s", paper_id)
-            update_paper_status(conn, paper_id, "failed")
-            conn.close()
-            raise HTTPException(status_code=400, detail=f"Embedding or Qdrant error: {str(e)}")
+            except Exception as e:
+                logger.exception("Embedding or Qdrant error for paper_id=%s", paper_id)
+                update_paper_status(conn, paper_id, "failed")
+                raise HTTPException(status_code=400, detail=f"Embedding or Qdrant error: {str(e)}")
 
     except HTTPException:
         raise
@@ -208,18 +203,18 @@ def list_papers_endpoint(
     sort: Literal["ingested_at", "score"] = Query("ingested_at", description="Sort order"),
 ):
     """List papers with pagination, optional filters, and sort."""
-    conn = get_connection(settings.academic_db)
-    total, papers = list_papers_filtered(conn, limit=limit, offset=offset, author=author, category=category, sort=sort)
-    conn.close()
+    with db_connection(settings.academic_db) as conn:
+        total, papers = list_papers_filtered(
+            conn, limit=limit, offset=offset, author=author, category=category, sort=sort
+        )
     return {"total": total, "papers": papers}
 
 
 @app.get("/papers/{paper_id}")
 def get_paper_endpoint(paper_id: int):
     """Get paper details by ID."""
-    conn = get_connection(settings.academic_db)
-    paper = get_paper(conn, paper_id)
-    conn.close()
+    with db_connection(settings.academic_db) as conn:
+        paper = get_paper(conn, paper_id)
     if paper is None:
         raise HTTPException(status_code=404, detail="Paper not found")
     return paper
@@ -228,69 +223,63 @@ def get_paper_endpoint(paper_id: int):
 @app.get("/papers/{paper_id}/summary")
 async def get_summary_endpoint(paper_id: int, force: bool = Query(False)):
     """Get summary of a paper (cached unless force=true)."""
-    conn = get_connection(settings.academic_db)
-    paper = get_paper(conn, paper_id)
+    with db_connection(settings.academic_db) as conn:
+        paper = get_paper(conn, paper_id)
 
-    if paper is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Paper not found")
+        if paper is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
 
-    if not force:
-        cached_summary = get_summary(conn, paper_id)
-        if cached_summary is not None:
-            conn.close()
+        if not force:
+            cached_summary = get_summary(conn, paper_id)
+            if cached_summary is not None:
+                return {
+                    "paper_id": paper_id,
+                    "model": cached_summary["model"],
+                    "objective": cached_summary["objective"],
+                    "method": cached_summary["method"],
+                    "results": cached_summary["results"],
+                    "limitations": cached_summary["limitations"],
+                    "keywords": cached_summary["keywords"],
+                    "cached": True,
+                }
+
+        if app.state.llm is None:
+            raise HTTPException(status_code=503, detail="LLM not configured")
+
+        if app.state.summarizer is None:
+            raise HTTPException(status_code=503, detail="Summarizer not initialized")
+
+        try:
+            with tracer.start_as_current_span("summarize") as span:
+                span.set_attribute("paper_id", paper_id)
+                summary = await app.state.summarizer.summarize(
+                    paper_id, paper["file_hash"], title=paper.get("title"), file_name=paper.get("file_name")
+                )
+
+            llm_class_name = app.state.llm.__class__.__name__
+            if llm_class_name == "GeminiClient":
+                model = "gemini-2.0-flash"
+            elif llm_class_name == "OllamaClient":
+                model = f"ollama/{app.state.llm.model}"
+            else:
+                model = llm_class_name
+
+            save_summary(conn, paper_id, model, summary)
+
             return {
                 "paper_id": paper_id,
-                "model": cached_summary["model"],
-                "objective": cached_summary["objective"],
-                "method": cached_summary["method"],
-                "results": cached_summary["results"],
-                "limitations": cached_summary["limitations"],
-                "keywords": cached_summary["keywords"],
-                "cached": True,
+                "model": model,
+                "objective": summary.get("objective", ""),
+                "method": summary.get("method", ""),
+                "results": summary.get("results", ""),
+                "limitations": summary.get("limitations", ""),
+                "keywords": summary.get("keywords", []),
+                "cached": False,
             }
 
-    if app.state.llm is None:
-        conn.close()
-        raise HTTPException(status_code=503, detail="LLM not configured")
-
-    if app.state.summarizer is None:
-        conn.close()
-        raise HTTPException(status_code=503, detail="Summarizer not initialized")
-
-    try:
-        with tracer.start_as_current_span("summarize") as span:
-            span.set_attribute("paper_id", paper_id)
-            summary = await app.state.summarizer.summarize(
-                paper_id, paper["file_hash"], title=paper.get("title"), file_name=paper.get("file_name")
-            )
-
-        llm_class_name = app.state.llm.__class__.__name__
-        if llm_class_name == "GeminiClient":
-            model = "gemini-2.0-flash"
-        elif llm_class_name == "OllamaClient":
-            model = f"ollama/{app.state.llm.model}"
-        else:
-            model = llm_class_name
-
-        save_summary(conn, paper_id, model, summary)
-        conn.close()
-
-        return {
-            "paper_id": paper_id,
-            "model": model,
-            "objective": summary.get("objective", ""),
-            "method": summary.get("method", ""),
-            "results": summary.get("results", ""),
-            "limitations": summary.get("limitations", ""),
-            "keywords": summary.get("keywords", []),
-            "cached": False,
-        }
-
-    except Exception as e:
-        logger.exception("Summarization error for paper_id=%s", paper_id)
-        conn.close()
-        raise HTTPException(status_code=400, detail=f"Summarization error: {str(e)}")
+        except Exception as e:
+            logger.exception("Summarization error for paper_id=%s", paper_id)
+            raise HTTPException(status_code=400, detail=f"Summarization error: {str(e)}")
 
 
 @app.post("/papers/score-all")
@@ -304,29 +293,26 @@ def score_all_papers():
         JSON with total and scored counts.
     """
     preferred = settings.preferred_categories_list
-    conn = get_connection(settings.academic_db)
-    papers = get_all_papers_for_scoring(conn)
-    scored = 0
-    for paper in papers:
-        score = compute_score(paper, preferred)
-        update_paper_score(conn, paper["id"], score)
-        scored += 1
-    conn.close()
+    with db_connection(settings.academic_db) as conn:
+        papers = get_all_papers_for_scoring(conn)
+        scored = 0
+        for paper in papers:
+            score = compute_score(paper, preferred)
+            update_paper_score(conn, paper["id"], score)
+            scored += 1
     return {"total": len(papers), "scored": scored, "preferred_categories": preferred}
 
 
 @app.post("/papers/{paper_id}/score")
 def score_paper(paper_id: int):
     """Compute and store relevance score for a single paper."""
-    conn = get_connection(settings.academic_db)
-    paper = get_paper(conn, paper_id)
-    if paper is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Paper not found")
-    preferred = settings.preferred_categories_list
-    score = compute_score(paper, preferred)
-    update_paper_score(conn, paper_id, score)
-    conn.close()
+    with db_connection(settings.academic_db) as conn:
+        paper = get_paper(conn, paper_id)
+        if paper is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        preferred = settings.preferred_categories_list
+        score = compute_score(paper, preferred)
+        update_paper_score(conn, paper_id, score)
     return {"paper_id": paper_id, "score": score}
 
 
@@ -336,9 +322,8 @@ def list_summaries_endpoint(
     offset: int = Query(0, ge=0),
 ):
     """List all paper summaries with associated paper metadata."""
-    conn = get_connection(settings.academic_db)
-    total, summaries = list_summaries(conn, limit=limit, offset=offset)
-    conn.close()
+    with db_connection(settings.academic_db) as conn:
+        total, summaries = list_summaries(conn, limit=limit, offset=offset)
     return {"total": total, "summaries": summaries}
 
 
@@ -351,16 +336,15 @@ async def _run_summarize_all(job_id: str) -> None:
     job.status = "running"
     job_store.persist(job)
     try:
-        conn = get_connection(settings.academic_db)
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT p.id, p.file_hash, p.title, p.file_name
-            FROM papers p
-            LEFT JOIN summaries s ON p.id = s.paper_id
-            WHERE s.paper_id IS NULL AND p.status = 'indexed'
-        """)
-        rows = cursor.fetchall()
-        conn.close()
+        with db_connection(settings.academic_db) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT p.id, p.file_hash, p.title, p.file_name
+                FROM papers p
+                LEFT JOIN summaries s ON p.id = s.paper_id
+                WHERE s.paper_id IS NULL AND p.status = 'indexed'
+            """)
+            rows = cursor.fetchall()
 
         job.total = len(rows)
 
@@ -381,9 +365,8 @@ async def _run_summarize_all(job_id: str) -> None:
                 summary = await app.state.summarizer.summarize(
                     paper_id, file_hash, title=row_title, file_name=row_file_name
                 )
-                conn = get_connection(settings.academic_db)
-                save_summary(conn, paper_id, model, summary)
-                conn.close()
+                with db_connection(settings.academic_db) as conn:
+                    save_summary(conn, paper_id, model, summary)
                 job.processed += 1
             except Exception as e:
                 logger.exception("Background summarize failed for paper_id=%s", paper_id)
@@ -452,6 +435,7 @@ async def search(
     sentences from each chunk instead of returning the full snippet. Reduces
     context length by ~68% while maintaining Recall@5.
     """
+    conn = None
     try:
         conn = get_connection(settings.academic_db)
         cursor = conn.cursor()
@@ -477,7 +461,6 @@ async def search(
                         "snippet": snippet,
                     }
                 )
-            conn.close()
             return {"mode": mode, "query": q, "results": results}
 
         elif mode == "vector":
@@ -504,7 +487,6 @@ async def search(
                         "snippet": snippet,
                     }
                 )
-            conn.close()
             return {"mode": mode, "query": q, "results": results}
 
         else:  # hybrid or nugget (same retrieval, different snippet)
@@ -561,12 +543,14 @@ async def search(
                         "snippet": snippet,
                     }
                 )
-            conn.close()
             return {"mode": mode, "query": q, "results": results}
 
     except Exception as e:
         logger.exception("Search error for query=%r mode=%s", q, mode)
         raise HTTPException(status_code=400, detail=f"Search error: {str(e)}")
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 @app.get("/health")
@@ -596,8 +580,7 @@ async def health():
 @app.get("/stats")
 def stats():
     """DB統計情報"""
-    conn = get_connection(settings.academic_db)
-    try:
+    with db_connection(settings.academic_db) as conn:
         papers = conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
         chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
         try:
@@ -605,9 +588,7 @@ def stats():
             qdrant_points = info.points_count
         except Exception:
             qdrant_points = -1
-        return {"papers": papers, "chunks": chunks, "qdrant_points": qdrant_points, "db": settings.academic_db}
-    finally:
-        conn.close()
+    return {"papers": papers, "chunks": chunks, "qdrant_points": qdrant_points, "db": settings.academic_db}
 
 
 # Serve frontend at /ui — must be mounted after all API routes
