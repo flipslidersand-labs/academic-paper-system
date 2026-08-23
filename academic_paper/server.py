@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI):
     llm_client = get_llm_client()
     app.state.llm = llm_client
     if llm_client is not None:
-        app.state.summarizer = RAGSummarizer(llm_client, app.state.vector_store)
+        app.state.summarizer = RAGSummarizer(llm_client, app.state.vector_store, app.state.embedder)
     else:
         app.state.summarizer = None
     yield
@@ -261,7 +261,9 @@ async def get_summary_endpoint(paper_id: int, force: bool = Query(False)):
     try:
         with tracer.start_as_current_span("summarize") as span:
             span.set_attribute("paper_id", paper_id)
-            summary = await app.state.summarizer.summarize(paper_id, paper["file_hash"])
+            summary = await app.state.summarizer.summarize(
+                paper_id, paper["file_hash"], title=paper.get("title"), file_name=paper.get("file_name")
+            )
 
         llm_class_name = app.state.llm.__class__.__name__
         if llm_class_name == "GeminiClient":
@@ -352,7 +354,7 @@ async def _run_summarize_all(job_id: str) -> None:
         conn = get_connection(settings.academic_db)
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT p.id, p.file_hash
+            SELECT p.id, p.file_hash, p.title, p.file_name
             FROM papers p
             LEFT JOIN summaries s ON p.id = s.paper_id
             WHERE s.paper_id IS NULL AND p.status = 'indexed'
@@ -373,8 +375,12 @@ async def _run_summarize_all(job_id: str) -> None:
         for row in rows:
             paper_id = row[0]
             file_hash = row[1]
+            row_title = row[2] if len(row) > 2 else None
+            row_file_name = row[3] if len(row) > 3 else None
             try:
-                summary = await app.state.summarizer.summarize(paper_id, file_hash)
+                summary = await app.state.summarizer.summarize(
+                    paper_id, file_hash, title=row_title, file_name=row_file_name
+                )
                 conn = get_connection(settings.academic_db)
                 save_summary(conn, paper_id, model, summary)
                 conn.close()

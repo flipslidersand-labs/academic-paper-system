@@ -1,11 +1,15 @@
 """RAG-based paper summarizer using LLM and vector store."""
 
 import json
+import logging
 import re
 import sqlite3
 
+from academic_paper.embedder import EmbedderClient
 from academic_paper.llm import BaseLLMClient
 from academic_paper.vector_store import QdrantStore
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are an expert academic paper analyzer.
 Your task is to provide a structured summary of academic papers.
@@ -15,17 +19,26 @@ Focus on clarity, accuracy, and extracting key information."""
 class RAGSummarizer:
     """Summarize academic papers using RAG (Retrieval-Augmented Generation)."""
 
-    def __init__(self, llm_client: BaseLLMClient, qdrant_store: QdrantStore):
+    def __init__(self, llm_client: BaseLLMClient, qdrant_store: QdrantStore, embedder: EmbedderClient | None = None):
         """Initialize RAGSummarizer.
 
         Args:
             llm_client: LLM client for generation
             qdrant_store: Qdrant vector store for retrieval
+            embedder: Embedding client for semantic chunk retrieval (optional; falls back to zero vector)
         """
         self.llm = llm_client
         self.qdrant = qdrant_store
+        self.embedder = embedder
 
-    async def summarize(self, paper_id: int, file_hash: str, top_k: int = 5) -> dict:
+    async def summarize(
+        self,
+        paper_id: int,
+        file_hash: str,
+        top_k: int = 5,
+        title: str | None = None,
+        file_name: str | None = None,
+    ) -> dict:
         """Summarize a paper using RAG.
 
         Args:
@@ -39,10 +52,22 @@ class RAGSummarizer:
         Raises:
             ValueError: If no chunks found or LLM returns invalid JSON
         """
+        # Build a real query vector from title or filename for semantic chunk retrieval
+        query_text = title or (file_name.removesuffix(".pdf") if file_name else None) or "academic paper"
+        query_vector: list[float]
+        if self.embedder is not None:
+            try:
+                query_vector = await self.embedder.embed_single(query_text, mode="search")
+            except Exception:
+                logger.warning("embed_single failed for summarize query=%r — falling back to zero vector", query_text)
+                query_vector = [0.0] * 768
+        else:
+            query_vector = [0.0] * 768
+
         # Try to retrieve relevant chunks from Qdrant first
         try:
             chunks = self.qdrant.search(
-                query_vector=[0.1] * 768,  # Dummy vector - mocked in tests
+                query_vector=query_vector,
                 limit=top_k,
                 paper_id_filter=paper_id,
             )
