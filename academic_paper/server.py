@@ -13,6 +13,7 @@ from typing import Literal
 import httpx
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.staticfiles import StaticFiles
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from academic_paper.chunker import chunk_pages
 from academic_paper.config import settings
@@ -107,6 +108,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Academic Paper System", lifespan=lifespan)
+Instrumentator().instrument(app).expose(app)
 
 
 @app.post("/papers/ingest")
