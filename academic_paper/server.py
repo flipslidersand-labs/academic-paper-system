@@ -1,5 +1,6 @@
 """FastAPI server for academic paper ingestion and retrieval."""
 
+import asyncio
 import json
 import logging
 import os
@@ -59,6 +60,32 @@ def _parse_list_field(value: str | None) -> list[str] | None:
     return [x.strip() for x in value.split(",") if x.strip()]
 
 
+async def _probe_startup_health(app: FastAPI) -> None:
+    """Probe Qdrant and embedding-svc at startup; log warnings on failure."""
+    try:
+        app.state.vector_store.client.get_collections()
+        logger.info("Startup probe OK: Qdrant")
+    except Exception:
+        logger.warning(
+            "Startup probe: Qdrant unreachable at %s — ingest/search will fail until available",
+            settings.qdrant_url,
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            resp = await client.get(
+                f"{settings.embedding_svc_url}/health",
+                headers={"X-API-Key": settings.embedding_api_key},
+            )
+            resp.raise_for_status()
+        logger.info("Startup probe OK: embedding-svc")
+    except Exception:
+        logger.warning(
+            "Startup probe: embedding-svc unreachable at %s — ingest/search will fail until available",
+            settings.embedding_svc_url,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize database and services on startup."""
@@ -73,6 +100,7 @@ async def lifespan(app: FastAPI):
         app.state.summarizer = RAGSummarizer(llm_client, app.state.vector_store, app.state.embedder)
     else:
         app.state.summarizer = None
+    asyncio.create_task(_probe_startup_health(app))
     yield
 
 
