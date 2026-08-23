@@ -11,3 +11,10 @@ jobs:
     uses: flipslidersand-labs/qa-workflows/.github/workflows/python-test.yml@main
     with:
       coverage-threshold: 90
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -t academic-paper-system:test .
