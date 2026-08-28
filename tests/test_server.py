@@ -542,3 +542,31 @@ def test_ingest_unexpected_exception(client):
         )
     assert response.status_code == 400
     assert "disk error" in response.json()["detail"]
+
+
+def test_ingest_file_too_large_returns_413(client):
+    """POST /papers/ingest returns 413 when file exceeds max_upload_mb limit."""
+    with patch.object(settings, "max_upload_mb", 0):
+        response = client.post(
+            "/papers/ingest",
+            files={"file": ("big.pdf", BytesIO(b"X"), "application/pdf")},
+        )
+    assert response.status_code == 413
+    assert "too large" in response.json()["detail"].lower()
+
+
+def test_ingest_file_at_limit_is_accepted(client):
+    """POST /papers/ingest accepts a file exactly at the size limit."""
+    pdf_content = create_minimal_pdf()
+    limit_mb = len(pdf_content) // (1024 * 1024) + 1
+
+    with (
+        patch.object(settings, "max_upload_mb", limit_mb),
+        patch("academic_paper.server.extract_text") as mock_extract,
+    ):
+        mock_extract.return_value = [{"page": 1, "text": "Test content"}]
+        response = client.post(
+            "/papers/ingest",
+            files={"file": ("ok.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+    assert response.status_code == 200
