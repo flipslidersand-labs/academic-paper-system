@@ -392,6 +392,19 @@ def test_ingest_no_chunks(client):
         assert "No chunks generated" in response.json()["detail"]
 
 
+def test_ingest_file_too_large(client):
+    """Test POST /papers/ingest returns 413 when file exceeds max_upload_mb."""
+    oversized_content = b"%PDF-1.4 " + b"x" * (51 * 1024 * 1024)
+
+    with patch.object(settings, "max_upload_mb", 50):
+        response = client.post(
+            "/papers/ingest",
+            files={"file": ("big.pdf", BytesIO(oversized_content), "application/pdf")},
+        )
+    assert response.status_code == 413
+    assert "50 MB" in response.json()["detail"]
+
+
 def test_ingest_embedding_failure(client):
     """Test POST /papers/ingest returns 400 when embedding service fails."""
     pdf_content = create_minimal_pdf()
