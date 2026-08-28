@@ -276,7 +276,7 @@ academic-paper-system/
 | Phase 2 | #2 | Embedding + Qdrant | ✅ |
 | Phase 3 | #3 | ハイブリッド検索 RRF | ✅ |
 | Phase 4 | #4 | 構造化要約 LLM RAG | ✅ |
-| Phase 5 | #5 | CI/OTel/仕上げ | 進行中 |
+| Phase 5 | #5 | CI/OTel/仕上げ | ✅ |
 
 ## 関連インフラ
 
@@ -350,4 +350,8 @@ docker run -d \
 
 ## Last Updated
 
-2026-07-22 — Phase 1-4 完了。API エンドポイント・テストスイート・Docker セットアップ完成。
+2026-08-23 — Phase 5 完了。
+全 11 Issue (#96-#106) 実装・PR 化（#110-#119）。
+N+1 修正 / upload 制限 / embed 実装化 / DB コンテキストマネージャ /
+バッチ embedding / startup probe / JSON logging / Prometheus /metrics /
+Docker CI / HEALTHCHECK / マルチステージビルド + requirements.lock
