@@ -106,6 +106,12 @@ async def ingest_paper(
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             content = await file.read()
+            max_bytes = settings.max_upload_mb * 1024 * 1024
+            if len(content) > max_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File too large. Maximum size is {settings.max_upload_mb} MB.",
+                )
             tmp.write(content)
             tmp_path = tmp.name
 

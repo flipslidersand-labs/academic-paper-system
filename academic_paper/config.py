@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     preferred_categories: str = Field(
         default="cs.AI,cs.LG,cs.CL", description="Comma-separated preferred arXiv categories for scoring"
     )
+    max_upload_mb: int = Field(default=50, description="Maximum upload file size in MB")
 
     @property
     def preferred_categories_list(self) -> list[str]:
