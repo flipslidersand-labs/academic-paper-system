@@ -21,13 +21,13 @@ Exit codes:
 """
 
 import argparse
-import io
 import json
 import os
 import sys
 import time
 
 import httpx
+from ingest_client import submit_and_wait
 
 S2_API = "https://api.semanticscholar.org/graph/v1/paper/search"
 S2_FIELDS = "paperId,title,authors,year,publicationDate,openAccessPdf,fieldsOfStudy"
@@ -108,9 +108,9 @@ def ingest_paper(
     paper: dict,
     api_url: str,
     pdf_timeout: int = 60,
-    ingest_timeout: int = 120,
+    poll_timeout: int = 300,
 ) -> dict:
-    """Download PDF and POST to /papers/ingest."""
+    """Download the PDF and submit it to the async /papers/ingest job."""
     pdf_url = paper["openAccessPdf"]["url"]
     pdf_resp = httpx.get(pdf_url, timeout=pdf_timeout, follow_redirects=True)
     pdf_resp.raise_for_status()
@@ -123,24 +123,20 @@ def ingest_paper(
     categories = paper.get("fieldsOfStudy") or []
     pub_date = (paper.get("publicationDate") or "")[:10] or None
 
-    resp = client.post(
-        f"{api_url}/papers/ingest",
-        files={"file": (f"s2_{s2_id[:12]}.pdf", io.BytesIO(pdf_resp.content), "application/pdf")},
-        data={
+    return submit_and_wait(
+        client,
+        api_url,
+        f"s2_{s2_id[:12]}.pdf",
+        pdf_resp.content,
+        {
             "title": title,
             "authors": json.dumps(authors),
             "categories": json.dumps(categories),
             "published_date": pub_date or "",
             "source": "semantic_scholar",
         },
-        timeout=ingest_timeout,
+        poll_timeout=poll_timeout,
     )
-    if resp.status_code == 409:
-        return {"status": "duplicate"}
-    resp.raise_for_status()
-    data = resp.json()
-    data["status"] = "ingested"
-    return data
 
 
 def main() -> None:
@@ -183,11 +179,11 @@ def main() -> None:
         help="academic-paper-system API base URL",
     )
     parser.add_argument(
-        "--ingest-timeout",
+        "--poll-timeout",
         type=int,
-        default=120,
+        default=300,
         metavar="SEC",
-        help="Timeout (s) for the /papers/ingest POST (default: 120)",
+        help="Max seconds to wait for each ingest job to finish (default: 300)",
     )
     parser.add_argument(
         "--api-key",
@@ -233,7 +229,7 @@ def main() -> None:
         for paper in papers:
             s2_id = paper["paperId"]
             try:
-                result = ingest_paper(client, paper, args.api_url, ingest_timeout=args.ingest_timeout)
+                result = ingest_paper(client, paper, args.api_url, poll_timeout=args.poll_timeout)
                 status = result["status"]
                 counts[status] = counts.get(status, 0) + 1
                 label = "OK  " if status == "ingested" else "SKIP"

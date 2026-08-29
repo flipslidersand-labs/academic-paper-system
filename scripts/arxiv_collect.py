@@ -25,13 +25,13 @@ Exit codes:
 """
 
 import argparse
-import io
 import json
 import sys
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
 
 import httpx
+from ingest_client import submit_and_wait
 
 ARXIV_API = "https://export.arxiv.org/api/query"
 ARXIV_PDF_BASE = "https://arxiv.org/pdf"
@@ -144,30 +144,26 @@ def ingest_paper(
     paper: dict,
     api_url: str,
     pdf_timeout: int = 60,
-    ingest_timeout: int = 120,
+    poll_timeout: int = 300,
 ) -> dict:
-    """Download PDF and POST to /papers/ingest with metadata."""
+    """Download the PDF and submit it to the async /papers/ingest job."""
     pdf_resp = httpx.get(paper["pdf_url"], timeout=pdf_timeout, follow_redirects=True)
     pdf_resp.raise_for_status()
 
-    resp = client.post(
-        f"{api_url}/papers/ingest",
-        files={"file": (paper["file_name"], io.BytesIO(pdf_resp.content), "application/pdf")},
-        data={
+    return submit_and_wait(
+        client,
+        api_url,
+        paper["file_name"],
+        pdf_resp.content,
+        {
             "title": paper["title"],
             "authors": json.dumps(paper["authors"]),
             "categories": json.dumps(paper["categories"]),
             "published_date": paper["published_date"] or "",
             "source": "arxiv",
         },
-        timeout=ingest_timeout,
+        poll_timeout=poll_timeout,
     )
-    if resp.status_code == 409:
-        return {"status": "duplicate"}
-    resp.raise_for_status()
-    data = resp.json()
-    data["status"] = "ingested"
-    return data
 
 
 def build_summary(counts: dict, papers: list[dict]) -> str:
@@ -217,11 +213,11 @@ def main() -> None:
         help="academic-paper-system API base URL (default: http://localhost:8020)",
     )
     parser.add_argument(
-        "--ingest-timeout",
+        "--poll-timeout",
         type=int,
-        default=120,
+        default=300,
         metavar="SEC",
-        help="Timeout (s) for the /papers/ingest POST (default: 120)",
+        help="Max seconds to wait for each ingest job to finish (default: 300)",
     )
     parser.add_argument(
         "--summary-file",
@@ -255,7 +251,7 @@ def main() -> None:
         for paper in papers:
             arxiv_id = paper["arxiv_id"]
             try:
-                result = ingest_paper(client, paper, args.api_url, ingest_timeout=args.ingest_timeout)
+                result = ingest_paper(client, paper, args.api_url, poll_timeout=args.poll_timeout)
                 status = result["status"]
                 counts[status] = counts.get(status, 0) + 1
                 label = "OK  " if status == "ingested" else "SKIP"
