@@ -18,13 +18,13 @@ Exit codes:
 """
 
 import argparse
-import io
 import json
 import re
 import sys
 import time
 
 import httpx
+from ingest_client import submit_and_wait
 
 OPENALEX_API = "https://api.openalex.org/works"
 FIELDS = ",".join(
@@ -160,9 +160,9 @@ def ingest_paper(
     work: dict,
     api_url: str,
     pdf_timeout: int = 60,
-    ingest_timeout: int = 120,
+    poll_timeout: int = 300,
 ) -> dict:
-    """Download PDF and POST to /papers/ingest."""
+    """Download the PDF and submit it to the async /papers/ingest job."""
     pdf_url = work["_pdf_url"]
     pdf_resp = httpx.get(pdf_url, timeout=pdf_timeout, follow_redirects=True)
     pdf_resp.raise_for_status()
@@ -185,24 +185,20 @@ def ingest_paper(
     )
     pub_date = (work.get("publication_date") or "")[:10] or None
 
-    resp = client.post(
-        f"{api_url}/papers/ingest",
-        files={"file": (file_name, io.BytesIO(pdf_resp.content), "application/pdf")},
-        data={
+    return submit_and_wait(
+        client,
+        api_url,
+        file_name,
+        pdf_resp.content,
+        {
             "title": title,
             "authors": json.dumps([a for a in authors if a]),
             "categories": json.dumps(topics),
             "published_date": pub_date or "",
             "source": "openalex",
         },
-        timeout=ingest_timeout,
+        poll_timeout=poll_timeout,
     )
-    if resp.status_code == 409:
-        return {"status": "duplicate"}
-    resp.raise_for_status()
-    result = resp.json()
-    result["status"] = "ingested"
-    return result
 
 
 def main() -> None:
@@ -235,11 +231,11 @@ def main() -> None:
         help="academic-paper-system API base URL",
     )
     parser.add_argument(
-        "--ingest-timeout",
+        "--poll-timeout",
         type=int,
-        default=120,
+        default=300,
         metavar="SEC",
-        help="Timeout (s) for the /papers/ingest POST (default: 120)",
+        help="Max seconds to wait for each ingest job to finish (default: 300)",
     )
     parser.add_argument(
         "--summary-file",
@@ -283,7 +279,7 @@ def main() -> None:
             label = f"arXiv:{arxiv_id}" if arxiv_id else work_id[:12]
             title_short = (work.get("title") or "")[:50]
             try:
-                result = ingest_paper(client, work, args.api_url, ingest_timeout=args.ingest_timeout)
+                result = ingest_paper(client, work, args.api_url, poll_timeout=args.poll_timeout)
                 status = result["status"]
                 counts[status] = counts.get(status, 0) + 1
                 tag = "OK  " if status == "ingested" else "SKIP"

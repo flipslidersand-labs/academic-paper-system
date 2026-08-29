@@ -12,6 +12,7 @@ from typing import Literal
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -111,33 +112,110 @@ app = FastAPI(title="Academic Paper System", lifespan=lifespan)
 Instrumentator().instrument(app).expose(app)
 
 
+async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_name: str) -> int:
+    """Extract → chunk → embed → Qdrant upsert for a saved paper. Returns chunk count.
+
+    Raises on extraction/chunking/embedding failure; the caller is responsible
+    for updating the paper status to 'failed'.
+    """
+    with tracer.start_as_current_span("pdf.extract"):
+        pages = extract_text(tmp_path)
+    if not pages:
+        raise ValueError("No text extracted from PDF")
+
+    chunks_list = chunk_pages(pages, chunk_size=settings.chunk_size, overlap=settings.chunk_overlap)
+    if not chunks_list:
+        raise ValueError("No chunks generated")
+
+    chunk_texts = [chunk["text"] for chunk in chunks_list]
+    with tracer.start_as_current_span("embed.batch"):
+        embeddings = await app.state.embedder.embed(chunk_texts, mode="index")
+
+    app.state.vector_store.ensure_collection()
+
+    points = []
+    for idx, (chunk, embedding) in enumerate(zip(chunks_list, embeddings)):
+        qdrant_id = make_qdrant_id(file_hash, idx)
+        chunk["qdrant_id"] = qdrant_id
+        points.append(
+            {
+                "id": qdrant_id,
+                "vector": embedding,
+                "payload": {
+                    "paper_id": paper_id,
+                    "chunk_index": idx,
+                    "text": chunk["text"],
+                    "file_name": file_name,
+                },
+            }
+        )
+
+    with tracer.start_as_current_span("qdrant.upsert"):
+        app.state.vector_store.upsert(points)
+
+    with db_connection(settings.academic_db) as conn:
+        save_chunks(conn, paper_id, chunks_list)
+        update_paper_status(conn, paper_id, "indexed")
+
+    return len(chunks_list)
+
+
+async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str, file_name: str) -> None:
+    """Background task: run the ingest pipeline, updating job + paper status."""
+    job = job_store.get(job_id)
+    if job is None:
+        return
+    job.status = "running"
+    job.total = 1
+    job_store.persist(job)
+    try:
+        chunks = await _ingest_pipeline(tmp_path, paper_id, file_hash, file_name)
+        job.result = {"paper_id": paper_id, "file_name": file_name, "chunks": chunks, "status": "indexed"}
+        job.processed = 1
+        job.status = "done"
+    except Exception as e:
+        logger.exception("Background ingest failed for paper_id=%s", paper_id)
+        with db_connection(settings.academic_db) as conn:
+            update_paper_status(conn, paper_id, "failed")
+        job.failed = 1
+        job.errors.append(f"paper_id={paper_id}: {str(e) or type(e).__name__}")
+        job.status = "failed"
+    finally:
+        job.finished_at = time.time()
+        job_store.persist(job)
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
 @app.post("/papers/ingest")
 async def ingest_paper(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     title: str | None = Form(None),
     authors: str | None = Form(None),
     categories: str | None = Form(None),
     published_date: str | None = Form(None),
     source: str | None = Form(None),
+    wait: bool = Query(False, description="Process synchronously and return the indexed result (200)"),
 ):
     """Ingest a PDF paper with optional metadata.
 
-    Args:
-        file: PDF file to ingest.
-        title: Paper title (optional; overrides extracted title).
-        authors: Authors as JSON array or comma-separated string (optional).
-        categories: Categories as JSON array or comma-separated string (optional).
-        published_date: Publication date string YYYY-MM-DD (optional).
-        source: Source identifier e.g. 'arxiv' (optional).
+    Accepts the upload, deduplicates by file hash, saves a 'pending' paper row,
+    then processes (extract → chunk → embed → Qdrant upsert) in the background,
+    returning **202** with a `job_id`. Poll `GET /jobs/{job_id}` for completion;
+    on `done` the job's `result` holds `paper_id`/`chunks`.
 
-    Returns:
-        JSON with paper_id, file_name, chunks, status.
+    Set `wait=true` to process synchronously and receive the indexed result (200).
 
     Raises:
         HTTPException 409: File already ingested.
-        HTTPException 400: Extraction / chunking / embedding error.
+        HTTPException 413: File exceeds the max upload size.
+        HTTPException 400: Extraction / chunking / embedding error (wait=true only).
     """
     tmp_path: str | None = None
+    keep_tmp = False
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             content = await file.read()
@@ -148,24 +226,17 @@ async def ingest_paper(
             tmp_path = tmp.name
 
         file_hash = hash_file(tmp_path)
+        file_name = file.filename or "unknown.pdf"
+
         with db_connection(settings.academic_db) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id FROM papers WHERE file_hash = ?", (file_hash,))
             if cursor.fetchone():
                 raise HTTPException(status_code=409, detail="File already ingested")
 
-            with tracer.start_as_current_span("pdf.extract"):
-                pages = extract_text(tmp_path)
-            if not pages:
-                raise HTTPException(status_code=400, detail="No text extracted from PDF")
-
-            chunks_list = chunk_pages(pages, chunk_size=settings.chunk_size, overlap=settings.chunk_overlap)
-            if not chunks_list:
-                raise HTTPException(status_code=400, detail="No chunks generated")
-
             paper_id = save_paper(
                 conn,
-                file.filename or "unknown.pdf",
+                file_name,
                 file_hash,
                 title=title,
                 authors=_parse_list_field(authors),
@@ -174,47 +245,28 @@ async def ingest_paper(
                 source=source or None,
             )
 
+        if wait:
             try:
-                chunk_texts = [chunk["text"] for chunk in chunks_list]
-                with tracer.start_as_current_span("embed.batch"):
-                    embeddings = await app.state.embedder.embed(chunk_texts, mode="index")
-
-                app.state.vector_store.ensure_collection()
-
-                points = []
-                for idx, (chunk, embedding) in enumerate(zip(chunks_list, embeddings)):
-                    qdrant_id = make_qdrant_id(file_hash, idx)
-                    chunk["qdrant_id"] = qdrant_id
-                    points.append(
-                        {
-                            "id": qdrant_id,
-                            "vector": embedding,
-                            "payload": {
-                                "paper_id": paper_id,
-                                "chunk_index": idx,
-                                "text": chunk["text"],
-                                "file_name": file.filename or "unknown.pdf",
-                            },
-                        }
-                    )
-
-                with tracer.start_as_current_span("qdrant.upsert"):
-                    app.state.vector_store.upsert(points)
-
-                save_chunks(conn, paper_id, chunks_list)
-                update_paper_status(conn, paper_id, "indexed")
-
-                return {
-                    "paper_id": paper_id,
-                    "file_name": file.filename or "unknown.pdf",
-                    "chunks": len(chunks_list),
-                    "status": "indexed",
-                }
-
+                chunks = await _ingest_pipeline(tmp_path, paper_id, file_hash, file_name)
             except Exception as e:
-                logger.exception("Embedding or Qdrant error for paper_id=%s", paper_id)
-                update_paper_status(conn, paper_id, "failed")
-                raise HTTPException(status_code=400, detail=f"Embedding or Qdrant error: {str(e)}")
+                logger.exception("Synchronous ingest failed for paper_id=%s", paper_id)
+                with db_connection(settings.academic_db) as conn:
+                    update_paper_status(conn, paper_id, "failed")
+                raise HTTPException(status_code=400, detail=f"Ingest error: {str(e)}")
+            return {
+                "paper_id": paper_id,
+                "file_name": file_name,
+                "chunks": chunks,
+                "status": "indexed",
+            }
+
+        job = job_store.create()
+        keep_tmp = True  # background task now owns tmp cleanup
+        background_tasks.add_task(_run_ingest, job.id, tmp_path, paper_id, file_hash, file_name)
+        return JSONResponse(
+            status_code=202,
+            content={"job_id": job.id, "paper_id": paper_id, "status": "pending"},
+        )
 
     except HTTPException:
         raise
@@ -222,7 +274,7 @@ async def ingest_paper(
         logger.exception("Unexpected error during paper ingest")
         raise HTTPException(status_code=400, detail=str(e))
     finally:
-        if tmp_path is not None:
+        if tmp_path is not None and not keep_tmp:
             try:
                 os.unlink(tmp_path)
             except OSError:

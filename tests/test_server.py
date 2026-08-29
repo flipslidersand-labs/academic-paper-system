@@ -103,7 +103,7 @@ def test_ingest_valid_pdf(client):
         ]
 
         response = client.post(
-            "/papers/ingest",
+            "/papers/ingest?wait=true",
             files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
         )
 
@@ -133,7 +133,7 @@ def test_ingest_cleans_up_tmpfile(client):
     ):
         mock_extract.return_value = [{"page": 1, "text": "Test Document content"}]
         response = client.post(
-            "/papers/ingest",
+            "/papers/ingest?wait=true",
             files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
         )
         assert response.status_code == 200
@@ -161,7 +161,7 @@ def test_ingest_cleans_up_tmpfile_on_error(client):
         patch("academic_paper.server.extract_text", side_effect=RuntimeError("boom")),
     ):
         response = client.post(
-            "/papers/ingest",
+            "/papers/ingest?wait=true",
             files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
         )
         assert response.status_code == 400
@@ -183,14 +183,14 @@ def test_ingest_duplicate_pdf(client):
 
         # Ingest first time
         response1 = client.post(
-            "/papers/ingest",
+            "/papers/ingest?wait=true",
             files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
         )
         assert response1.status_code == 200
 
         # Ingest same PDF again
         response2 = client.post(
-            "/papers/ingest",
+            "/papers/ingest?wait=true",
             files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
         )
         assert response2.status_code == 409
@@ -208,7 +208,7 @@ def test_list_papers_with_data(client):
 
         # Ingest a paper
         response_ingest = client.post(
-            "/papers/ingest",
+            "/papers/ingest?wait=true",
             files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
         )
         assert response_ingest.status_code == 200
@@ -232,7 +232,7 @@ def test_ingest_calls_embedder(client):
         ]
 
         response = client.post(
-            "/papers/ingest",
+            "/papers/ingest?wait=true",
             files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
         )
 
@@ -255,7 +255,7 @@ def test_ingest_stores_qdrant_id(client):
         ]
 
         response = client.post(
-            "/papers/ingest",
+            "/papers/ingest?wait=true",
             files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
         )
 
@@ -328,7 +328,7 @@ def test_stats_returns_counts(client):
         ]
 
         response_ingest = client.post(
-            "/papers/ingest",
+            "/papers/ingest?wait=true",
             files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
         )
         assert response_ingest.status_code == 200
@@ -363,7 +363,7 @@ def test_get_paper_by_id_success(client):
     with patch("academic_paper.server.extract_text") as mock_extract:
         mock_extract.return_value = [{"page": 1, "text": "Test Document content"}]
         resp = client.post(
-            "/papers/ingest",
+            "/papers/ingest?wait=true",
             files={"file": ("detail.pdf", BytesIO(pdf_content), "application/pdf")},
         )
         assert resp.status_code == 200
@@ -423,7 +423,7 @@ def test_ingest_empty_pages(client):
         mock_extract.return_value = []
 
         response = client.post(
-            "/papers/ingest",
+            "/papers/ingest?wait=true",
             files={"file": ("empty.pdf", BytesIO(pdf_content), "application/pdf")},
         )
         assert response.status_code == 400
@@ -442,7 +442,7 @@ def test_ingest_no_chunks(client):
         mock_chunk.return_value = []
 
         response = client.post(
-            "/papers/ingest",
+            "/papers/ingest?wait=true",
             files={"file": ("nochunk.pdf", BytesIO(pdf_content), "application/pdf")},
         )
         assert response.status_code == 400
@@ -458,11 +458,80 @@ def test_ingest_embedding_failure(client):
         client.app.state.embedder.embed = AsyncMock(side_effect=Exception("Embedding service unavailable"))
 
         response = client.post(
-            "/papers/ingest",
+            "/papers/ingest?wait=true",
             files={"file": ("fail.pdf", BytesIO(pdf_content), "application/pdf")},
         )
         assert response.status_code == 400
-        assert "Embedding or Qdrant error" in response.json()["detail"]
+        assert "Ingest error" in response.json()["detail"]
+
+
+def test_ingest_async_returns_202_and_completes_job(client):
+    """Default ingest is async: returns 202 + job_id, job completes to done."""
+    pdf_content = create_minimal_pdf()
+
+    with patch("academic_paper.server.extract_text") as mock_extract:
+        mock_extract.return_value = [{"page": 1, "text": "Async ingest content"}]
+
+        response = client.post(
+            "/papers/ingest",
+            files={"file": ("async.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["status"] == "pending"
+    assert "job_id" in body
+    paper_id = body["paper_id"]
+
+    # TestClient runs BackgroundTasks synchronously, so the job is already done.
+    job = client.get(f"/jobs/{body['job_id']}").json()
+    assert job["status"] == "done"
+    assert job["result"]["paper_id"] == paper_id
+    assert job["result"]["chunks"] > 0
+
+    paper = client.get(f"/papers/{paper_id}").json()
+    assert paper["status"] == "indexed"
+
+
+def test_ingest_async_duplicate_returns_409(client):
+    """Async ingest of an already-ingested file returns 409 synchronously."""
+    pdf_content = create_minimal_pdf()
+
+    with patch("academic_paper.server.extract_text") as mock_extract:
+        mock_extract.return_value = [{"page": 1, "text": "Dup content"}]
+        first = client.post(
+            "/papers/ingest",
+            files={"file": ("dup.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert first.status_code == 202
+
+        second = client.post(
+            "/papers/ingest",
+            files={"file": ("dup.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert second.status_code == 409
+        assert "already ingested" in second.json()["detail"].lower()
+
+
+def test_ingest_async_job_failed_on_no_text(client):
+    """When extraction yields no text, the async job ends 'failed' and paper is 'failed'."""
+    pdf_content = create_minimal_pdf()
+
+    with patch("academic_paper.server.extract_text") as mock_extract:
+        mock_extract.return_value = []
+        response = client.post(
+            "/papers/ingest",
+            files={"file": ("notext.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+
+    assert response.status_code == 202
+    body = response.json()
+    job = client.get(f"/jobs/{body['job_id']}").json()
+    assert job["status"] == "failed"
+    assert job["errors"]
+
+    paper = client.get(f"/papers/{body['paper_id']}").json()
+    assert paper["status"] == "failed"
 
 
 def test_list_papers_pagination(client, temp_db):
@@ -537,7 +606,7 @@ def test_ingest_unexpected_exception(client):
 
     with patch("academic_paper.server.hash_file", side_effect=RuntimeError("disk error")):
         response = client.post(
-            "/papers/ingest",
+            "/papers/ingest?wait=true",
             files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
         )
     assert response.status_code == 400
@@ -548,7 +617,7 @@ def test_ingest_file_too_large_returns_413(client):
     """POST /papers/ingest returns 413 when file exceeds max_upload_mb limit."""
     with patch.object(settings, "max_upload_mb", 0):
         response = client.post(
-            "/papers/ingest",
+            "/papers/ingest?wait=true",
             files={"file": ("big.pdf", BytesIO(b"X"), "application/pdf")},
         )
     assert response.status_code == 413
@@ -566,7 +635,7 @@ def test_ingest_file_at_limit_is_accepted(client):
     ):
         mock_extract.return_value = [{"page": 1, "text": "Test content"}]
         response = client.post(
-            "/papers/ingest",
+            "/papers/ingest?wait=true",
             files={"file": ("ok.pdf", BytesIO(pdf_content), "application/pdf")},
         )
     assert response.status_code == 200

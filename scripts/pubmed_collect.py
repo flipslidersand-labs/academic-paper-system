@@ -15,13 +15,13 @@ Exit codes:
 """
 
 import argparse
-import io
 import json
 import sys
 import time
 import xml.etree.ElementTree as ET
 
 import httpx
+from ingest_client import submit_and_wait
 
 ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
@@ -136,9 +136,9 @@ def ingest_paper(
     paper: dict,
     api_url: str,
     pdf_timeout: int = 60,
-    ingest_timeout: int = 120,
+    poll_timeout: int = 300,
 ) -> dict:
-    """Download PDF from PMC and POST to /papers/ingest."""
+    """Download the PDF from PMC and submit it to the async /papers/ingest job."""
     pmc_id = paper["pmc_id"]
     pdf_url = PMC_PDF_URL.format(pmc_id=pmc_id)
     pdf_resp = httpx.get(pdf_url, timeout=pdf_timeout, follow_redirects=True)
@@ -146,24 +146,20 @@ def ingest_paper(
     if "pdf" not in pdf_resp.headers.get("content-type", "").lower():
         raise ValueError(f"Not a PDF (content-type: {pdf_resp.headers.get('content-type')})")
 
-    resp = client.post(
-        f"{api_url}/papers/ingest",
-        files={"file": (f"pmc_{pmc_id}.pdf", io.BytesIO(pdf_resp.content), "application/pdf")},
-        data={
+    return submit_and_wait(
+        client,
+        api_url,
+        f"pmc_{pmc_id}.pdf",
+        pdf_resp.content,
+        {
             "title": paper["title"],
             "authors": json.dumps(paper["authors"]),
             "categories": json.dumps(paper["categories"]),
             "published_date": paper["pub_date"] or "",
             "source": "pubmed",
         },
-        timeout=ingest_timeout,
+        poll_timeout=poll_timeout,
     )
-    if resp.status_code == 409:
-        return {"status": "duplicate"}
-    resp.raise_for_status()
-    data = resp.json()
-    data["status"] = "ingested"
-    return data
 
 
 def main() -> None:
@@ -187,11 +183,11 @@ def main() -> None:
         help="academic-paper-system API base URL",
     )
     parser.add_argument(
-        "--ingest-timeout",
+        "--poll-timeout",
         type=int,
-        default=120,
+        default=300,
         metavar="SEC",
-        help="Timeout (s) for the /papers/ingest POST (default: 120)",
+        help="Max seconds to wait for each ingest job to finish (default: 300)",
     )
     parser.add_argument(
         "--api-key",
@@ -237,7 +233,7 @@ def main() -> None:
             pmc_id = paper["pmc_id"]
             try:
                 time.sleep(0.34)  # respect rate limit
-                result = ingest_paper(client, paper, args.api_url, ingest_timeout=args.ingest_timeout)
+                result = ingest_paper(client, paper, args.api_url, poll_timeout=args.poll_timeout)
                 status = result["status"]
                 counts[status] = counts.get(status, 0) + 1
                 label = "OK  " if status == "ingested" else "SKIP"
