@@ -306,13 +306,33 @@ def get_chunks(conn: sqlite3.Connection, paper_id: int) -> list[dict]:
     return [dict(row) for row in cursor.fetchall()]
 
 
+def escape_fts5_query(query: str) -> str:
+    """Quote each whitespace-separated token as an FTS5 string literal.
+
+    Wrapping every token in double quotes (with any internal ``"`` doubled)
+    makes FTS5 treat it as a literal term, so user input can't inject
+    operators (AND/OR/NEAR/``*``, ``column:`` filters) or trigger fts5 syntax
+    errors via unbalanced quotes. Multi-word input keeps its implicit-AND
+    semantics. Returns ``'""'`` (matches nothing) for blank input.
+    """
+    tokens = query.split()
+    if not tokens:
+        return '""'
+    return " ".join('"' + token.replace('"', '""') + '"' for token in tokens)
+
+
 def search_fts(
     conn: sqlite3.Connection,
     query: str,
     limit: int = 10,
     paper_id: int | None = None,
 ) -> list[dict]:
-    """Search chunks using FTS5 with BM25 ranking."""
+    """Search chunks using FTS5 with BM25 ranking.
+
+    The query is escaped via :func:`escape_fts5_query` before being passed to
+    ``MATCH`` so arbitrary user input is treated as literal terms.
+    """
+    match_query = escape_fts5_query(query)
     cursor = conn.cursor()
     if paper_id is None:
         cursor.execute(
@@ -324,7 +344,7 @@ def search_fts(
             ORDER BY rank
             LIMIT ?
         """,
-            (query, limit),
+            (match_query, limit),
         )
     else:
         cursor.execute(
@@ -336,7 +356,7 @@ def search_fts(
             ORDER BY rank
             LIMIT ?
         """,
-            (query, paper_id, limit),
+            (match_query, paper_id, limit),
         )
     return [dict(row) for row in cursor.fetchall()]
 

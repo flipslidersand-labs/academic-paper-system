@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from academic_paper.db import (
+    escape_fts5_query,
     get_connection,
     init_db,
     save_chunks,
@@ -180,4 +181,74 @@ def test_fts_search_no_match(temp_db):
     assert len(results) == 0
     assert isinstance(results, list)
 
+    conn.close()
+
+
+def test_escape_fts5_query_quotes_tokens():
+    """Each token is wrapped as an FTS5 string literal; internal quotes doubled."""
+    assert escape_fts5_query("machine learning") == '"machine" "learning"'
+    assert escape_fts5_query('say "hi"') == '"say" """hi"""'
+    assert escape_fts5_query("   ") == '""'
+
+
+@pytest.mark.parametrize(
+    "bad_query",
+    [
+        'unbalanced "quote',
+        "NEAR(term",
+        "text:column",
+        "*leadingstar",
+        "a AND b OR c",
+        "foo^bar (baz",
+    ],
+)
+def test_fts_search_handles_special_chars_without_error(temp_db, bad_query):
+    """FTS5-special input must not raise a syntax error; it is treated literally."""
+    init_db(temp_db)
+    conn = get_connection(temp_db)
+    paper_id = save_paper(conn, file_name="t.pdf", file_hash="h-special", title="T")
+    save_chunks(
+        conn,
+        paper_id,
+        [
+            {
+                "text": "ordinary machine learning content",
+                "page_start": 1,
+                "page_end": 1,
+                "chunk_index": 0,
+                "qdrant_id": "q-sp-0",
+                "token_count": 4,
+            }
+        ],
+    )
+
+    # Must not raise sqlite3.OperationalError (fts5 syntax error)
+    results = search_fts(conn, bad_query, limit=10)
+    assert isinstance(results, list)
+    conn.close()
+
+
+def test_fts_operator_injection_is_neutralized(temp_db):
+    """'a OR b' is matched as literal tokens, not an FTS OR, so a doc with only 'b' misses."""
+    init_db(temp_db)
+    conn = get_connection(temp_db)
+    paper_id = save_paper(conn, file_name="t.pdf", file_hash="h-or", title="T")
+    save_chunks(
+        conn,
+        paper_id,
+        [
+            {
+                "text": "alpha content only",
+                "page_start": 1,
+                "page_end": 1,
+                "chunk_index": 0,
+                "qdrant_id": "q-or-0",
+                "token_count": 3,
+            }
+        ],
+    )
+
+    # As a real FTS OR this would match (doc has 'alpha'); escaped it needs BOTH literals.
+    results = search_fts(conn, "alpha OR zzzmissing", limit=10)
+    assert results == []
     conn.close()

@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from academic_paper.config import settings
-from academic_paper.db import get_chunks, get_connection, init_db, save_paper
+from academic_paper.db import get_chunks, get_connection, init_db, save_chunks, save_paper
 from academic_paper.server import app
 
 
@@ -639,3 +639,40 @@ def test_ingest_file_at_limit_is_accepted(client):
             files={"file": ("ok.pdf", BytesIO(pdf_content), "application/pdf")},
         )
     assert response.status_code == 200
+
+
+def test_search_keyword_returns_real_chunk_index(client, temp_db):
+    """Regression (#131): keyword mode must return the real chunk_index, not always 0."""
+    conn = get_connection(temp_db)
+    paper_id = save_paper(conn, "kw.pdf", "hash-kw-idx", title="KW")
+    save_chunks(
+        conn,
+        paper_id,
+        [
+            {
+                "text": "intro alpha term",
+                "page_start": 1,
+                "page_end": 1,
+                "chunk_index": 0,
+                "qdrant_id": "kw-0",
+                "token_count": 3,
+            },
+            {
+                "text": "later alpha section appears again",
+                "page_start": 5,
+                "page_end": 5,
+                "chunk_index": 7,
+                "qdrant_id": "kw-1",
+                "token_count": 5,
+            },
+        ],
+    )
+    conn.close()
+
+    resp = client.get("/search?q=alpha&mode=keyword&limit=10")
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    by_qdrant = {r["chunk_index"]: r for r in results}
+    # Both chunks match "alpha"; the second must report chunk_index 7 (not 0).
+    assert {r["chunk_index"] for r in results} == {0, 7}
+    assert by_qdrant[7]["page_start"] == 5

@@ -532,15 +532,19 @@ async def search(
             _kw_ids = [r["chunk_id"] for r in fts_results]
             if _kw_ids:
                 _ph = ",".join("?" * len(_kw_ids))
-                _ps_rows = cursor.execute(f"SELECT id, page_start FROM chunks WHERE id IN ({_ph})", _kw_ids).fetchall()
-                _kw_page_map = {r["id"]: r["page_start"] for r in _ps_rows}
+                _ps_rows = cursor.execute(
+                    f"SELECT id, page_start, chunk_index FROM chunks WHERE id IN ({_ph})", _kw_ids
+                ).fetchall()
+                _kw_meta_map = {r["id"]: r for r in _ps_rows}
             else:
-                _kw_page_map = {}
+                _kw_meta_map = {}
             results = []
             for rank, result in enumerate(fts_results, start=1):
                 chunk_id = result["chunk_id"]
                 paper_id_res = result["paper_id"]
-                page_start = _kw_page_map.get(chunk_id)
+                meta = _kw_meta_map.get(chunk_id)
+                page_start = meta["page_start"] if meta else None
+                chunk_index = meta["chunk_index"] if meta else 0
                 full_text = result["text"]
                 snippet = full_text[:snippet_length] if snippet_length > 0 else full_text
                 results.append(
@@ -548,7 +552,7 @@ async def search(
                         "rank": rank,
                         "score": result["rank"],
                         "paper_id": paper_id_res,
-                        "chunk_index": result.get("chunk_index", 0),
+                        "chunk_index": chunk_index,
                         "page_start": page_start,
                         "snippet": snippet,
                     }
