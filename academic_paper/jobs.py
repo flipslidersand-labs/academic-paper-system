@@ -18,6 +18,7 @@ class Job:
     errors: list[str] = field(default_factory=list)
     started_at: float = field(default_factory=time.time)
     finished_at: float | None = None
+    result: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -29,6 +30,7 @@ class Job:
             "errors": self.errors[:10],
             "started_at": self.started_at,
             "finished_at": self.finished_at,
+            "result": self.result,
         }
 
 

@@ -161,7 +161,7 @@ def test_ingest_with_metadata(client):
     with patch("academic_paper.server.extract_text") as mock_extract:
         mock_extract.return_value = [{"page": 1, "text": "Test content for metadata"}]
         resp = client.post(
-            "/papers/ingest",
+            "/papers/ingest?wait=true",
             files={"file": ("meta.pdf", BytesIO(_make_minimal_pdf()), "application/pdf")},
             data={
                 "title": "My Paper",
