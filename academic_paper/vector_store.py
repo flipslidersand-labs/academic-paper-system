@@ -23,7 +23,7 @@ class QdrantStore:
         self.url = url or settings.qdrant_url
         self.api_key = api_key or settings.qdrant_api_key or None
         self.collection = collection or settings.qdrant_collection
-        self.client = QdrantClient(url=self.url, api_key=self.api_key)
+        self.client = QdrantClient(url=self.url, api_key=self.api_key, timeout=settings.qdrant_timeout)
 
     def ensure_collection(self) -> None:
         """コレクションが存在しなければ作成（冪等）
