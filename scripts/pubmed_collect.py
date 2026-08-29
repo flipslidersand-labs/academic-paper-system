@@ -26,6 +26,8 @@ import httpx
 ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 PMC_PDF_URL = "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{pmc_id}/pdf/"
+# /papers/ingest is synchronous (extract→chunk→embed→upsert); large PDFs take ~42s (#127)
+INGEST_TIMEOUT = 120
 
 
 def fetch_pmc_ids(
@@ -136,6 +138,7 @@ def ingest_paper(
     paper: dict,
     api_url: str,
     pdf_timeout: int = 60,
+    ingest_timeout: int = INGEST_TIMEOUT,
 ) -> dict:
     """Download PDF from PMC and POST to /papers/ingest."""
     pmc_id = paper["pmc_id"]
@@ -155,7 +158,7 @@ def ingest_paper(
             "published_date": paper["pub_date"] or "",
             "source": "pubmed",
         },
-        timeout=30,
+        timeout=ingest_timeout,
     )
     if resp.status_code == 409:
         return {"status": "duplicate"}
@@ -195,6 +198,13 @@ def main() -> None:
         default=None,
         help="Write run summary JSON to this path",
     )
+    parser.add_argument(
+        "--ingest-timeout",
+        type=int,
+        default=INGEST_TIMEOUT,
+        metavar="SEC",
+        help=f"Timeout for POST /papers/ingest in seconds (default: {INGEST_TIMEOUT})",
+    )
     args = parser.parse_args()
 
     print(f"[pubmed] terms={args.terms} max={args.max_results} api={args.api_url}")
@@ -229,7 +239,7 @@ def main() -> None:
             pmc_id = paper["pmc_id"]
             try:
                 time.sleep(0.34)  # respect rate limit
-                result = ingest_paper(client, paper, args.api_url)
+                result = ingest_paper(client, paper, args.api_url, ingest_timeout=args.ingest_timeout)
                 status = result["status"]
                 counts[status] = counts.get(status, 0) + 1
                 label = "OK  " if status == "ingested" else "SKIP"

@@ -27,6 +27,8 @@ import time
 import httpx
 
 OPENALEX_API = "https://api.openalex.org/works"
+# /papers/ingest is synchronous (extract→chunk→embed→upsert); large PDFs take ~42s (#127)
+INGEST_TIMEOUT = 120
 FIELDS = ",".join(
     [
         "id",
@@ -160,6 +162,7 @@ def ingest_paper(
     work: dict,
     api_url: str,
     pdf_timeout: int = 60,
+    ingest_timeout: int = INGEST_TIMEOUT,
 ) -> dict:
     """Download PDF and POST to /papers/ingest."""
     pdf_url = work["_pdf_url"]
@@ -194,7 +197,7 @@ def ingest_paper(
             "published_date": pub_date or "",
             "source": "openalex",
         },
-        timeout=30,
+        timeout=ingest_timeout,
     )
     if resp.status_code == 409:
         return {"status": "duplicate"}
@@ -243,6 +246,13 @@ def main() -> None:
         action="store_true",
         help="Fetch and list papers without ingesting",
     )
+    parser.add_argument(
+        "--ingest-timeout",
+        type=int,
+        default=INGEST_TIMEOUT,
+        metavar="SEC",
+        help=f"Timeout for POST /papers/ingest in seconds (default: {INGEST_TIMEOUT})",
+    )
     args = parser.parse_args()
 
     date_range = ""
@@ -275,7 +285,7 @@ def main() -> None:
             label = f"arXiv:{arxiv_id}" if arxiv_id else work_id[:12]
             title_short = (work.get("title") or "")[:50]
             try:
-                result = ingest_paper(client, work, args.api_url)
+                result = ingest_paper(client, work, args.api_url, ingest_timeout=args.ingest_timeout)
                 status = result["status"]
                 counts[status] = counts.get(status, 0) + 1
                 tag = "OK  " if status == "ingested" else "SKIP"

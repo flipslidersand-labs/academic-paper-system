@@ -31,6 +31,8 @@ import httpx
 
 S2_API = "https://api.semanticscholar.org/graph/v1/paper/search"
 S2_FIELDS = "paperId,title,authors,year,publicationDate,openAccessPdf,fieldsOfStudy"
+# /papers/ingest is synchronous (extract→chunk→embed→upsert); large PDFs take ~42s (#127)
+INGEST_TIMEOUT = 120
 
 
 def fetch_papers(
@@ -108,6 +110,7 @@ def ingest_paper(
     paper: dict,
     api_url: str,
     pdf_timeout: int = 60,
+    ingest_timeout: int = INGEST_TIMEOUT,
 ) -> dict:
     """Download PDF and POST to /papers/ingest."""
     pdf_url = paper["openAccessPdf"]["url"]
@@ -132,7 +135,7 @@ def ingest_paper(
             "published_date": pub_date or "",
             "source": "semantic_scholar",
         },
-        timeout=30,
+        timeout=ingest_timeout,
     )
     if resp.status_code == 409:
         return {"status": "duplicate"}
@@ -191,6 +194,13 @@ def main() -> None:
         default=None,
         help="Write run summary JSON to this path",
     )
+    parser.add_argument(
+        "--ingest-timeout",
+        type=int,
+        default=INGEST_TIMEOUT,
+        metavar="SEC",
+        help=f"Timeout for POST /papers/ingest in seconds (default: {INGEST_TIMEOUT})",
+    )
     args = parser.parse_args()
 
     # --topics is deprecated; merge into --query if provided
@@ -225,7 +235,7 @@ def main() -> None:
         for paper in papers:
             s2_id = paper["paperId"]
             try:
-                result = ingest_paper(client, paper, args.api_url)
+                result = ingest_paper(client, paper, args.api_url, ingest_timeout=args.ingest_timeout)
                 status = result["status"]
                 counts[status] = counts.get(status, 0) + 1
                 label = "OK  " if status == "ingested" else "SKIP"

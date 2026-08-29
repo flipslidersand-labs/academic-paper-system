@@ -36,6 +36,8 @@ import httpx
 ARXIV_API = "https://export.arxiv.org/api/query"
 ARXIV_PDF_BASE = "https://arxiv.org/pdf"
 FETCH_FACTOR = 5  # multiply max_results when date-filtering to fill the target
+# /papers/ingest is synchronous (extract→chunk→embed→upsert); large PDFs take ~42s (#127)
+INGEST_TIMEOUT = 120
 
 
 def _date_to_arxiv(date_str: str, end_of_day: bool = False) -> str:
@@ -144,6 +146,7 @@ def ingest_paper(
     paper: dict,
     api_url: str,
     pdf_timeout: int = 60,
+    ingest_timeout: int = INGEST_TIMEOUT,
 ) -> dict:
     """Download PDF and POST to /papers/ingest with metadata."""
     pdf_resp = httpx.get(paper["pdf_url"], timeout=pdf_timeout, follow_redirects=True)
@@ -159,7 +162,7 @@ def ingest_paper(
             "published_date": paper["published_date"] or "",
             "source": "arxiv",
         },
-        timeout=30,
+        timeout=ingest_timeout,
     )
     if resp.status_code == 409:
         return {"status": "duplicate"}
@@ -220,6 +223,13 @@ def main() -> None:
         default=None,
         help="Write run summary JSON to this path (optional)",
     )
+    parser.add_argument(
+        "--ingest-timeout",
+        type=int,
+        default=INGEST_TIMEOUT,
+        metavar="SEC",
+        help=f"Timeout for POST /papers/ingest in seconds (default: {INGEST_TIMEOUT})",
+    )
     args = parser.parse_args()
 
     date_range = ""
@@ -247,7 +257,7 @@ def main() -> None:
         for paper in papers:
             arxiv_id = paper["arxiv_id"]
             try:
-                result = ingest_paper(client, paper, args.api_url)
+                result = ingest_paper(client, paper, args.api_url, ingest_timeout=args.ingest_timeout)
                 status = result["status"]
                 counts[status] = counts.get(status, 0) + 1
                 label = "OK  " if status == "ingested" else "SKIP"
