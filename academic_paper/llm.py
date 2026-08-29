@@ -32,8 +32,12 @@ class GeminiClient(BaseLLMClient):
         """
         self.api_key = api_key or settings.google_api_key
         from google import genai
+        from google.genai.types import HttpOptions
 
-        self.client = genai.Client(api_key=self.api_key)
+        self.client = genai.Client(
+            api_key=self.api_key,
+            http_options=HttpOptions(timeout=settings.gemini_timeout_ms),
+        )
 
     async def generate(self, prompt: str, system: str = "") -> str:
         """Generate text using Gemini API.
