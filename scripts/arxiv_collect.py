@@ -144,6 +144,7 @@ def ingest_paper(
     paper: dict,
     api_url: str,
     pdf_timeout: int = 60,
+    ingest_timeout: int = 120,
 ) -> dict:
     """Download PDF and POST to /papers/ingest with metadata."""
     pdf_resp = httpx.get(paper["pdf_url"], timeout=pdf_timeout, follow_redirects=True)
@@ -159,7 +160,7 @@ def ingest_paper(
             "published_date": paper["published_date"] or "",
             "source": "arxiv",
         },
-        timeout=30,
+        timeout=ingest_timeout,
     )
     if resp.status_code == 409:
         return {"status": "duplicate"}
@@ -216,6 +217,13 @@ def main() -> None:
         help="academic-paper-system API base URL (default: http://localhost:8020)",
     )
     parser.add_argument(
+        "--ingest-timeout",
+        type=int,
+        default=120,
+        metavar="SEC",
+        help="Timeout (s) for the /papers/ingest POST (default: 120)",
+    )
+    parser.add_argument(
         "--summary-file",
         default=None,
         help="Write run summary JSON to this path (optional)",
@@ -247,7 +255,7 @@ def main() -> None:
         for paper in papers:
             arxiv_id = paper["arxiv_id"]
             try:
-                result = ingest_paper(client, paper, args.api_url)
+                result = ingest_paper(client, paper, args.api_url, ingest_timeout=args.ingest_timeout)
                 status = result["status"]
                 counts[status] = counts.get(status, 0) + 1
                 label = "OK  " if status == "ingested" else "SKIP"

@@ -136,6 +136,7 @@ def ingest_paper(
     paper: dict,
     api_url: str,
     pdf_timeout: int = 60,
+    ingest_timeout: int = 120,
 ) -> dict:
     """Download PDF from PMC and POST to /papers/ingest."""
     pmc_id = paper["pmc_id"]
@@ -155,7 +156,7 @@ def ingest_paper(
             "published_date": paper["pub_date"] or "",
             "source": "pubmed",
         },
-        timeout=30,
+        timeout=ingest_timeout,
     )
     if resp.status_code == 409:
         return {"status": "duplicate"}
@@ -184,6 +185,13 @@ def main() -> None:
         "--api-url",
         default="http://localhost:8020",
         help="academic-paper-system API base URL",
+    )
+    parser.add_argument(
+        "--ingest-timeout",
+        type=int,
+        default=120,
+        metavar="SEC",
+        help="Timeout (s) for the /papers/ingest POST (default: 120)",
     )
     parser.add_argument(
         "--api-key",
@@ -229,7 +237,7 @@ def main() -> None:
             pmc_id = paper["pmc_id"]
             try:
                 time.sleep(0.34)  # respect rate limit
-                result = ingest_paper(client, paper, args.api_url)
+                result = ingest_paper(client, paper, args.api_url, ingest_timeout=args.ingest_timeout)
                 status = result["status"]
                 counts[status] = counts.get(status, 0) + 1
                 label = "OK  " if status == "ingested" else "SKIP"
