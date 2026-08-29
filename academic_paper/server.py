@@ -212,18 +212,36 @@ async def ingest_paper(
     Raises:
         HTTPException 409: File already ingested.
         HTTPException 413: File exceeds the max upload size.
+        HTTPException 415: File is not a PDF (missing %PDF- magic bytes).
         HTTPException 400: Extraction / chunking / embedding error (wait=true only).
     """
     tmp_path: str | None = None
     keep_tmp = False
     try:
+        max_bytes = settings.max_upload_mb * 1024 * 1024
+        size_detail = f"File too large (max {settings.max_upload_mb} MB)"
+        # Reject early when the multipart part already declares an oversized length,
+        # before buffering anything.
+        if file.size is not None and file.size > max_bytes:
+            raise HTTPException(status_code=413, detail=size_detail)
+
+        # Stream to disk in 1 MiB chunks, enforcing the size cap as bytes arrive
+        # so an oversized body is cut off mid-transfer instead of being fully
+        # buffered in memory first.
+        header = b""
+        received = 0
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            content = await file.read()
-            max_bytes = settings.max_upload_mb * 1024 * 1024
-            if len(content) > max_bytes:
-                raise HTTPException(status_code=413, detail=f"File too large (max {settings.max_upload_mb} MB)")
-            tmp.write(content)
             tmp_path = tmp.name
+            while chunk := await file.read(1 << 20):
+                received += len(chunk)
+                if received > max_bytes:
+                    raise HTTPException(status_code=413, detail=size_detail)
+                if len(header) < 5:
+                    header += chunk[: 5 - len(header)]
+                tmp.write(chunk)
+
+        if not header.startswith(b"%PDF-"):
+            raise HTTPException(status_code=415, detail="Not a PDF file (missing %PDF- header)")
 
         file_hash = hash_file(tmp_path)
         file_name = file.filename or "unknown.pdf"
