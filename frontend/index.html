@@ -260,12 +260,16 @@
         async openSummary(paperId) {
           this.modal = { open: true, loading: true, summary: null, title: '', error: '' };
           try {
-            const [pr, sr] = await Promise.all([
+            const [pr, cached] = await Promise.all([
               fetch('/papers/' + paperId),
               fetch('/papers/' + paperId + '/summary'),
             ]);
             const paper = await pr.json();
             this.modal.title = paper.title || paper.file_name;
+            // Cache miss → generation moved to POST (#140)
+            const sr = cached.status === 404 && pr.ok
+              ? await fetch('/papers/' + paperId + '/summary', { method: 'POST' })
+              : cached;
             if (sr.status === 503) {
               this.modal.error = 'LLM 未設定のため要約できません（LLM を設定して再試行してください）';
               return;
