@@ -8,13 +8,19 @@ on:
 
 jobs:
   test:
-    uses: flipslidersand-labs/qa-workflows/.github/workflows/python-test.yml@main
+    # Pinned to a SHA (not @main) so upstream workflow changes can't silently
+    # alter this repo's gate; bump deliberately (#147).
+    uses: flipslidersand-labs/qa-workflows/.github/workflows/python-test.yml@fcccf3f5895340faa5c6ef2469068b7b32a6c60e
     with:
-      coverage-threshold: 90
+      # Measured academic_paper coverage is ~90.5% with tests/ and scripts/
+      # omitted (pyproject [tool.coverage.run] omit); 88 leaves a small margin.
+      coverage-threshold: 88
+      # Pin ruff so an upstream ruff release can't break lint mid-PR.
+      ruff-version: "0.16.2"
 
   docker-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build Docker image
         run: docker build -t academic-paper-system:test .

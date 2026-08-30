@@ -54,9 +54,12 @@ Repository = "https://github.com/flipslidersand/academic-paper-system.git"
 [tool.hatch.build.targets.wheel]
 packages = ["academic_paper"]
 
+# Coverage flags live in CI (qa-workflows python-test passes --cov) — keeping
+# them out of addopts avoids double --cov specs whose union polluted the
+# measured set with tests/ and scripts/ (#147).
+# Local coverage: pytest --cov=academic_paper --cov-report=html
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=academic_paper --cov-report=html --cov-report=term-missing"
 
 [tool.ruff]
 line-length = 120
@@ -66,9 +69,12 @@ target-version = "py312"
 select = ["E", "F", "W", "I", "N"]
 ignore = ["E501"]  # line-too-long is handled by formatter
 
+# CI passes --cov=. (source is then overridden), so omit is what actually
+# keeps tests/ (inflating) and scripts/ (deflating) out of the denominator.
 [tool.coverage.run]
 branch = true
 source = ["academic_paper"]
+omit = ["tests/*", "scripts/*", ".venv/*", "htmlcov/*", "frontend/*"]
 
 [tool.coverage.report]
 precision = 2
