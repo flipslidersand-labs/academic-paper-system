@@ -21,6 +21,7 @@ from academic_paper.chunker import chunk_pages
 from academic_paper.config import settings
 from academic_paper.db import (
     db_connection,
+    delete_paper,
     get_all_papers_for_scoring,
     get_connection,
     get_paper,
@@ -191,9 +192,18 @@ async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_na
     with tracer.start_as_current_span("qdrant.upsert"):
         app.state.vector_store.upsert(points)
 
-    with db_connection(settings.academic_db) as conn:
-        save_chunks(conn, paper_id, chunks_list)
-        update_paper_status(conn, paper_id, "indexed")
+    try:
+        with db_connection(settings.academic_db) as conn:
+            save_chunks(conn, paper_id, chunks_list)
+            update_paper_status(conn, paper_id, "indexed")
+    except Exception:
+        # Qdrant upsert succeeded but DB write failed — compensate by deleting
+        # the orphaned vectors so the paper can be re-ingested (#145).
+        try:
+            app.state.vector_store.delete_by_paper_id(paper_id)
+        except Exception as qdrant_exc:
+            logger.error("Qdrant compensation delete failed for paper_id=%s: %s", paper_id, qdrant_exc)
+        raise
 
     return len(chunks_list)
 
@@ -288,9 +298,15 @@ async def ingest_paper(
 
         with db_connection(settings.academic_db) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT id FROM papers WHERE file_hash = ?", (file_hash,))
-            if cursor.fetchone():
-                raise HTTPException(status_code=409, detail="File already ingested")
+            # Only 409 when already successfully indexed; failed rows are removed
+            # so the same PDF can be re-uploaded after a partial failure (#145).
+            cursor.execute("SELECT id, status FROM papers WHERE file_hash = ?", (file_hash,))
+            existing = cursor.fetchone()
+            if existing:
+                if existing["status"] == "indexed":
+                    raise HTTPException(status_code=409, detail="File already ingested")
+                # 'failed' / 'pending' row — purge and re-ingest
+                delete_paper(conn, existing["id"])
 
             paper_id = save_paper(
                 conn,
@@ -310,6 +326,12 @@ async def ingest_paper(
                 logger.exception("Synchronous ingest failed for paper_id=%s", paper_id)
                 with db_connection(settings.academic_db) as conn:
                     update_paper_status(conn, paper_id, "failed")
+                # _ingest_pipeline already compensates Qdrant on save_chunks failure;
+                # compensate here for embed/upsert errors that leave no Qdrant data.
+                try:
+                    app.state.vector_store.delete_by_paper_id(paper_id)
+                except Exception:
+                    pass
                 raise HTTPException(status_code=400, detail=f"Ingest error: {str(e)}")
             return {
                 "paper_id": paper_id,
@@ -710,7 +732,9 @@ async def search(
                         vec_result["payload"]["chunk_id"] = _qid_to_cid[vec_result["id"]]
 
             merged = rrf_merge(fts_results, vector_results)
-            _merged_slice = merged[:limit]
+            # Drop orphaned Qdrant results that have no chunk_id — these can arise
+            # from a partial ingest failure before compensation runs (#145).
+            _merged_slice = [r for r in merged[:limit] if "chunk_id" in r]
             _merged_ids = [r["chunk_id"] for r in _merged_slice]
             if _merged_ids:
                 _ph = ",".join("?" * len(_merged_ids))
