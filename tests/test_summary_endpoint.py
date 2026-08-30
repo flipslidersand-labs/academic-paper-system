@@ -64,7 +64,7 @@ def test_summary_404_for_missing_paper(client):
 
 
 def test_summary_503_when_no_llm(client, temp_db):
-    """Test GET /papers/{paper_id}/summary returns 503 when LLM not configured."""
+    """Test POST /papers/{paper_id}/summary returns 503 when LLM not configured."""
     conn = get_connection(temp_db)
     paper_id = save_paper(conn, "test.pdf", "hash123")
     save_chunks(conn, paper_id, _make_chunks())
@@ -73,13 +73,13 @@ def test_summary_503_when_no_llm(client, temp_db):
     client.app.state.llm = None
     client.app.state.summarizer = None
 
-    response = client.get(f"/papers/{paper_id}/summary")
+    response = client.post(f"/papers/{paper_id}/summary")
     assert response.status_code == 503
     assert "not configured" in response.json()["detail"].lower()
 
 
 def test_summary_returns_structured_response(client, temp_db):
-    """Test GET /papers/{paper_id}/summary returns structured response."""
+    """Test POST /papers/{paper_id}/summary returns structured response."""
     conn = get_connection(temp_db)
     paper_id = save_paper(conn, "test.pdf", "hash123")
     save_chunks(conn, paper_id, _make_chunks())
@@ -100,7 +100,7 @@ def test_summary_returns_structured_response(client, temp_db):
     client.app.state.llm = mock_llm
     client.app.state.summarizer = mock_summarizer
 
-    response = client.get(f"/papers/{paper_id}/summary")
+    response = client.post(f"/papers/{paper_id}/summary")
     assert response.status_code == 200
     data = response.json()
     assert data["paper_id"] == paper_id
@@ -114,7 +114,7 @@ def test_summary_returns_structured_response(client, temp_db):
 
 
 def test_summary_cached_on_second_call(client, temp_db):
-    """Test GET /papers/{paper_id}/summary returns cached=True on second call."""
+    """Test POST then GET: generation caches, GET serves cached=True (#140)."""
     conn = get_connection(temp_db)
     paper_id = save_paper(conn, "test.pdf", "hash123")
     save_chunks(conn, paper_id, _make_chunks())
@@ -135,10 +135,11 @@ def test_summary_cached_on_second_call(client, temp_db):
     client.app.state.llm = mock_llm
     client.app.state.summarizer = mock_summarizer
 
-    response1 = client.get(f"/papers/{paper_id}/summary")
+    response1 = client.post(f"/papers/{paper_id}/summary")
     assert response1.status_code == 200
     assert response1.json()["cached"] is False
 
+    # GET now serves the cached summary without generating (#140)
     response2 = client.get(f"/papers/{paper_id}/summary")
     assert response2.status_code == 200
     data2 = response2.json()
@@ -151,7 +152,7 @@ def test_summary_cached_on_second_call(client, temp_db):
 
 
 def test_summary_force_regenerate(client, temp_db):
-    """Test GET /papers/{paper_id}/summary?force=true bypasses cache."""
+    """Test POST /papers/{paper_id}/summary?force=true bypasses cache."""
     conn = get_connection(temp_db)
     paper_id = save_paper(conn, "force.pdf", "hash_force")
     save_chunks(
@@ -186,19 +187,19 @@ def test_summary_force_regenerate(client, temp_db):
     client.app.state.summarizer = mock_summarizer
 
     # First call — generates and caches
-    r1 = client.get(f"/papers/{paper_id}/summary")
+    r1 = client.post(f"/papers/{paper_id}/summary")
     assert r1.status_code == 200
     assert r1.json()["cached"] is False
 
     # Second call with force=true — must regenerate, not serve cache
-    r2 = client.get(f"/papers/{paper_id}/summary?force=true")
+    r2 = client.post(f"/papers/{paper_id}/summary?force=true")
     assert r2.status_code == 200
     assert r2.json()["cached"] is False
     assert mock_summarizer.summarize.call_count == 2
 
 
 def test_summary_ollama_model_naming(client, temp_db):
-    """Test GET /papers/{paper_id}/summary returns 'ollama/<model>' for OllamaClient."""
+    """Test POST /papers/{paper_id}/summary returns 'ollama/<model>' for OllamaClient."""
     conn = get_connection(temp_db)
     paper_id = save_paper(conn, "ollama.pdf", "hash_ollama")
     save_chunks(
@@ -233,13 +234,13 @@ def test_summary_ollama_model_naming(client, temp_db):
     client.app.state.llm = mock_llm
     client.app.state.summarizer = mock_summarizer
 
-    response = client.get(f"/papers/{paper_id}/summary")
+    response = client.post(f"/papers/{paper_id}/summary")
     assert response.status_code == 200
     assert response.json()["model"] == "ollama/qwen2.5:7b"
 
 
 def test_summary_error_returns_400(client, temp_db):
-    """Test GET /papers/{paper_id}/summary returns 400 when summarization raises."""
+    """Test POST /papers/{paper_id}/summary returns 400 when summarization raises."""
     conn = get_connection(temp_db)
     paper_id = save_paper(conn, "err.pdf", "hash_err")
     save_chunks(
@@ -265,13 +266,13 @@ def test_summary_error_returns_400(client, temp_db):
     client.app.state.llm = mock_llm
     client.app.state.summarizer = mock_summarizer
 
-    response = client.get(f"/papers/{paper_id}/summary")
+    response = client.post(f"/papers/{paper_id}/summary")
     assert response.status_code == 400
     assert "Summarization error" in response.json()["detail"]
 
 
 def test_summary_503_when_summarizer_none(client, temp_db):
-    """Test GET /papers/{paper_id}/summary returns 503 when LLM is set but summarizer is None."""
+    """Test POST /papers/{paper_id}/summary returns 503 when LLM is set but summarizer is None."""
     conn = get_connection(temp_db)
     paper_id = save_paper(conn, "test.pdf", "hash_no_sum")
     save_chunks(conn, paper_id, _make_chunks())
@@ -280,6 +281,23 @@ def test_summary_503_when_summarizer_none(client, temp_db):
     client.app.state.llm = MagicMock()
     client.app.state.summarizer = None
 
-    response = client.get(f"/papers/{paper_id}/summary")
+    response = client.post(f"/papers/{paper_id}/summary")
     assert response.status_code == 503
     assert "Summarizer not initialized" in response.json()["detail"]
+
+
+def test_get_summary_cache_miss_404_no_generation(client, temp_db):
+    """Regression (#140): GET must not generate — cache miss is 404, summarizer untouched."""
+    conn = get_connection(temp_db)
+    paper_id = save_paper(conn, "nogen.pdf", "hash_nogen")
+    save_chunks(conn, paper_id, _make_chunks())
+    conn.close()
+
+    mock_summarizer = AsyncMock()
+    client.app.state.llm = MagicMock()
+    client.app.state.summarizer = mock_summarizer
+
+    response = client.get(f"/papers/{paper_id}/summary")
+    assert response.status_code == 404
+    assert "not generated yet" in response.json()["detail"].lower()
+    mock_summarizer.summarize.assert_not_called()

@@ -384,6 +384,19 @@ def test_get_paper_by_id_not_found(client):
     assert "not found" in response.json()["detail"].lower()
 
 
+def _mock_embedding_response(status_code: int) -> MagicMock:
+    """Build a mock httpx response whose raise_for_status honors status_code."""
+    import httpx as _httpx
+
+    mock_response = MagicMock()
+    mock_response.status_code = status_code
+    if status_code >= 400:
+        mock_response.raise_for_status.side_effect = _httpx.HTTPStatusError(
+            f"HTTP {status_code}", request=MagicMock(), response=mock_response
+        )
+    return mock_response
+
+
 def test_health_embedding_svc_degraded(client):
     """Test GET /health returns degraded when embedding-svc returns 5xx."""
     mock_client = MagicMock()
@@ -391,15 +404,28 @@ def test_health_embedding_svc_degraded(client):
     client.app.state.vector_store.client = mock_client
 
     with patch("academic_paper.server.httpx.AsyncClient") as mock_httpx:
-        mock_response = MagicMock()
-        mock_response.status_code = 503
-        mock_httpx.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
+        mock_httpx.return_value.__aenter__.return_value.get = AsyncMock(return_value=_mock_embedding_response(503))
 
         response = client.get("/health")
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "degraded"
         assert data["qdrant"] == "ok"
+        assert data["embedding_svc"] == "error"
+
+
+def test_health_embedding_svc_auth_failure_degraded(client):
+    """Regression (#142): a 401 from embedding-svc must report degraded, not ok."""
+    mock_client = MagicMock()
+    mock_client.get_collections.return_value = MagicMock(collections=[])
+    client.app.state.vector_store.client = mock_client
+
+    with patch("academic_paper.server.httpx.AsyncClient") as mock_httpx:
+        mock_httpx.return_value.__aenter__.return_value.get = AsyncMock(return_value=_mock_embedding_response(401))
+
+        response = client.get("/health")
+        data = response.json()
+        assert data["status"] == "degraded"
         assert data["embedding_svc"] == "error"
 
 

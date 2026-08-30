@@ -63,6 +63,20 @@ def _parse_list_field(value: str | None) -> list[str] | None:
     return [x.strip() for x in value.split(",") if x.strip()]
 
 
+async def _check_embedding_svc(timeout: float = 3.0) -> None:
+    """Probe embedding-svc /health with the API key; raise on any error status.
+
+    Shared by the startup probe and /health so both use the same criteria —
+    a 401/403 means ingest/search are down just as surely as a 5xx (#142).
+    """
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.get(
+            f"{settings.embedding_svc_url}/health",
+            headers={"X-API-Key": settings.embedding_api_key},
+        )
+        resp.raise_for_status()
+
+
 async def _probe_startup_health(app: FastAPI) -> None:
     """Probe Qdrant and embedding-svc at startup; log warnings on failure."""
     try:
@@ -75,12 +89,7 @@ async def _probe_startup_health(app: FastAPI) -> None:
         )
 
     try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
-            resp = await client.get(
-                f"{settings.embedding_svc_url}/health",
-                headers={"X-API-Key": settings.embedding_api_key},
-            )
-            resp.raise_for_status()
+        await _check_embedding_svc(timeout=2.0)
         logger.info("Startup probe OK: embedding-svc")
     except Exception:
         logger.warning(
@@ -104,8 +113,11 @@ async def lifespan(app: FastAPI):
         app.state.summarizer = RAGSummarizer(llm_client, app.state.vector_store, app.state.embedder)
     else:
         app.state.summarizer = None
-    asyncio.create_task(_probe_startup_health(app))
+    # Keep a reference so the task isn't garbage-collected mid-flight
+    # (documented asyncio pitfall), and cancel it on shutdown.
+    app.state.probe_task = asyncio.create_task(_probe_startup_health(app))
     yield
+    app.state.probe_task.cancel()
 
 
 app = FastAPI(title="Academic Paper System", lifespan=lifespan)
@@ -326,8 +338,37 @@ def get_paper_endpoint(paper_id: int):
 
 
 @app.get("/papers/{paper_id}/summary")
-async def get_summary_endpoint(paper_id: int, force: bool = Query(False)):
-    """Get summary of a paper (cached unless force=true)."""
+async def get_summary_endpoint(paper_id: int):
+    """Return the cached summary only. GET is safe/idempotent (#140):
+    crawler or monitoring access must never trigger LLM generation or DB
+    writes. Generation lives in POST /papers/{paper_id}/summary.
+    """
+    with db_connection(settings.academic_db) as conn:
+        paper = get_paper(conn, paper_id)
+        if paper is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
+
+        cached_summary = get_summary(conn, paper_id)
+        if cached_summary is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Summary not generated yet — POST /papers/{paper_id}/summary to generate",
+            )
+        return {
+            "paper_id": paper_id,
+            "model": cached_summary["model"],
+            "objective": cached_summary["objective"],
+            "method": cached_summary["method"],
+            "results": cached_summary["results"],
+            "limitations": cached_summary["limitations"],
+            "keywords": cached_summary["keywords"],
+            "cached": True,
+        }
+
+
+@app.post("/papers/{paper_id}/summary")
+async def generate_summary_endpoint(paper_id: int, force: bool = Query(False)):
+    """Generate the summary (cached result is returned unless force=true)."""
     with db_connection(settings.academic_db) as conn:
         paper = get_paper(conn, paper_id)
 
@@ -693,7 +734,7 @@ async def search(
 
 @app.get("/health")
 async def health():
-    """Qdrant / embedding-svc 痎通チェック"""
+    """Qdrant / embedding-svc 疎通チェック"""
     status = {"qdrant": "ok", "embedding_svc": "ok"}
     overall = "ok"
 
@@ -704,10 +745,7 @@ async def health():
         overall = "degraded"
 
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{settings.embedding_svc_url}/health")
-            if resp.status_code >= 500:
-                raise Exception()
+        await _check_embedding_svc()
     except Exception:
         status["embedding_svc"] = "error"
         overall = "degraded"
