@@ -765,3 +765,44 @@ def test_ingest_indexed_paper_still_409(client):
             files={"file": ("dup.pdf", BytesIO(pdf_content), "application/pdf")},
         )
         assert r2.status_code == 409
+
+
+def test_write_endpoints_require_api_key_when_configured(client, temp_db):
+    """Regression (#146): write endpoints return 401 when API_KEY is set and key missing."""
+    with patch.object(settings, "api_key", "secret-key"):
+        # No key → 401
+        r = client.post(
+            "/papers/ingest",
+            files={"file": ("a.pdf", BytesIO(create_minimal_pdf()), "application/pdf")},
+        )
+        assert r.status_code == 401
+
+        # Wrong key → 401
+        r2 = client.post(
+            "/papers/ingest",
+            files={"file": ("a.pdf", BytesIO(create_minimal_pdf()), "application/pdf")},
+            headers={"X-API-Key": "wrong"},
+        )
+        assert r2.status_code == 401
+
+        # Correct key → proceeds past auth (may fail later, but not 401)
+        with patch("academic_paper.server.extract_text") as mock_extract:
+            mock_extract.return_value = [{"page": 1, "text": "Auth test"}]
+            r3 = client.post(
+                "/papers/ingest?wait=true",
+                files={"file": ("b.pdf", BytesIO(create_minimal_pdf()), "application/pdf")},
+                headers={"X-API-Key": "secret-key"},
+            )
+        assert r3.status_code != 401
+
+
+def test_write_endpoints_pass_without_api_key_when_unconfigured(client):
+    """When API_KEY is empty (default), write endpoints accept requests without key."""
+    with patch.object(settings, "api_key", ""):
+        with patch("academic_paper.server.extract_text") as mock_extract:
+            mock_extract.return_value = [{"page": 1, "text": "No auth needed"}]
+            r = client.post(
+                "/papers/ingest?wait=true",
+                files={"file": ("c.pdf", BytesIO(create_minimal_pdf()), "application/pdf")},
+            )
+        assert r.status_code != 401
