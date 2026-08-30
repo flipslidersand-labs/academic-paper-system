@@ -7,10 +7,18 @@ from datetime import UTC, datetime
 
 
 def get_connection(db_path: str) -> sqlite3.Connection:
-    """Get SQLite connection with foreign keys enabled."""
+    """Get SQLite connection with foreign keys, WAL, and busy timeout enabled.
+
+    WAL lets readers proceed while a writer holds the lock, and busy_timeout
+    makes concurrent writers wait instead of failing immediately with
+    "database is locked" — important now that background ingest jobs hold
+    connections across awaits.
+    """
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 
@@ -92,6 +100,7 @@ def init_db(db_path: str) -> None:
         CREATE TABLE IF NOT EXISTS jobs (
             id TEXT PRIMARY KEY,
             status TEXT NOT NULL DEFAULT 'pending',
+            kind TEXT NOT NULL DEFAULT '',
             total INTEGER NOT NULL DEFAULT 0,
             processed INTEGER NOT NULL DEFAULT 0,
             failed INTEGER NOT NULL DEFAULT 0,
@@ -100,6 +109,11 @@ def init_db(db_path: str) -> None:
             finished_at REAL
         )
     """)
+
+    # Migration for databases created before the kind column existed.
+    cursor.execute("PRAGMA table_info(jobs)")
+    if "kind" not in [row[1] for row in cursor.fetchall()]:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN kind TEXT NOT NULL DEFAULT ''")
 
     cursor.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
@@ -484,21 +498,23 @@ def upsert_job(
     errors: list[str],
     started_at: float,
     finished_at: float | None,
+    kind: str = "",
 ) -> None:
     """Insert or update a job row."""
     conn.execute(
         """
-        INSERT INTO jobs (id, status, total, processed, failed, errors, started_at, finished_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO jobs (id, status, kind, total, processed, failed, errors, started_at, finished_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             status = excluded.status,
+            kind = excluded.kind,
             total = excluded.total,
             processed = excluded.processed,
             failed = excluded.failed,
             errors = excluded.errors,
             finished_at = excluded.finished_at
     """,
-        (job_id, status, total, processed, failed, json.dumps(errors), started_at, finished_at),
+        (job_id, status, kind, total, processed, failed, json.dumps(errors), started_at, finished_at),
     )
     conn.commit()
 
