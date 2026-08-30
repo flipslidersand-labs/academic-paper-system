@@ -3,13 +3,19 @@
 import json
 import logging
 import re
-import sqlite3
+
+from qdrant_client.http.exceptions import ApiException, ResponseHandlingException
 
 from academic_paper.embedder import EmbedderClient
 from academic_paper.llm import BaseLLMClient
 from academic_paper.vector_store import QdrantStore
 
 logger = logging.getLogger(__name__)
+
+# Errors meaning "Qdrant is unavailable" — the only condition under which the
+# SQLite fallback is legitimate. AttributeError/TypeError are real bugs and
+# must propagate (#139).
+QDRANT_UNAVAILABLE_ERRORS = (ApiException, ResponseHandlingException, ConnectionError, TimeoutError, OSError)
 
 SYSTEM_PROMPT = """You are an expert academic paper analyzer.
 Your task is to provide a structured summary of academic papers.
@@ -30,6 +36,24 @@ class RAGSummarizer:
         self.llm = llm_client
         self.qdrant = qdrant_store
         self.embedder = embedder
+
+    def _chunks_from_db(self, paper_id: int, top_k: int) -> list[dict]:
+        """Load the first top_k chunks in chunk_index order from SQLite, Qdrant-shaped."""
+        from academic_paper.config import settings
+        from academic_paper.db import db_connection, get_chunks
+
+        with db_connection(settings.academic_db) as conn:
+            chunks_db = get_chunks(conn, paper_id)
+        return [
+            {
+                "payload": {
+                    "paper_id": paper_id,
+                    "page_start": chunk.get("page_start") or "unknown",
+                    "text": chunk["text"],
+                }
+            }
+            for chunk in chunks_db[:top_k]
+        ]
 
     async def summarize(
         self,
@@ -54,51 +78,34 @@ class RAGSummarizer:
         """
         # Build a real query vector from title or filename for semantic chunk retrieval
         query_text = title or (file_name.removesuffix(".pdf") if file_name else None) or "academic paper"
-        query_vector: list[float]
+        chunks: list[dict]
         if self.embedder is not None:
             try:
                 query_vector = await self.embedder.embed_single(query_text, mode="search")
             except Exception:
-                logger.warning("embed_single failed for summarize query=%r — falling back to zero vector", query_text)
-                query_vector = [0.0] * 768
+                # A zero-vector search would return arbitrary chunks and cache a
+                # degraded summary as success — take leading DB chunks instead.
+                logger.warning(
+                    "embed_single failed for summarize query=%r — falling back to DB chunk order", query_text
+                )
+                chunks = self._chunks_from_db(paper_id, top_k)
+            else:
+                try:
+                    chunks = self.qdrant.search(
+                        query_vector=query_vector,
+                        limit=top_k,
+                        paper_id_filter=paper_id,
+                    )
+                except QDRANT_UNAVAILABLE_ERRORS:
+                    logger.warning("Qdrant unavailable for paper_id=%s — falling back to DB chunk order", paper_id)
+                    chunks = self._chunks_from_db(paper_id, top_k)
         else:
-            query_vector = [0.0] * 768
-
-        # Try to retrieve relevant chunks from Qdrant first
-        try:
+            # No embedder configured (test convenience): degraded zero-vector search
             chunks = self.qdrant.search(
-                query_vector=query_vector,
+                query_vector=[0.0] * 768,
                 limit=top_k,
                 paper_id_filter=paper_id,
             )
-        except (AttributeError, TypeError):
-            # If Qdrant mock doesn't support search, try alternative approach
-            # This handles both real and mocked Qdrant instances
-            try:
-                from academic_paper.config import settings
-                from academic_paper.db import get_chunks, get_connection
-
-                conn = get_connection(settings.academic_db)
-                chunks_db = get_chunks(conn, paper_id)
-                conn.close()
-
-                if not chunks_db:
-                    raise ValueError(f"No chunks found for paper {paper_id}")
-
-                # Convert database chunks to Qdrant-like format
-                chunks = []
-                for chunk in chunks_db[:top_k]:
-                    chunks.append(
-                        {
-                            "payload": {
-                                "paper_id": paper_id,
-                                "page_start": chunk.get("page_start", "unknown"),
-                                "text": chunk["text"],
-                            }
-                        }
-                    )
-            except (sqlite3.OperationalError, FileNotFoundError):
-                raise ValueError(f"No chunks found for paper {paper_id}")
 
         if not chunks:
             raise ValueError(f"No chunks found for paper {paper_id}")
