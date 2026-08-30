@@ -12,23 +12,19 @@ _BATCH_MAX = 256  # embedding-svc /embed/batch hard limit
 class EmbedderClient:
     """Client for embedding service API."""
 
-    def __init__(self, base_url: str | None = None, api_key: str | None = None):
-        """Initialize embedder client.
-
-        Args:
-            base_url: Base URL for embedding service (default: from settings)
-            api_key: API key for embedding service (default: from settings)
-        """
+    def __init__(
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        client: httpx.AsyncClient | None = None,
+    ):
         self.base_url = base_url or settings.embedding_svc_url
         self.api_key = api_key or settings.embedding_api_key
+        # Injected persistent client (managed by lifespan); None → per-call client.
+        self._client = client
 
     async def embed(self, texts: list[str], mode: str = "index", collection: str = "facts") -> list[list[float]]:
         """Embed texts using /embed/batch, splitting into chunks of at most 256.
-
-        Args:
-            texts: List of texts to embed
-            mode: Embedding mode ("index" or "search")
-            collection: Qdrant collection name
 
         Returns:
             List of embedding vectors in the same order as texts
@@ -39,12 +35,12 @@ class EmbedderClient:
         if not texts:
             return []
         results: list[list[float]] = []
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        if self._client is not None:
             for i in range(0, len(texts), _BATCH_MAX):
                 chunk = texts[i : i + _BATCH_MAX]
                 vectors = await async_with_retry(
                     self._embed_batch,
-                    client,
+                    self._client,
                     chunk,
                     mode,
                     collection,
@@ -53,6 +49,22 @@ class EmbedderClient:
                     exceptions=_EMBED_RETRYABLE,
                 )
                 results.extend(vectors)
+        else:
+            # Fallback: per-call client (tests / direct instantiation without lifespan).
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                for i in range(0, len(texts), _BATCH_MAX):
+                    chunk = texts[i : i + _BATCH_MAX]
+                    vectors = await async_with_retry(
+                        self._embed_batch,
+                        client,
+                        chunk,
+                        mode,
+                        collection,
+                        attempts=3,
+                        base_delay=1.0,
+                        exceptions=_EMBED_RETRYABLE,
+                    )
+                    results.extend(vectors)
         return results
 
     async def _embed_batch(
