@@ -183,6 +183,7 @@ file: <PDF file>
 |--------|------|-----------|
 | `EMBEDDING_SVC_URL` | embedding-svc URL | `http://<internal-host>:9092` |
 | `EMBEDDING_API_KEY` | embedding-svc APIキー | (空) |
+| `EMBEDDING_TIMEOUT` | embedding-svc HTTP タイムアウト秒（大バッチは 30s 超） | `120` |
 | `QDRANT_URL` | Qdrant URL | `http://<internal-host>:6333` |
 | `QDRANT_API_KEY` | Qdrant APIキー | (空) |
 | `QDRANT_COLLECTION` | Qdrant コレクション名 | `academic-papers` |

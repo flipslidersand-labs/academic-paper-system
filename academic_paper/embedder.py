@@ -51,7 +51,7 @@ class EmbedderClient:
                 results.extend(vectors)
         else:
             # Fallback: per-call client (tests / direct instantiation without lifespan).
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=settings.embedding_timeout) as client:
                 for i in range(0, len(texts), _BATCH_MAX):
                     chunk = texts[i : i + _BATCH_MAX]
                     vectors = await async_with_retry(

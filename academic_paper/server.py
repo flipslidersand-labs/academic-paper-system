@@ -132,7 +132,7 @@ async def lifespan(app: FastAPI):
     job_store.init(settings.academic_db)
     # Persistent AsyncClient shared across all embed calls — avoids per-call
     # TCP/TLS handshake and leverages connection pool (#143).
-    http_client = httpx.AsyncClient(timeout=settings.qdrant_timeout)
+    http_client = httpx.AsyncClient(timeout=settings.embedding_timeout)
     app.state.embedder = EmbedderClient(client=http_client)
     app.state.vector_store = QdrantStore()
     llm_client = get_llm_client()
