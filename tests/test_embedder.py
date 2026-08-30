@@ -112,3 +112,20 @@ async def test_embed_batch_request_body():
         assert body["texts"] == ["hello"]
         assert body["mode"] == "index"
         assert body["collection"] == "papers"
+
+
+@pytest.mark.anyio
+async def test_embed_reuses_injected_client():
+    """Injected persistent client is used instead of creating a new one per call (#143)."""
+    with respx.mock:
+        respx.post("http://localhost:9092/embed/batch").mock(
+            return_value=httpx.Response(200, json={"vectors": [[0.1, 0.2, 0.3]]})
+        )
+        persistent = httpx.AsyncClient()
+        try:
+            client = EmbedderClient(base_url="http://localhost:9092", api_key="test-key", client=persistent)
+            result = await client.embed(["hello"])
+        finally:
+            await persistent.aclose()
+
+    assert result == [[0.1, 0.2, 0.3]]
