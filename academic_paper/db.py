@@ -196,6 +196,15 @@ def update_paper_status(conn: sqlite3.Connection, paper_id: int, status: str) ->
     conn.commit()
 
 
+def delete_paper(conn: sqlite3.Connection, paper_id: int) -> None:
+    """Delete a paper and its chunks/summary by id (#145)."""
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM chunks WHERE paper_id = ?", (paper_id,))
+    cursor.execute("DELETE FROM summaries WHERE paper_id = ?", (paper_id,))
+    cursor.execute("DELETE FROM papers WHERE id = ?", (paper_id,))
+    conn.commit()
+
+
 def update_paper_score(conn: sqlite3.Connection, paper_id: int, score: float) -> None:
     """Update computed relevance score for a paper."""
     cursor = conn.cursor()

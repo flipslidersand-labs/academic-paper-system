@@ -3,7 +3,7 @@ import uuid
 import httpx
 from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
-from qdrant_client.models import Distance, FieldCondition, Filter, MatchValue, PointStruct, VectorParams
+from qdrant_client.models import Distance, FieldCondition, Filter, FilterSelector, MatchValue, PointStruct, VectorParams
 
 from academic_paper.config import settings
 from academic_paper.retry import with_retry
@@ -46,6 +46,18 @@ class QdrantStore:
 
         def _do():
             self.client.upsert(collection_name=self.collection, points=structs)
+
+        with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
+
+    def delete_by_paper_id(self, paper_id: int) -> None:
+        """Qdrant から paper_id に属する全ポイントを削除（補償用、#145）。"""
+        flt = Filter(must=[FieldCondition(key="paper_id", match=MatchValue(value=paper_id))])
+
+        def _do():
+            self.client.delete(
+                collection_name=self.collection,
+                points_selector=FilterSelector(filter=flt),
+            )
 
         with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
 

@@ -721,3 +721,47 @@ def test_ingest_empty_body_returns_415(client):
         files={"file": ("empty.pdf", BytesIO(b""), "application/pdf")},
     )
     assert response.status_code == 415
+
+
+def test_ingest_failed_paper_can_be_reingest(client):
+    """Regression (#145): a paper stuck in 'failed' status can be re-uploaded."""
+    pdf_content = create_minimal_pdf()
+
+    with patch("academic_paper.server.extract_text") as mock_extract:
+        mock_extract.return_value = [{"page": 1, "text": "Retry content"}]
+
+        # First upload fails at embedding
+        client.app.state.embedder.embed = AsyncMock(side_effect=Exception("embed down"))
+        r1 = client.post(
+            "/papers/ingest?wait=true",
+            files={"file": ("retry.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert r1.status_code == 400
+
+        # Second upload of same PDF should succeed (not 409) once embedding is back
+        client.app.state.embedder.embed = AsyncMock(return_value=[[0.1] * 768])
+        r2 = client.post(
+            "/papers/ingest?wait=true",
+            files={"file": ("retry.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert r2.status_code == 200, r2.json()
+
+
+def test_ingest_indexed_paper_still_409(client):
+    """Successfully indexed paper still returns 409 on duplicate upload (#145)."""
+    pdf_content = create_minimal_pdf()
+
+    with patch("academic_paper.server.extract_text") as mock_extract:
+        mock_extract.return_value = [{"page": 1, "text": "Already indexed"}]
+
+        r1 = client.post(
+            "/papers/ingest?wait=true",
+            files={"file": ("dup.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert r1.status_code == 200
+
+        r2 = client.post(
+            "/papers/ingest?wait=true",
+            files={"file": ("dup.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert r2.status_code == 409
