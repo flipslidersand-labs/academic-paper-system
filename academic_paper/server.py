@@ -127,7 +127,10 @@ async def lifespan(app: FastAPI):
     setup_telemetry(app, settings.otel_endpoint)
     init_db(settings.academic_db)
     job_store.init(settings.academic_db)
-    app.state.embedder = EmbedderClient()
+    # Persistent AsyncClient shared across all embed calls — avoids per-call
+    # TCP/TLS handshake and leverages connection pool (#143).
+    http_client = httpx.AsyncClient(timeout=settings.qdrant_timeout)
+    app.state.embedder = EmbedderClient(client=http_client)
     app.state.vector_store = QdrantStore()
     llm_client = get_llm_client()
     app.state.llm = llm_client
@@ -140,6 +143,7 @@ async def lifespan(app: FastAPI):
     app.state.probe_task = asyncio.create_task(_probe_startup_health(app))
     yield
     app.state.probe_task.cancel()
+    await http_client.aclose()
 
 
 app = FastAPI(title="Academic Paper System", lifespan=lifespan)
@@ -716,23 +720,39 @@ async def search(
                 _merged_page_map = {r["id"]: r["page_start"] for r in _mps_rows}
             else:
                 _merged_page_map = {}
+            # nugget mode: batch-embed all sentences across all chunks in a single
+            # HTTP call instead of one call per chunk (#143).
+            if mode == "nugget" and nugget_embed_weight > 0.0:
+                _chunk_sentences = [split_sentences(r["text"]) for r in _merged_slice]
+                _flat_sentences = [s for sents in _chunk_sentences for s in sents]
+                if _flat_sentences:
+                    with tracer.start_as_current_span("embed.nuggets"):
+                        _flat_vecs = await app.state.embedder.embed(_flat_sentences, mode="search")
+                else:
+                    _flat_vecs = []
+                # Slice flat vectors back to per-chunk lists.
+                _nugget_vecs: list[list[list[float]] | None] = []
+                _offset = 0
+                for sents in _chunk_sentences:
+                    if sents:
+                        _nugget_vecs.append(_flat_vecs[_offset : _offset + len(sents)])
+                        _offset += len(sents)
+                    else:
+                        _nugget_vecs.append(None)
+            else:
+                _nugget_vecs = [None] * len(_merged_slice)
+
             results = []
-            for rank, result in enumerate(_merged_slice, start=1):
+            for rank, (result, chunk_sentence_vecs) in enumerate(zip(_merged_slice, _nugget_vecs), start=1):
                 full_text = result["text"]
                 if mode == "nugget":
-                    sentence_vecs = None
-                    if nugget_embed_weight > 0.0:
-                        sentences = split_sentences(full_text)
-                        if sentences:
-                            with tracer.start_as_current_span("embed.nuggets"):
-                                sentence_vecs = await app.state.embedder.embed(sentences, mode="search")
                     snippet = extract_nuggets(
                         q,
                         full_text,
                         top_k=nuggets_per_chunk,
                         embed_weight=nugget_embed_weight,
                         query_vec=query_vector,
-                        sentence_vecs=sentence_vecs,
+                        sentence_vecs=chunk_sentence_vecs,
                     )
                 else:
                     snippet = full_text[:snippet_length] if snippet_length > 0 else full_text
