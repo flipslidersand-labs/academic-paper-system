@@ -27,6 +27,7 @@ import sys
 import time
 
 import httpx
+from cli_utils import check_date_order, iso_date, positive_int
 from ingest_client import submit_and_wait
 
 S2_API = "https://api.semanticscholar.org/graph/v1/paper/search"
@@ -161,19 +162,21 @@ def main() -> None:
     )
     parser.add_argument(
         "--from-date",
+        type=iso_date,
         default="",
         metavar="YYYY-MM-DD",
         help="Filter papers published on or after this date (inclusive)",
     )
     parser.add_argument(
         "--until-date",
+        type=iso_date,
         default="",
         metavar="YYYY-MM-DD",
         help="Filter papers published on or before this date (inclusive)",
     )
     parser.add_argument(
         "--max",
-        type=int,
+        type=positive_int,
         default=10,
         dest="max_results",
         help="Max open-access papers to ingest (default: 10)",
@@ -201,6 +204,7 @@ def main() -> None:
         help="Write run summary JSON to this path",
     )
     args = parser.parse_args()
+    check_date_order(parser, args.from_date, args.until_date)
 
     # --topics is deprecated; merge into --query if provided
     if args.topics:

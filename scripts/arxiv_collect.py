@@ -31,6 +31,7 @@ import xml.etree.ElementTree as ET
 from urllib.parse import quote
 
 import httpx
+from cli_utils import check_date_order, iso_date, positive_int
 from ingest_client import submit_and_wait
 
 ARXIV_API = "https://export.arxiv.org/api/query"
@@ -191,7 +192,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--max",
-        type=int,
+        type=positive_int,
         default=20,
         dest="max_results",
         metavar="N",
@@ -199,12 +200,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--from-date",
+        type=iso_date,
         default="",
         metavar="YYYY-MM-DD",
         help="Filter papers published on or after this date (inclusive)",
     )
     parser.add_argument(
         "--until-date",
+        type=iso_date,
         default="",
         metavar="YYYY-MM-DD",
         help="Filter papers published on or before this date (inclusive)",
@@ -227,6 +230,7 @@ def main() -> None:
         help="Write run summary JSON to this path (optional)",
     )
     args = parser.parse_args()
+    check_date_order(parser, args.from_date, args.until_date)
 
     date_range = ""
     if args.from_date or args.until_date:
