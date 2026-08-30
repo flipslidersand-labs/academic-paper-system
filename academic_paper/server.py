@@ -7,6 +7,7 @@ import os
 import tempfile
 import time
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -50,17 +51,38 @@ logger = logging.getLogger(__name__)
 tracer = get_tracer()
 
 
-def _parse_list_field(value: str | None) -> list[str] | None:
-    """Parse a JSON array string or comma-separated string into a list."""
+def _parse_list_field(value: str | None, field: str = "field") -> list[str] | None:
+    """Parse a JSON array string or comma-separated string into a list.
+
+    JSON arrays must contain only strings — nested objects/arrays were
+    previously coerced via str(x) and stored as Python reprs (#144).
+
+    Raises:
+        HTTPException 422: JSON array contains non-string elements.
+    """
     if not value:
         return None
     try:
         parsed = json.loads(value)
         if isinstance(parsed, list):
-            return [str(x) for x in parsed]
-    except (json.JSONDecodeError, ValueError):
+            if not all(isinstance(x, str) for x in parsed):
+                raise HTTPException(
+                    status_code=422, detail=f"{field} must be a JSON array of strings or a comma-separated string"
+                )
+            return parsed
+    except json.JSONDecodeError:
         pass
     return [x.strip() for x in value.split(",") if x.strip()]
+
+
+def _validate_published_date(value: str | None, field: str = "published_date") -> None:
+    """Reject non-ISO dates instead of letting them silently degrade scoring (#144)."""
+    if not value:
+        return
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"{field} must be an ISO date (YYYY-MM-DD), got {value!r}")
 
 
 async def _check_embedding_svc(timeout: float = 3.0) -> None:
@@ -205,11 +227,11 @@ async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str,
 async def ingest_paper(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    title: str | None = Form(None),
-    authors: str | None = Form(None),
-    categories: str | None = Form(None),
-    published_date: str | None = Form(None),
-    source: str | None = Form(None),
+    title: str | None = Form(None, max_length=1000),
+    authors: str | None = Form(None, max_length=10000),
+    categories: str | None = Form(None, max_length=2000),
+    published_date: str | None = Form(None, max_length=10),
+    source: str | None = Form(None, max_length=100),
     wait: bool = Query(False, description="Process synchronously and return the indexed result (200)"),
 ):
     """Ingest a PDF paper with optional metadata.
@@ -225,11 +247,13 @@ async def ingest_paper(
         HTTPException 409: File already ingested.
         HTTPException 413: File exceeds the max upload size.
         HTTPException 415: File is not a PDF (missing %PDF- magic bytes).
+        HTTPException 422: Invalid metadata (non-ISO published_date, non-string list elements).
         HTTPException 400: Extraction / chunking / embedding error (wait=true only).
     """
     tmp_path: str | None = None
     keep_tmp = False
     try:
+        _validate_published_date(published_date)
         max_bytes = settings.max_upload_mb * 1024 * 1024
         size_detail = f"File too large (max {settings.max_upload_mb} MB)"
         # Reject early when the multipart part already declares an oversized length,
@@ -269,8 +293,8 @@ async def ingest_paper(
                 file_name,
                 file_hash,
                 title=title,
-                authors=_parse_list_field(authors),
-                categories=_parse_list_field(categories),
+                authors=_parse_list_field(authors, "authors"),
+                categories=_parse_list_field(categories, "categories"),
                 published_date=published_date or None,
                 source=source or None,
             )
