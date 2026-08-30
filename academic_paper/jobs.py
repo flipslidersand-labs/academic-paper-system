@@ -12,6 +12,7 @@ JobStatus = Literal["pending", "running", "done", "failed"]
 class Job:
     id: str
     status: JobStatus
+    kind: str = ""
     total: int = 0
     processed: int = 0
     failed: int = 0
@@ -24,6 +25,7 @@ class Job:
         return {
             "id": self.id,
             "status": self.status,
+            "kind": self.kind,
             "total": self.total,
             "processed": self.processed,
             "failed": self.failed,
@@ -42,7 +44,9 @@ class JobStore:
     def init(self, db_path: str) -> None:
         """Load existing jobs from SQLite into memory on startup.
 
-        Jobs that were 'running' at last shutdown are converted to 'failed'.
+        Jobs that were 'pending' or 'running' at last shutdown are converted to
+        'failed' — their BackgroundTasks did not survive the restart, and a
+        stale in-flight status would block has_running() forever.
         """
         from academic_paper.db import get_connection, load_all_jobs, upsert_job
 
@@ -51,9 +55,9 @@ class JobStore:
         for row in load_all_jobs(conn):
             status = row["status"]
             errors = list(row["errors"])
-            if status == "running":
+            if status in ("pending", "running"):
                 status = "failed"
-                errors.append("Server restarted while job was running")
+                errors.append("Server restarted while job was in flight")
                 upsert_job(
                     conn,
                     row["id"],
@@ -64,10 +68,12 @@ class JobStore:
                     errors,
                     row["started_at"],
                     row["finished_at"],
+                    kind=row.get("kind", ""),
                 )
             job = Job(
                 id=row["id"],
                 status=status,
+                kind=row.get("kind", ""),
                 total=row["total"],
                 processed=row["processed"],
                 failed=row["failed"],
@@ -95,11 +101,12 @@ class JobStore:
             job.errors,
             job.started_at,
             job.finished_at,
+            kind=job.kind,
         )
         conn.close()
 
-    def create(self) -> Job:
-        job = Job(id=str(uuid.uuid4()), status="pending")
+    def create(self, kind: str = "") -> Job:
+        job = Job(id=str(uuid.uuid4()), status="pending", kind=kind)
         self._jobs[job.id] = job
         self._persist(job)
         return job
@@ -110,8 +117,17 @@ class JobStore:
     def list_all(self) -> list[Job]:
         return list(self._jobs.values())
 
-    def has_running(self) -> bool:
-        return any(j.status == "running" for j in self._jobs.values())
+    def has_running(self, kind: str | None = None) -> bool:
+        """True if any job (optionally filtered by kind) is pending or running.
+
+        Counting "pending" closes the TOCTOU window between create() and the
+        background task flipping the status to "running"; filtering by kind
+        keeps unrelated job types (e.g. per-paper ingest) from blocking each
+        other.
+        """
+        return any(
+            j.status in ("pending", "running") and (kind is None or j.kind == kind) for j in self._jobs.values()
+        )
 
     def persist(self, job: Job) -> None:
         """Persist job state to SQLite (call on status transitions)."""
