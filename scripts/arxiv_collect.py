@@ -149,6 +149,8 @@ def ingest_paper(
     """Download the PDF and submit it to the async /papers/ingest job."""
     pdf_resp = httpx.get(paper["pdf_url"], timeout=pdf_timeout, follow_redirects=True)
     pdf_resp.raise_for_status()
+    if "pdf" not in pdf_resp.headers.get("content-type", "").lower():
+        raise ValueError(f"Not a PDF (content-type: {pdf_resp.headers.get('content-type')})")
 
     return submit_and_wait(
         client,

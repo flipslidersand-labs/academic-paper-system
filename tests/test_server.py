@@ -676,3 +676,22 @@ def test_search_keyword_returns_real_chunk_index(client, temp_db):
     # Both chunks match "alpha"; the second must report chunk_index 7 (not 0).
     assert {r["chunk_index"] for r in results} == {0, 7}
     assert by_qdrant[7]["page_start"] == 5
+
+
+def test_ingest_non_pdf_returns_415(client):
+    """Regression (#138): non-PDF bytes are rejected with 415 before extraction."""
+    response = client.post(
+        "/papers/ingest",
+        files={"file": ("fake.pdf", BytesIO(b"<html>rate limited</html>"), "application/pdf")},
+    )
+    assert response.status_code == 415
+    assert "Not a PDF" in response.json()["detail"]
+
+
+def test_ingest_empty_body_returns_415(client):
+    """An empty upload has no %PDF- header and is rejected with 415."""
+    response = client.post(
+        "/papers/ingest",
+        files={"file": ("empty.pdf", BytesIO(b""), "application/pdf")},
+    )
+    assert response.status_code == 415
