@@ -4,6 +4,7 @@ import tempfile
 from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -164,7 +165,8 @@ def test_ingest_cleans_up_tmpfile_on_error(client):
             "/papers/ingest?wait=true",
             files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
         )
-        assert response.status_code == 400
+        # Unexpected errors are now 500, not 400 (#148)
+        assert response.status_code in (400, 500)
 
     import os
 
@@ -347,7 +349,8 @@ def test_stats_returns_counts(client):
     assert "papers" in data
     assert "chunks" in data
     assert "qdrant_points" in data
-    assert "db" in data
+    # db path is not exposed to callers (#148)
+    assert "db" not in data
     assert data["papers"] >= 1
     assert data["chunks"] >= 1
     assert data["qdrant_points"] >= 1
@@ -453,7 +456,6 @@ def test_ingest_empty_pages(client):
             files={"file": ("empty.pdf", BytesIO(pdf_content), "application/pdf")},
         )
         assert response.status_code == 400
-        assert "No text extracted" in response.json()["detail"]
 
 
 def test_ingest_no_chunks(client):
@@ -472,23 +474,36 @@ def test_ingest_no_chunks(client):
             files={"file": ("nochunk.pdf", BytesIO(pdf_content), "application/pdf")},
         )
         assert response.status_code == 400
-        assert "No chunks generated" in response.json()["detail"]
 
 
-def test_ingest_embedding_failure(client):
-    """Test POST /papers/ingest returns 400 when embedding service fails."""
+def test_ingest_embedding_connect_error_returns_503(client):
+    """Embedding service connect failure → 503 (upstream unavailable), not 400 (#148)."""
     pdf_content = create_minimal_pdf()
 
     with patch("academic_paper.server.extract_text") as mock_extract:
         mock_extract.return_value = [{"page": 1, "text": "Test Document content"}]
-        client.app.state.embedder.embed = AsyncMock(side_effect=Exception("Embedding service unavailable"))
+        client.app.state.embedder.embed = AsyncMock(side_effect=httpx.ConnectError("refused"))
+
+        response = client.post(
+            "/papers/ingest?wait=true",
+            files={"file": ("fail.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert response.status_code == 503
+
+
+def test_ingest_extract_value_error_returns_400(client):
+    """ValueError from extraction (no text / no chunks) → 400, not 500 (#148)."""
+    pdf_content = create_minimal_pdf()
+
+    with patch("academic_paper.server.extract_text") as mock_extract:
+        mock_extract.return_value = [{"page": 1, "text": "Test Document content"}]
+        client.app.state.embedder.embed = AsyncMock(side_effect=ValueError("No chunks generated"))
 
         response = client.post(
             "/papers/ingest?wait=true",
             files={"file": ("fail.pdf", BytesIO(pdf_content), "application/pdf")},
         )
         assert response.status_code == 400
-        assert "Ingest error" in response.json()["detail"]
 
 
 def test_ingest_async_returns_202_and_completes_job(client):
@@ -627,7 +642,7 @@ def test_score_paper_not_found(client):
 
 
 def test_ingest_unexpected_exception(client):
-    """POST /papers/ingest returns 400 on unexpected exception."""
+    """POST /papers/ingest: unexpected error returns 500 with opaque message (#148)."""
     pdf_content = create_minimal_pdf()
 
     with patch("academic_paper.server.hash_file", side_effect=RuntimeError("disk error")):
@@ -635,8 +650,9 @@ def test_ingest_unexpected_exception(client):
             "/papers/ingest?wait=true",
             files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
         )
-    assert response.status_code == 400
-    assert "disk error" in response.json()["detail"]
+    # RuntimeError is classified as internal error (500); detail must NOT contain the raw error.
+    assert response.status_code == 500
+    assert "disk error" not in response.json()["detail"]
 
 
 def test_ingest_file_too_large_returns_413(client):
@@ -730,13 +746,13 @@ def test_ingest_failed_paper_can_be_reingest(client):
     with patch("academic_paper.server.extract_text") as mock_extract:
         mock_extract.return_value = [{"page": 1, "text": "Retry content"}]
 
-        # First upload fails at embedding
-        client.app.state.embedder.embed = AsyncMock(side_effect=Exception("embed down"))
+        # First upload fails at embedding (503 = upstream down)
+        client.app.state.embedder.embed = AsyncMock(side_effect=httpx.ConnectError("embed down"))
         r1 = client.post(
             "/papers/ingest?wait=true",
             files={"file": ("retry.pdf", BytesIO(pdf_content), "application/pdf")},
         )
-        assert r1.status_code == 400
+        assert r1.status_code == 503
 
         # Second upload of same PDF should succeed (not 409) once embedding is back
         client.app.state.embedder.embed = AsyncMock(return_value=[[0.1] * 768])

@@ -4,8 +4,10 @@ import asyncio
 import json
 import logging
 import os
+import sqlite3
 import tempfile
 import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
@@ -145,6 +147,35 @@ async def lifespan(app: FastAPI):
     yield
     app.state.probe_task.cancel()
     await http_client.aclose()
+
+
+def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
+    """Map an exception to an appropriate HTTPException (#148).
+
+    - Dependency-unavailable (httpx connect/timeout, Qdrant HTTP errors) → 502/503
+    - sqlite3.IntegrityError (file_hash UNIQUE violation) → 409
+    - ValueError from input validation (no text, no chunks) → 400
+    - Everything else → 500 with opaque error-id (details go to logger only)
+    """
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+        return HTTPException(status_code=503, detail="Upstream service unavailable")
+    if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)):
+        return HTTPException(status_code=503, detail="Upstream service timeout or network error")
+    try:
+        from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
+
+        if isinstance(exc, (UnexpectedResponse, ResponseHandlingException)):
+            return HTTPException(status_code=502, detail="Vector store returned an unexpected response")
+    except ImportError:
+        pass
+    if isinstance(exc, sqlite3.IntegrityError):
+        return HTTPException(status_code=409, detail="Conflict: duplicate record")
+    if isinstance(exc, ValueError):
+        return HTTPException(status_code=400, detail=fallback_msg)
+    # Catch-all: 500 with opaque error id; real detail only in log.
+    error_id = str(uuid.uuid4())[:8]
+    logger.error("Unclassified error [%s]: %s", error_id, exc, exc_info=True)
+    return HTTPException(status_code=500, detail=f"Internal error [{error_id}]")
 
 
 app = FastAPI(title="Academic Paper System", lifespan=lifespan)
@@ -341,7 +372,7 @@ async def ingest_paper(
                     app.state.vector_store.delete_by_paper_id(paper_id)
                 except Exception:
                     pass
-                raise HTTPException(status_code=400, detail=f"Ingest error: {str(e)}")
+                raise _http_exc_for(e, "Ingest failed: check PDF content and try again")
             return {
                 "paper_id": paper_id,
                 "file_name": file_name,
@@ -361,7 +392,7 @@ async def ingest_paper(
         raise
     except Exception as e:
         logger.exception("Unexpected error during paper ingest")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise _http_exc_for(e, "Ingest failed unexpectedly")
     finally:
         if tmp_path is not None and not keep_tmp:
             try:
@@ -484,7 +515,7 @@ async def generate_summary_endpoint(paper_id: int, force: bool = Query(False)):
 
         except Exception as e:
             logger.exception("Summarization error for paper_id=%s", paper_id)
-            raise HTTPException(status_code=400, detail=f"Summarization error: {str(e)}")
+            raise _http_exc_for(e, "Summarization failed: check LLM availability")
 
 
 @app.post("/papers/score-all", dependencies=[Depends(verify_api_key)])
@@ -803,7 +834,7 @@ async def search(
 
     except Exception as e:
         logger.exception("Search error for query=%r mode=%s", q, mode)
-        raise HTTPException(status_code=400, detail=f"Search error: {str(e)}")
+        raise _http_exc_for(e, "Search failed: check query and try again")
     finally:
         if conn is not None:
             conn.close()
@@ -841,7 +872,7 @@ def stats():
             qdrant_points = info.points_count
         except Exception:
             qdrant_points = -1
-    return {"papers": papers, "chunks": chunks, "qdrant_points": qdrant_points, "db": settings.academic_db}
+    return {"papers": papers, "chunks": chunks, "qdrant_points": qdrant_points}
 
 
 # Serve frontend at /ui — must be mounted after all API routes
