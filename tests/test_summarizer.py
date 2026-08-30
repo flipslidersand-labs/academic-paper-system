@@ -129,26 +129,44 @@ async def test_summarize_calls_llm_with_context():
 
 
 @pytest.mark.anyio
-async def test_summarize_qdrant_attr_error_falls_back_to_db():
-    """When Qdrant.search raises AttributeError the DB fallback path is used."""
+async def test_summarize_qdrant_attr_error_propagates():
+    """Regression (#139): AttributeError from qdrant.search is a real bug and must propagate."""
+    mock_llm = AsyncMock()
+    mock_qdrant = MagicMock()
+    mock_qdrant.search.side_effect = AttributeError("no search")
+    mock_embedder = AsyncMock()
+    mock_embedder.embed_single.return_value = [0.1] * 768
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
+    with pytest.raises(AttributeError):
+        await summarizer.summarize(paper_id=1, file_hash="hash1", title="Test")
+
+
+@pytest.mark.anyio
+async def test_summarize_qdrant_unavailable_falls_back_to_db():
+    """Qdrant connection errors (not bugs) fall back to DB chunk order (#139)."""
     from unittest.mock import patch
+
+    from qdrant_client.http.exceptions import ResponseHandlingException
 
     mock_llm = AsyncMock()
     mock_llm.generate.return_value = json.dumps(
         {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
     )
     mock_qdrant = MagicMock()
-    mock_qdrant.search.side_effect = AttributeError("no search")
+    mock_qdrant.search.side_effect = ResponseHandlingException("connection refused")
+    mock_embedder = AsyncMock()
+    mock_embedder.embed_single.return_value = [0.1] * 768
 
     db_chunks = [{"text": "chunk text from db", "page_start": 1}]
-    mock_conn = MagicMock()
 
-    with (
-        patch("academic_paper.db.get_chunks", return_value=db_chunks),
-        patch("academic_paper.db.get_connection", return_value=mock_conn),
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
+    with patch.object(
+        summarizer,
+        "_chunks_from_db",
+        return_value=[{"payload": {"page_start": 1, "text": c["text"]}} for c in db_chunks],
     ):
-        summarizer = RAGSummarizer(mock_llm, mock_qdrant)
-        result = await summarizer.summarize(paper_id=1, file_hash="hash1")
+        result = await summarizer.summarize(paper_id=1, file_hash="hash1", title="Test")
 
     assert "objective" in result
 
@@ -240,22 +258,25 @@ async def test_summarize_uses_filename_when_no_title():
 
 
 @pytest.mark.anyio
-async def test_summarize_falls_back_to_zero_vector_on_embed_failure():
-    """When embed_single raises, summarizer falls back to zero vector and continues."""
+async def test_summarize_falls_back_to_db_on_embed_failure():
+    """When embed_single raises, summarizer takes DB chunks instead of a zero-vector search (#139)."""
+    from unittest.mock import patch
+
     mock_llm = AsyncMock()
     mock_qdrant = MagicMock()
     mock_embedder = AsyncMock()
     mock_embedder.embed_single.side_effect = RuntimeError("embedding-svc down")
 
-    chunks = [{"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "text"}}]
-    mock_qdrant.search.return_value = chunks
     mock_llm.generate.return_value = json.dumps(
         {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
     )
 
     summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
-    result = await summarizer.summarize(paper_id=1, file_hash="abc", title="Test")
+    with patch.object(
+        summarizer, "_chunks_from_db", return_value=[{"payload": {"page_start": 1, "text": "db text"}}]
+    ) as mock_db:
+        result = await summarizer.summarize(paper_id=1, file_hash="abc", title="Test")
 
-    # Should succeed with zero-vector fallback
     assert "objective" in result
-    mock_qdrant.search.assert_called_once_with(query_vector=[0.0] * 768, limit=5, paper_id_filter=1)
+    mock_db.assert_called_once_with(1, 5)
+    mock_qdrant.search.assert_not_called()
