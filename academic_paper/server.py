@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -151,6 +151,15 @@ app = FastAPI(title="Academic Paper System", lifespan=lifespan)
 Instrumentator().instrument(app).expose(app)
 
 
+async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
+    """Require X-API-Key on write endpoints when API_KEY env var is set (#146)."""
+    configured = settings.api_key
+    if not configured:
+        return  # auth disabled
+    if x_api_key != configured:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
 async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_name: str) -> int:
     """Extract → chunk → embed → Qdrant upsert for a saved paper. Returns chunk count.
 
@@ -237,7 +246,7 @@ async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str,
             pass
 
 
-@app.post("/papers/ingest")
+@app.post("/papers/ingest", dependencies=[Depends(verify_api_key)])
 async def ingest_paper(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -416,7 +425,7 @@ async def get_summary_endpoint(paper_id: int):
         }
 
 
-@app.post("/papers/{paper_id}/summary")
+@app.post("/papers/{paper_id}/summary", dependencies=[Depends(verify_api_key)])
 async def generate_summary_endpoint(paper_id: int, force: bool = Query(False)):
     """Generate the summary (cached result is returned unless force=true)."""
     with db_connection(settings.academic_db) as conn:
@@ -478,7 +487,7 @@ async def generate_summary_endpoint(paper_id: int, force: bool = Query(False)):
             raise HTTPException(status_code=400, detail=f"Summarization error: {str(e)}")
 
 
-@app.post("/papers/score-all")
+@app.post("/papers/score-all", dependencies=[Depends(verify_api_key)])
 def score_all_papers():
     """Compute and store relevance scores for all papers.
 
@@ -499,7 +508,7 @@ def score_all_papers():
     return {"total": len(papers), "scored": scored, "preferred_categories": preferred}
 
 
-@app.post("/papers/{paper_id}/score")
+@app.post("/papers/{paper_id}/score", dependencies=[Depends(verify_api_key)])
 def score_paper(paper_id: int):
     """Compute and store relevance score for a single paper."""
     with db_connection(settings.academic_db) as conn:
@@ -579,7 +588,7 @@ async def _run_summarize_all(job_id: str) -> None:
         job_store.persist(job)
 
 
-@app.post("/jobs/summarize-all", status_code=202)
+@app.post("/jobs/summarize-all", status_code=202, dependencies=[Depends(verify_api_key)])
 async def start_summarize_all(background_tasks: BackgroundTasks):
     """Start a background job to summarize all papers without a cached summary."""
     if job_store.has_running(kind="summarize-all"):
