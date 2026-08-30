@@ -267,8 +267,9 @@ def test_summary_error_returns_400(client, temp_db):
     client.app.state.summarizer = mock_summarizer
 
     response = client.post(f"/papers/{paper_id}/summary")
-    assert response.status_code == 400
-    assert "Summarization error" in response.json()["detail"]
+    # Generic Exception → 500 with opaque error-id (#148); no raw exception text.
+    assert response.status_code == 500
+    assert "LLM timeout" not in response.json()["detail"]
 
 
 def test_summary_503_when_summarizer_none(client, temp_db):
