@@ -288,3 +288,25 @@ def test_list_summaries_pagination(client, temp_db):
     resp2 = client.get("/summaries?limit=2&offset=1")
     assert resp2.status_code == 200
     assert len(resp2.json()["summaries"]) == 2
+
+
+def test_ingest_invalid_published_date_422(client):
+    """Regression (#144): non-ISO published_date is rejected, not silently stored."""
+    resp = client.post(
+        "/papers/ingest",
+        files={"file": ("d.pdf", BytesIO(_make_minimal_pdf()), "application/pdf")},
+        data={"published_date": "2026/01/15"},
+    )
+    assert resp.status_code == 422
+    assert "ISO date" in resp.json()["detail"]
+
+
+def test_ingest_nested_authors_422(client):
+    """Regression (#144): JSON array with non-string elements is rejected."""
+    resp = client.post(
+        "/papers/ingest",
+        files={"file": ("n.pdf", BytesIO(_make_minimal_pdf()), "application/pdf")},
+        data={"authors": '[{"name": "Alice"}]'},
+    )
+    assert resp.status_code == 422
+    assert "authors" in resp.json()["detail"]

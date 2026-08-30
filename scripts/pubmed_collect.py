@@ -21,6 +21,7 @@ import time
 import xml.etree.ElementTree as ET
 
 import httpx
+from cli_utils import positive_int
 from ingest_client import submit_and_wait
 
 ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
@@ -172,7 +173,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--max",
-        type=int,
+        type=positive_int,
         default=5,
         dest="max_results",
         help="Max papers to ingest (default: 5)",

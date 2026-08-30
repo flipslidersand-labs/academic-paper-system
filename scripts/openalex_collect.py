@@ -24,6 +24,7 @@ import sys
 import time
 
 import httpx
+from cli_utils import check_date_order, iso_date, positive_int
 from ingest_client import submit_and_wait
 
 OPENALEX_API = "https://api.openalex.org/works"
@@ -214,17 +215,19 @@ def main() -> None:
     )
     parser.add_argument(
         "--from-date",
+        type=iso_date,
         default="",
         help="Start date YYYY-MM-DD (inclusive). Example: 2025-02-01",
     )
     parser.add_argument(
         "--until-date",
+        type=iso_date,
         default="",
         help="End date YYYY-MM-DD (inclusive). Example: 2025-08-01",
     )
     parser.add_argument(
         "--max",
-        type=int,
+        type=positive_int,
         default=10,
         dest="max_results",
         help="Max papers to ingest (default: 10)",
@@ -252,6 +255,7 @@ def main() -> None:
         help="Fetch and list papers without ingesting",
     )
     args = parser.parse_args()
+    check_date_order(parser, args.from_date, args.until_date)
 
     date_range = ""
     if args.from_date or args.until_date:
