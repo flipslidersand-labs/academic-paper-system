@@ -95,11 +95,13 @@ def fetch_papers(
     until_date: str = "",
     max_results: int = 20,
     timeout: int = 30,
-) -> list[dict]:
-    """Search OpenAlex and return works that have a PDF URL.
+) -> tuple[list[dict], str | None]:
+    """Search OpenAlex and return (works with a PDF URL, fetch error or None).
 
     Uses cursor-based pagination. Stops when max_results is reached or
-    all pages are exhausted.
+    all pages are exhausted. A page-fetch failure aborts pagination and is
+    reported via the second tuple element so callers can distinguish
+    "no results" from "search API down" (exit-code false success, #133).
     """
     filter_parts = [f"title.search:{query}"]
     if from_date:
@@ -118,13 +120,15 @@ def fetch_papers(
 
     papers: list[dict] = []
     seen: set[str] = set()
+    fetch_error: str | None = None
 
     while len(papers) < max_results:
         try:
             resp = httpx.get(OPENALEX_API, params=params, timeout=timeout)
             resp.raise_for_status()
         except Exception as exc:
-            print(f"[openalex] ERROR fetching page: {exc}", file=sys.stderr)
+            fetch_error = str(exc) or type(exc).__name__
+            print(f"[openalex] ERROR fetching page: {fetch_error}", file=sys.stderr)
             break
 
         data = resp.json()
@@ -152,7 +156,7 @@ def fetch_papers(
         params["cursor"] = next_cursor
         time.sleep(0.5)  # OpenAlex polite pool: 10 req/s; 0.5s is comfortable
 
-    return papers
+    return papers, fetch_error
 
 
 def ingest_paper(
@@ -254,13 +258,19 @@ def main() -> None:
         date_range = f" [{args.from_date or '*'} → {args.until_date or '*'}]"
     print(f"[openalex] query='{args.query}'{date_range} max={args.max_results} api={args.api_url}")
 
-    papers = fetch_papers(
+    papers, fetch_error = fetch_papers(
         query=args.query,
         from_date=args.from_date,
         until_date=args.until_date,
         max_results=args.max_results,
     )
     print(f"[openalex] found {len(papers)} papers with PDF URLs")
+    if fetch_error and not papers:
+        print(f"[openalex] FATAL: search API failed with no results: {fetch_error}", file=sys.stderr)
+        if args.summary_file:
+            with open(args.summary_file, "w") as f:
+                json.dump({"fetched": 0, "fetch_error": fetch_error}, f, indent=2)
+        sys.exit(1)
 
     if args.dry_run:
         for p in papers:
@@ -298,7 +308,7 @@ def main() -> None:
 
     if args.summary_file:
         with open(args.summary_file, "w") as f:
-            json.dump({**counts, "fetched": len(papers), "detail": detail}, f, indent=2)
+            json.dump({**counts, "fetched": len(papers), "fetch_error": fetch_error, "detail": detail}, f, indent=2)
         print(f"[openalex] summary written to {args.summary_file}")
 
     if counts["failed"] > 0:

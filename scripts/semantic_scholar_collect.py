@@ -40,15 +40,19 @@ def fetch_papers(
     max_results: int = 10,
     api_key: str = "",
     timeout: int = 30,
-) -> list[dict]:
+) -> tuple[list[dict], str | None]:
     """Search Semantic Scholar for open-access papers.
 
     Uses the `publicationDateOrYear` filter (format: YYYY-MM-DD:YYYY-MM-DD)
     when date range is provided. Only returns papers with an openAccessPdf.
+    Returns (papers, fetch error or None); a page-fetch failure aborts
+    pagination and is reported so callers can distinguish "no results" from
+    "search API down" (exit-code false success, #133).
     """
     headers = {"x-api-key": api_key} if api_key else {}
     papers: list[dict] = []
     seen: set[str] = set()
+    fetch_error: str | None = None
     offset = 0
     limit = min(100, max_results * 3)  # fetch more since many lack open-access PDFs
 
@@ -74,7 +78,8 @@ def fetch_papers(
                 resp = httpx.get(S2_API, params=params, headers=headers, timeout=timeout)
             resp.raise_for_status()
         except Exception as exc:
-            print(f"[s2] ERROR fetching offset={offset}: {exc}", file=sys.stderr)
+            fetch_error = str(exc) or type(exc).__name__
+            print(f"[s2] ERROR fetching offset={offset}: {fetch_error}", file=sys.stderr)
             break
 
         data = resp.json()
@@ -100,7 +105,7 @@ def fetch_papers(
 
         time.sleep(1 if not api_key else 0.05)
 
-    return papers
+    return papers, fetch_error
 
 
 def ingest_paper(
@@ -213,7 +218,7 @@ def main() -> None:
     if api_key:
         print("[s2] using API key")
 
-    papers = fetch_papers(
+    papers, fetch_error = fetch_papers(
         query=query,
         from_date=args.from_date,
         until_date=args.until_date,
@@ -221,6 +226,12 @@ def main() -> None:
         api_key=api_key,
     )
     print(f"[s2] found {len(papers)} open-access papers")
+    if fetch_error and not papers:
+        print(f"[s2] FATAL: search API failed with no results: {fetch_error}", file=sys.stderr)
+        if args.summary_file:
+            with open(args.summary_file, "w") as f:
+                json.dump({"fetched": 0, "fetch_error": fetch_error}, f, indent=2)
+        sys.exit(1)
 
     counts = {"ingested": 0, "duplicate": 0, "failed": 0}
     detail: list[dict] = []
@@ -248,7 +259,7 @@ def main() -> None:
 
     if args.summary_file:
         with open(args.summary_file, "w") as f:
-            json.dump({**counts, "fetched": len(papers), "detail": detail}, f, indent=2)
+            json.dump({**counts, "fetched": len(papers), "fetch_error": fetch_error, "detail": detail}, f, indent=2)
         print(f"[s2] summary written to {args.summary_file}")
 
     if counts["failed"] > 0:
