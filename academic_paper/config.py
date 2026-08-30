@@ -7,6 +7,9 @@ class Settings(BaseSettings):
 
     embedding_svc_url: str = Field(default="http://<internal-host>:9092", description="Embedding service URL")
     embedding_api_key: str = Field(default="", description="API key for embedding service")
+    embedding_timeout: int = Field(
+        default=120, description="embedding-svc HTTP timeout in seconds; large batches (up to 256 chunks) can take >30s"
+    )
     qdrant_url: str = Field(default="http://<internal-host>:6333", description="Qdrant vector database URL")
     qdrant_api_key: str = Field(default="", description="API key for Qdrant")
     qdrant_timeout: int = Field(default=10, description="Qdrant client timeout in seconds")
