@@ -30,6 +30,14 @@ jobs:
     runs-on: [self-hosted, minipc]
     timeout-minutes: 60
 
+    # Dispatch inputs are passed exclusively through env so user-controlled
+    # values never get template-expanded into run scripts (script injection
+    # on the self-hosted runner, #135). Defaults live here, in one place.
+    env:
+      API_URL: ${{ github.event.inputs.api_url || 'http://localhost:8020' }}
+      CATEGORIES: ${{ github.event.inputs.categories || 'cs.AI cs.LG cs.CL' }}
+      MAX_RESULTS: ${{ github.event.inputs.max_results || '20' }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -43,19 +51,18 @@ jobs:
 
       - name: Wait for API health
         run: |
-          API_URL="${{ github.event.inputs.api_url || 'http://localhost:8020' }}"
           echo "Checking $API_URL/health ..."
-          timeout 30 bash -c "until curl -sf $API_URL/health > /dev/null; do sleep 3; done"
+          # Single-quoted so the inner bash expands $API_URL itself — the outer
+          # shell never splices the value into the command string.
+          timeout 30 bash -c 'until curl -sf "$API_URL/health" > /dev/null; do sleep 3; done'
           echo "API is healthy"
 
       - name: Collect arXiv papers
         run: |
-          CATEGORIES="${{ github.event.inputs.categories || 'cs.AI cs.LG cs.CL' }}"
-          MAX="${{ github.event.inputs.max_results || '20' }}"
-          API_URL="${{ github.event.inputs.api_url || 'http://localhost:8020' }}"
+          # $CATEGORIES is intentionally unquoted: space-separated list → argv
           python scripts/arxiv_collect.py \
             --categories $CATEGORIES \
-            --max "$MAX" \
+            --max "$MAX_RESULTS" \
             --api-url "$API_URL" \
             --summary-file summary-arxiv.json
 
@@ -64,11 +71,9 @@ jobs:
         env:
           SEMANTIC_SCHOLAR_API_KEY: ${{ secrets.SEMANTIC_SCHOLAR_API_KEY }}
         run: |
-          API_URL="${{ github.event.inputs.api_url || 'http://localhost:8020' }}"
-          MAX="${{ github.event.inputs.max_results || '20' }}"
           python scripts/semantic_scholar_collect.py \
             --topics "machine learning" "deep learning" "natural language processing" \
-            --max "$MAX" \
+            --max "$MAX_RESULTS" \
             --api-url "$API_URL" \
             --summary-file summary-s2.json \
             ${SEMANTIC_SCHOLAR_API_KEY:+--api-key "$SEMANTIC_SCHOLAR_API_KEY"}
@@ -78,7 +83,6 @@ jobs:
         env:
           NCBI_API_KEY: ${{ secrets.NCBI_API_KEY }}
         run: |
-          API_URL="${{ github.event.inputs.api_url || 'http://localhost:8020' }}"
           python scripts/pubmed_collect.py \
             --terms "artificial intelligence" "machine learning" \
             --max 5 \
@@ -89,7 +93,7 @@ jobs:
       - name: Trigger bulk summarization
         if: ${{ github.event.inputs.summarize != 'false' }}
         run: |
-          API_URL="${{ github.event.inputs.api_url || 'http://localhost:8020' }}"
+          set -euo pipefail
 
           # POST /jobs/summarize-all — capture HTTP status and body separately
           HTTP_CODE=$(curl -s -o /tmp/job_response.json -w "%{http_code}" \
@@ -99,27 +103,45 @@ jobs:
             JOB_ID=$(python3 -c "import json; print(json.load(open('/tmp/job_response.json'))['job_id'])")
             echo "Summarize job started: $JOB_ID"
 
-            # Poll until done or timeout (5 minutes)
+            # Poll until done or timeout (5 minutes). A transient curl/parse
+            # failure keeps the previous STATUS and counts toward a retry
+            # budget; 5 consecutive failures abort the step (#141).
             STATUS="pending"
+            POLL_FAILS=0
             DEADLINE=$((SECONDS + 300))
             while [ $SECONDS -lt $DEADLINE ]; do
-              STATUS=$(curl -sf "$API_URL/jobs/$JOB_ID" \
-                | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
-              echo "Job status: $STATUS"
-              if [ "$STATUS" = "done" ] || [ "$STATUS" = "failed" ]; then
-                break
+              if POLLED=$(curl -sf "$API_URL/jobs/$JOB_ID" \
+                | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])" 2>/dev/null); then
+                POLL_FAILS=0
+                STATUS="$POLLED"
+                echo "Job status: $STATUS"
+                if [ "$STATUS" = "done" ] || [ "$STATUS" = "failed" ]; then
+                  break
+                fi
+              else
+                POLL_FAILS=$((POLL_FAILS + 1))
+                echo "Warning: poll failed ($POLL_FAILS/5)"
+                if [ "$POLL_FAILS" -ge 5 ]; then
+                  echo "Polling failed 5 times in a row — aborting"
+                  echo '{"status":"poll-error","processed":0,"failed":0}' > summarize-result.json
+                  exit 1
+                fi
               fi
               sleep 10
             done
 
-            # Print and save final job details
-            echo "=== Final job details ==="
-            curl -sf "$API_URL/jobs/$JOB_ID" | python3 -m json.tool
+            # Save and print final job details
             curl -sf "$API_URL/jobs/$JOB_ID" > summarize-result.json 2>/dev/null \
               || echo '{"status":"unknown","processed":0,"failed":0}' > summarize-result.json
+            echo "=== Final job details ==="
+            python3 -m json.tool < summarize-result.json || true
 
             if [ "$STATUS" = "failed" ]; then
               echo "Summarize job failed"
+              exit 1
+            fi
+            if [ "$STATUS" != "done" ]; then
+              echo "Summarize job did not finish within the 5-minute deadline (status: $STATUS)"
               exit 1
             fi
 
@@ -138,7 +160,6 @@ jobs:
 
       - name: Score papers
         run: |
-          API_URL="${{ github.event.inputs.api_url || 'http://localhost:8020' }}"
           HTTP_CODE=$(curl -s -o /tmp/score_response.json -w "%{http_code}" \
             -X POST "$API_URL/papers/score-all")
           if [ "$HTTP_CODE" = "200" ]; then
