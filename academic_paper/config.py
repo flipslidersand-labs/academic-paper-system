@@ -26,6 +26,7 @@ class Settings(BaseSettings):
         default="cs.AI,cs.LG,cs.CL", description="Comma-separated preferred arXiv categories for scoring"
     )
     max_upload_mb: int = Field(default=50, description="Maximum PDF upload size in megabytes")
+    api_key: str = Field(default="", description="X-API-Key for write endpoints; empty = no auth")
 
     @property
     def preferred_categories_list(self) -> list[str]:
