@@ -32,6 +32,11 @@ def client(temp_db):
         mock_embedder.embed = AsyncMock(return_value=[[0.1] * 768])  # 768-dim vector
 
         mock_qdrant = MagicMock()
+        # Async methods on QdrantStore must be AsyncMock so they can be awaited (#149).
+        mock_qdrant.aupsert = AsyncMock(return_value=None)
+        mock_qdrant.asearch = AsyncMock(return_value=[])
+        mock_qdrant.adelete_by_paper_id = AsyncMock(return_value=None)
+        mock_qdrant.aensure_collection = AsyncMock(return_value=None)
 
         # Patch and create client
         with (
@@ -241,10 +246,9 @@ def test_ingest_calls_embedder(client):
         assert response.status_code == 200
         # Verify embedder was called
         client.app.state.embedder.embed.assert_called_once()
-        # Verify Qdrant ensure_collection was called
-        client.app.state.vector_store.ensure_collection.assert_called_once()
-        # Verify Qdrant upsert was called
-        client.app.state.vector_store.upsert.assert_called_once()
+        # Verify async Qdrant methods were called (#149)
+        client.app.state.vector_store.aensure_collection.assert_called_once()
+        client.app.state.vector_store.aupsert.assert_called_once()
 
 
 def test_ingest_stores_qdrant_id(client):
