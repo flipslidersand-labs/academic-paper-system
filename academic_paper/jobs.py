@@ -125,9 +125,7 @@ class JobStore:
         keeps unrelated job types (e.g. per-paper ingest) from blocking each
         other.
         """
-        return any(
-            j.status in ("pending", "running") and (kind is None or j.kind == kind) for j in self._jobs.values()
-        )
+        return any(j.status in ("pending", "running") and (kind is None or j.kind == kind) for j in self._jobs.values())
 
     def persist(self, job: Job) -> None:
         """Persist job state to SQLite (call on status transitions)."""
