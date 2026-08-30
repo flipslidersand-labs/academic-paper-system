@@ -160,11 +160,27 @@ def test_start_summarize_all_skips_already_summarized(client, temp_db):
 
 def test_start_summarize_all_409_when_running(client):
     """POST /jobs/summarize-all returns 409 if a job is already running."""
-    job_store._jobs["running-job"] = Job(id="running-job", status="running")
+    job_store._jobs["running-job"] = Job(id="running-job", status="running", kind="summarize-all")
 
     resp = client.post("/jobs/summarize-all")
     assert resp.status_code == 409
     assert "already running" in resp.json()["detail"]
+
+
+def test_start_summarize_all_409_when_pending(client):
+    """Regression (#132): a still-pending job must also block a second start (TOCTOU)."""
+    job_store._jobs["pending-job"] = Job(id="pending-job", status="pending", kind="summarize-all")
+
+    resp = client.post("/jobs/summarize-all")
+    assert resp.status_code == 409
+
+
+def test_start_summarize_all_not_blocked_by_ingest_job(client):
+    """Regression (#132): an in-flight ingest job must not block summarize-all."""
+    job_store._jobs["ingest-job"] = Job(id="ingest-job", status="running", kind="ingest")
+
+    resp = client.post("/jobs/summarize-all")
+    assert resp.status_code == 202
 
 
 def test_start_summarize_all_503_no_llm(client_no_llm):
