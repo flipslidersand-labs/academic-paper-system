@@ -130,10 +130,11 @@ async def lifespan(app: FastAPI):
     setup_telemetry(app, settings.otel_endpoint)
     init_db(settings.academic_db)
     job_store.init(settings.academic_db)
-    # Persistent AsyncClient shared across all embed calls — avoids per-call
-    # TCP/TLS handshake and leverages connection pool (#143).
-    http_client = httpx.AsyncClient(timeout=settings.embedding_timeout)
-    app.state.embedder = EmbedderClient(client=http_client)
+    # Separate clients: embedding batches can take 60–120 s for large PDFs
+    # (EMBEDDING_TIMEOUT); Qdrant calls are fast point operations (QDRANT_TIMEOUT).
+    # Using qdrant_timeout for both caused ReadTimeout on big ingest batches (#153).
+    embed_client = httpx.AsyncClient(timeout=settings.embedding_timeout)
+    app.state.embedder = EmbedderClient(client=embed_client)
     app.state.vector_store = QdrantStore()
     llm_client = get_llm_client()
     app.state.llm = llm_client
@@ -146,7 +147,7 @@ async def lifespan(app: FastAPI):
     app.state.probe_task = asyncio.create_task(_probe_startup_health(app))
     yield
     app.state.probe_task.cancel()
-    await http_client.aclose()
+    await embed_client.aclose()
 
 
 def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
