@@ -25,7 +25,9 @@ Exit codes:
 """
 
 import argparse
+import io
 import json
+import re
 import sys
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
@@ -140,6 +142,50 @@ def fetch_papers(
     return papers
 
 
+ARXIV_WATERMARK_RE = re.compile(r"arXiv:(\d{4}\.\d{4,5})(?:v\d+)?")
+
+
+def find_arxiv_id_in_text(text: str) -> str | None:
+    """Extract the bare arXiv ID from page text, scanning forward and mirrored.
+
+    pdfplumber sometimes extracts the sideways arXiv watermark reversed
+    (e.g. "1v17001.0142:viXra"), so the mirrored text is scanned too (#163).
+    """
+    m = ARXIV_WATERMARK_RE.search(text)
+    if m:
+        return m.group(1)
+    m = ARXIV_WATERMARK_RE.search(text[::-1])
+    return m.group(1) if m else None
+
+
+def _extract_first_page_text(pdf_content: bytes) -> str | None:
+    """Extract page-1 text, or None when pdfplumber is unavailable or extraction fails."""
+    try:
+        import pdfplumber
+    except ImportError:
+        return None
+    try:
+        with pdfplumber.open(io.BytesIO(pdf_content)) as pdf:
+            return pdf.pages[0].extract_text() or ""
+    except Exception:
+        return None
+
+
+def verify_arxiv_id(pdf_content: bytes, expected_arxiv_id: str) -> bool | None:
+    """Check the PDF page-1 watermark against the expected arXiv ID.
+
+    Returns True on match, False on mismatch, None when the check could not
+    run (pdfplumber missing, extraction error, or no watermark found).
+    """
+    text = _extract_first_page_text(pdf_content)
+    if text is None:
+        return None
+    found = find_arxiv_id_in_text(text)
+    if found is None:
+        return None
+    return found == expected_arxiv_id.split("v")[0]
+
+
 def ingest_paper(
     client: httpx.Client,
     paper: dict,
@@ -152,6 +198,13 @@ def ingest_paper(
     pdf_resp.raise_for_status()
     if "pdf" not in pdf_resp.headers.get("content-type", "").lower():
         raise ValueError(f"Not a PDF (content-type: {pdf_resp.headers.get('content-type')})")
+
+    if verify_arxiv_id(pdf_resp.content, paper["arxiv_id"]) is False:
+        print(
+            f"[arxiv-collect] WARN [{paper['arxiv_id']}] PDF watermark does not match the expected "
+            "arXiv ID — downloaded content may belong to a different paper (#163). Ingesting anyway.",
+            file=sys.stderr,
+        )
 
     return submit_and_wait(
         client,
