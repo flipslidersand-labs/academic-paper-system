@@ -90,7 +90,16 @@ jobs:
             --summary-file summary-pubmed.json \
             ${NCBI_API_KEY:+--api-key "$NCBI_API_KEY"}
 
-      # The S2 / PubMed steps are continue-on-error, so a permanently broken
+      - name: Collect OpenAlex papers
+        continue-on-error: true
+        run: |
+          python scripts/openalex_collect.py \
+            --query "large language model retrieval augmented generation" \
+            --max "$MAX_RESULTS" \
+            --api-url "$API_URL" \
+            --summary-file summary-openalex.json
+
+      # The S2 / PubMed / OpenAlex steps are continue-on-error, so a permanently broken
       # collector would keep the workflow green forever. This gate fails when a
       # summary file is missing (script crashed before writing) or every fetched
       # paper failed to ingest. A fetch_error alone (e.g. keyless S2 rate limit)
@@ -101,7 +110,11 @@ jobs:
           import json, sys
 
           problems = []
-          for name, path in [("semantic-scholar", "summary-s2.json"), ("pubmed", "summary-pubmed.json")]:
+          for name, path in [
+              ("semantic-scholar", "summary-s2.json"),
+              ("pubmed", "summary-pubmed.json"),
+              ("openalex", "summary-openalex.json"),
+          ]:
               try:
                   with open(path) as f:
                       s = json.load(f)
@@ -211,6 +224,7 @@ jobs:
             summary-arxiv.json
             summary-s2.json
             summary-pubmed.json
+            summary-openalex.json
           if-no-files-found: ignore
           retention-days: 30
 
@@ -239,6 +253,7 @@ jobs:
           arxiv = load_summary("summary-arxiv.json")
           s2 = load_summary("summary-s2.json")
           pubmed = load_summary("summary-pubmed.json")
+          openalex = load_summary("summary-openalex.json")
           summ = load_summary("summarize-result.json")
 
           score_info = {}
@@ -268,6 +283,7 @@ jobs:
                   {"name": "arXiv", "value": fmt(arxiv), "inline": False},
                   {"name": "Semantic Scholar", "value": fmt(s2), "inline": False},
                   {"name": "PubMed", "value": fmt(pubmed), "inline": False},
+                  {"name": "OpenAlex", "value": fmt(openalex), "inline": False},
                   {
                       "name": "\U0001f52c 要約ジョブ",
                       "value": f"処理:{summ.get('processed','-')} / 失敗:{summ.get('failed','-')} / {s_status}",
