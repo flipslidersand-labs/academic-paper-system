@@ -1,6 +1,7 @@
 """SQLite database module for academic paper system."""
 
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -64,8 +65,17 @@ def init_db(db_path: str) -> None:
             ("published_date", "TEXT"),
             ("source", "TEXT"),
             ("score", "REAL"),
+            ("arxiv_id", "TEXT"),
         ],
     )
+
+    # Backfill arxiv_id for rows ingested before the column existed (#163).
+    for row_id, file_name in cursor.execute(
+        "SELECT id, file_name FROM papers WHERE arxiv_id IS NULL AND file_name LIKE 'arxiv\\_%' ESCAPE '\\'"
+    ).fetchall():
+        arxiv_id = arxiv_id_from_file_name(file_name)
+        if arxiv_id:
+            cursor.execute("UPDATE papers SET arxiv_id = ? WHERE id = ?", (arxiv_id, row_id))
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS chunks (
@@ -128,6 +138,15 @@ def init_db(db_path: str) -> None:
     conn.close()
 
 
+_ARXIV_FILE_NAME_RE = re.compile(r"^arxiv_(\d{4}\.\d{4,5})(?:v\d+)?\.pdf$")
+
+
+def arxiv_id_from_file_name(file_name: str) -> str | None:
+    """Extract the bare arXiv ID (no version) from an `arxiv_<id>vX.pdf` file name."""
+    m = _ARXIV_FILE_NAME_RE.match(file_name)
+    return m.group(1) if m else None
+
+
 def _migrate_add_columns(cursor: sqlite3.Cursor, table: str, columns: list[tuple[str, str]]) -> None:
     """Add columns to a table if they don't already exist."""
     for col_name, col_def in columns:
@@ -150,7 +169,8 @@ def save_paper(
         file_name: Name of the PDF file.
         file_hash: Hash of the file content.
         **kwargs: Optional metadata: title, authors (list), year, pages,
-                  categories (list), published_date (str), source (str).
+                  categories (list), published_date (str), source (str),
+                  arxiv_id (str).
 
     Returns:
         The paper_id of the saved paper.
@@ -168,8 +188,8 @@ def save_paper(
         """
         INSERT INTO papers
             (file_name, file_hash, title, authors, year, pages, ingested_at, status,
-             categories, published_date, source)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             categories, published_date, source, arxiv_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """,
         (
             file_name,
@@ -183,6 +203,7 @@ def save_paper(
             categories_json,
             kwargs.get("published_date"),
             kwargs.get("source"),
+            kwargs.get("arxiv_id") or arxiv_id_from_file_name(file_name),
         ),
     )
     conn.commit()

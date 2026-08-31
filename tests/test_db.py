@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from academic_paper.db import (
+    arxiv_id_from_file_name,
     get_chunks,
     get_connection,
     init_db,
@@ -195,4 +196,53 @@ def test_search_fts(temp_db):
     assert len(results_filtered) > 0
     assert all(r["paper_id"] == paper_id for r in results_filtered)
 
+    conn.close()
+
+
+@pytest.mark.parametrize(
+    ("file_name", "expected"),
+    [
+        ("arxiv_2410.10071v1.pdf", "2410.10071"),
+        ("arxiv_2005.11401v4.pdf", "2005.11401"),
+        ("arxiv_2608.27417.pdf", "2608.27417"),
+        ("2410.10071.pdf", None),
+        ("regular-paper.pdf", None),
+        ("arxiv_notanid.pdf", None),
+    ],
+)
+def test_arxiv_id_from_file_name(file_name, expected):
+    assert arxiv_id_from_file_name(file_name) == expected
+
+
+def test_save_paper_derives_arxiv_id(temp_db):
+    """save_paper fills arxiv_id from an arxiv_*.pdf file name (#163)."""
+    init_db(temp_db)
+    conn = get_connection(temp_db)
+
+    arxiv_paper = save_paper(conn, file_name="arxiv_2005.11401v4.pdf", file_hash="h-arxiv")
+    other_paper = save_paper(conn, file_name="uploaded.pdf", file_hash="h-other")
+
+    rows = dict(conn.execute("SELECT id, arxiv_id FROM papers").fetchall())
+    assert rows[arxiv_paper] == "2005.11401"
+    assert rows[other_paper] is None
+    conn.close()
+
+
+def test_init_db_backfills_arxiv_id(temp_db):
+    """Re-running init_db backfills arxiv_id for legacy rows (#163)."""
+    init_db(temp_db)
+    conn = get_connection(temp_db)
+    conn.execute(
+        "INSERT INTO papers (file_name, file_hash, ingested_at, status, source) "
+        "VALUES ('arxiv_2410.10071v1.pdf', 'h-legacy', '2026-01-01T00:00:00', 'indexed', 'arxiv')"
+    )
+    conn.execute("UPDATE papers SET arxiv_id = NULL")
+    conn.commit()
+    conn.close()
+
+    init_db(temp_db)
+
+    conn = get_connection(temp_db)
+    row = conn.execute("SELECT arxiv_id FROM papers WHERE file_hash = 'h-legacy'").fetchone()
+    assert row[0] == "2410.10071"
     conn.close()
