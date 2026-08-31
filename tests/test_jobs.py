@@ -26,6 +26,7 @@ def reset_job_store(temp_db):
     yield
 
 
+
 @pytest.fixture
 def mock_summarizer():
     s = MagicMock()
