@@ -91,7 +91,7 @@ class RAGSummarizer:
                 chunks = self._chunks_from_db(paper_id, top_k)
             else:
                 try:
-                    chunks = self.qdrant.search(
+                    chunks = await self.qdrant.asearch(
                         query_vector=query_vector,
                         limit=top_k,
                         paper_id_filter=paper_id,
@@ -101,7 +101,7 @@ class RAGSummarizer:
                     chunks = self._chunks_from_db(paper_id, top_k)
         else:
             # No embedder configured (test convenience): degraded zero-vector search
-            chunks = self.qdrant.search(
+            chunks = await self.qdrant.asearch(
                 query_vector=[0.0] * 768,
                 limit=top_k,
                 paper_id_filter=paper_id,

@@ -34,6 +34,10 @@ def client(temp_db):
         mock_embedder = MagicMock()
         mock_embedder.embed = AsyncMock(return_value=[[0.1] * 768])
         mock_qdrant = MagicMock()
+        mock_qdrant.aupsert = AsyncMock(return_value=None)
+        mock_qdrant.asearch = AsyncMock(return_value=[])
+        mock_qdrant.adelete_by_paper_id = AsyncMock(return_value=None)
+        mock_qdrant.aensure_collection = AsyncMock(return_value=None)
         with (
             patch("academic_paper.server.EmbedderClient", return_value=mock_embedder),
             patch("academic_paper.server.QdrantStore", return_value=mock_qdrant),

@@ -31,6 +31,10 @@ def client(temp_db):
         mock_embedder.embed_single = AsyncMock(return_value=[0.2] * 768)  # Query embedding
 
         mock_qdrant = MagicMock()
+        mock_qdrant.aupsert = AsyncMock(return_value=None)
+        mock_qdrant.asearch = AsyncMock(return_value=[])
+        mock_qdrant.adelete_by_paper_id = AsyncMock(return_value=None)
+        mock_qdrant.aensure_collection = AsyncMock(return_value=None)
 
         # Patch and create client
         with (
@@ -69,7 +73,7 @@ def test_search_returns_results(client):
             },
         },
     ]
-    client.app.state.vector_store.search = MagicMock(return_value=mock_search_results)
+    client.app.state.vector_store.asearch = AsyncMock(return_value=mock_search_results)
 
     # Mock database query for page_start
     with patch("academic_paper.server.get_connection") as mock_get_conn:
@@ -113,7 +117,7 @@ def test_search_vector_mode(client):
             },
         }
     ]
-    client.app.state.vector_store.search = MagicMock(return_value=mock_search_results)
+    client.app.state.vector_store.asearch = AsyncMock(return_value=mock_search_results)
 
     with patch("academic_paper.server.get_connection") as mock_get_conn:
         mock_conn = MagicMock()
@@ -145,7 +149,7 @@ def test_search_with_paper_id_filter(client):
             },
         }
     ]
-    client.app.state.vector_store.search = MagicMock(return_value=mock_search_results)
+    client.app.state.vector_store.asearch = AsyncMock(return_value=mock_search_results)
 
     with patch("academic_paper.server.get_connection") as mock_get_conn:
         mock_conn = MagicMock()
@@ -157,8 +161,8 @@ def test_search_with_paper_id_filter(client):
         response = client.get("/search?q=test&paper_id=1&limit=5&mode=vector")
 
         assert response.status_code == 200
-        # Verify search was called with paper_id_filter
-        client.app.state.vector_store.search.assert_called_once_with(
+        # Verify asearch was called with paper_id_filter (#149)
+        client.app.state.vector_store.asearch.assert_called_once_with(
             query_vector=[0.2] * 768,
             limit=5,
             paper_id_filter=1,
@@ -198,7 +202,7 @@ def test_search_hybrid_mode(client):
     ]
 
     # Mock vector store search
-    client.app.state.vector_store.search = MagicMock(return_value=mock_vector_results)
+    client.app.state.vector_store.asearch = AsyncMock(return_value=mock_vector_results)
 
     with (
         patch("academic_paper.server.search_fts") as mock_search_fts,
@@ -264,8 +268,8 @@ def test_search_keyword_mode(client):
             limit=10,
             paper_id=None,
         )
-        # Verify vector store search was NOT called
-        client.app.state.vector_store.search.assert_not_called()
+        # Verify vector store asearch was NOT called (#149)
+        client.app.state.vector_store.asearch.assert_not_called()
 
         data = response.json()
         assert data["mode"] == "keyword"
