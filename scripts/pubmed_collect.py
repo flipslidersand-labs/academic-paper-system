@@ -104,11 +104,11 @@ def _parse_article(article) -> dict | None:
             authors.append(name)
 
     # Prefer epub date, fall back to any pub-date
-    pub_date_elem = (
-        article.find(".//pub-date[@pub-type='epub']")
-        or article.find(".//pub-date[@date-type='pub']")
-        or article.find(".//pub-date")
-    )
+    pub_date_elem = article.find(".//pub-date[@pub-type='epub']")
+    if pub_date_elem is None:
+        pub_date_elem = article.find(".//pub-date[@date-type='pub']")
+    if pub_date_elem is None:
+        pub_date_elem = article.find(".//pub-date")
     pub_date = None
     if pub_date_elem is not None:
         year = pub_date_elem.findtext("year", "")

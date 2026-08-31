@@ -78,6 +78,22 @@ jobs:
             --summary-file summary-s2.json \
             ${SEMANTIC_SCHOLAR_API_KEY:+--api-key "$SEMANTIC_SCHOLAR_API_KEY"}
 
+      - name: Check Semantic Scholar failure count
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          try:
+              d = json.load(open("summary-s2.json"))
+          except FileNotFoundError:
+              sys.exit(0)  # step was skipped or did not produce a file
+          failed = d.get("failed", 0)
+          fetched = d.get("fetched", 0)
+          if fetched > 0 and failed == fetched:
+              print(f"::error::S2 all {failed}/{fetched} papers failed", flush=True)
+              sys.exit(1)
+          EOF
+
       - name: Collect PubMed papers
         continue-on-error: true
         env:
@@ -89,6 +105,47 @@ jobs:
             --api-url "$API_URL" \
             --summary-file summary-pubmed.json \
             ${NCBI_API_KEY:+--api-key "$NCBI_API_KEY"}
+
+      - name: Check PubMed failure count
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          try:
+              d = json.load(open("summary-pubmed.json"))
+          except FileNotFoundError:
+              sys.exit(0)
+          failed = d.get("failed", 0)
+          fetched = d.get("fetched", 0)
+          if fetched > 0 and failed == fetched:
+              print(f"::error::PubMed all {failed}/{fetched} papers failed", flush=True)
+              sys.exit(1)
+          EOF
+
+      - name: Collect OpenAlex papers
+        continue-on-error: true
+        run: |
+          python scripts/openalex_collect.py \
+            --query "large language model retrieval augmented generation" \
+            --max "$MAX_RESULTS" \
+            --api-url "$API_URL" \
+            --summary-file summary-openalex.json
+
+      - name: Check OpenAlex failure count
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          try:
+              d = json.load(open("summary-openalex.json"))
+          except FileNotFoundError:
+              sys.exit(0)
+          failed = d.get("failed", 0)
+          fetched = d.get("fetched", 0)
+          if fetched > 0 and failed == fetched:
+              print(f"::error::OpenAlex all {failed}/{fetched} papers failed", flush=True)
+              sys.exit(1)
+          EOF
 
       - name: Trigger bulk summarization
         if: ${{ github.event.inputs.summarize != 'false' }}
