@@ -1,0 +1,96 @@
+{
+  "generated_at": "2026-08-31T11:33:58+00:00",
+  "source": "qdrant chunk_index=0 text (arXiv watermark, forward+mirrored scan)",
+  "entries": [
+    {
+      "paper_id": 1,
+      "db_file_name": "2410.10071.pdf",
+      "qdrant_file_name": "2410.10071.pdf",
+      "chunk_head": "4202 tcO 41 ]AM.sc[ 1v17001.0142:viXra Content Caching-Assisted Vehicular Edge Computing Using Multi-Agent Graph Attenti",
+      "arxiv_id": "2410.10071",
+      "new_file_name": "arxiv_2410.10071v1.pdf",
+      "status": "rename"
+    },
+    {
+      "paper_id": 2,
+      "db_file_name": "2508.11836.pdf",
+      "qdrant_file_name": "rag-paper.pdf",
+      "chunk_head": "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks PatrickLewis†‡,EthanPerez(cid:63), AleksandraPiktus†,Fa",
+      "arxiv_id": "2005.11401",
+      "new_file_name": "arxiv_2005.11401v4.pdf",
+      "status": "wrong_id"
+    },
+    {
+      "paper_id": 3,
+      "db_file_name": "2508.11845.pdf",
+      "qdrant_file_name": "gpt4-report.pdf",
+      "chunk_head": "GPT-4 Technical Report OpenAI∗ Abstract WereportthedevelopmentofGPT-4,alarge-scale,multimodalmodelwhichcan acceptimagean",
+      "arxiv_id": "2303.08774",
+      "new_file_name": "arxiv_2303.08774v6.pdf",
+      "status": "wrong_id"
+    },
+    {
+      "paper_id": 4,
+      "db_file_name": "2509.25673.pdf",
+      "qdrant_file_name": "2509.25673.pdf",
+      "chunk_head": "Mitigating Biases in Language Models via Bias Unlearning DianqingLiu1,2,YiLiu2,*,GuoqingJin2,ZhendongMao1, 1Universityof",
+      "arxiv_id": "2509.25673",
+      "new_file_name": "arxiv_2509.25673v1.pdf",
+      "status": "rename"
+    },
+    {
+      "paper_id": 5,
+      "db_file_name": "2511.07482.pdf",
+      "qdrant_file_name": "2511.07482.pdf",
+      "chunk_head": "Alignment-Constrained Dynamic Pruning for LLMs: Identifying and Preserving Alignment-Critical Circuits DevPatel1 Gabriel",
+      "arxiv_id": "2511.07482",
+      "new_file_name": "arxiv_2511.07482v1.pdf",
+      "status": "rename"
+    },
+    {
+      "paper_id": 6,
+      "db_file_name": "2512.06812.pdf",
+      "qdrant_file_name": "2512.06812.pdf",
+      "chunk_head": "Large Language Model–Based Generation of Discharge Summaries Tiago Rodrigues1,2* and Carla Teixeira Lopes1,2 1Faculty of",
+      "arxiv_id": "2512.06812",
+      "new_file_name": "arxiv_2512.06812v1.pdf",
+      "status": "rename"
+    },
+    {
+      "paper_id": 7,
+      "db_file_name": "2601.10849.pdf",
+      "qdrant_file_name": "2601.10849.pdf",
+      "chunk_head": "ACCEPTEDTOIEEETRANSACTIONSONWIRELESSCOMMUNICATIONS 1 Cooperative UAVs for Remote Data Collection under Limited Communica",
+      "arxiv_id": "2601.10849",
+      "new_file_name": "arxiv_2601.10849v1.pdf",
+      "status": "rename"
+    },
+    {
+      "paper_id": 8,
+      "db_file_name": "2602.10161.pdf",
+      "qdrant_file_name": "2602.10161.pdf",
+      "chunk_head": "Omni-Safety under Cross-Modality Conflict: Vulnerabilities, Dynamics Mechanisms and Efficient Alignment KunWang*1 Zherui",
+      "arxiv_id": "2602.10161",
+      "new_file_name": "arxiv_2602.10161v1.pdf",
+      "status": "rename"
+    },
+    {
+      "paper_id": 9,
+      "db_file_name": "2608.06495.pdf",
+      "qdrant_file_name": "2608.06495.pdf",
+      "chunk_head": "ConstructCIE: A Dataset for Extracting Causal Information from Construction Accident Narratives HungNguyen†,JaehoonLee‡,",
+      "arxiv_id": "2608.06495",
+      "new_file_name": "arxiv_2608.06495v1.pdf",
+      "status": "rename"
+    },
+    {
+      "paper_id": 10,
+      "db_file_name": "2608.07458.pdf",
+      "qdrant_file_name": "2608.07458.pdf",
+      "chunk_head": "CoinRAG: Contextualized Information Nugget KV Cache Reuse for Long-Context RAG GyuwanKim1 CheoneumPark2 TaoYang1 1Univer",
+      "arxiv_id": "2608.07458",
+      "new_file_name": "arxiv_2608.07458v1.pdf",
+      "status": "rename"
+    }
+  ]
+}
