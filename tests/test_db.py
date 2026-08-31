@@ -1,8 +1,6 @@
 """Tests for academic_paper.db module."""
 
 import json
-import tempfile
-from pathlib import Path
 
 import pytest
 
@@ -15,16 +13,6 @@ from academic_paper.db import (
     save_paper,
     search_fts,
 )
-
-
-@pytest.fixture
-def temp_db():
-    """Create a temporary in-memory database for testing."""
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        db_path = f.name
-    yield db_path
-    # Cleanup
-    Path(db_path).unlink(missing_ok=True)
 
 
 def test_init_db_creates_tables(temp_db):

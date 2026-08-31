@@ -1,6 +1,5 @@
 """Tests for author/category filter, metadata ingest, and GET /summaries."""
 
-import tempfile
 from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -10,7 +9,6 @@ from fastapi.testclient import TestClient
 from academic_paper.config import settings
 from academic_paper.db import (
     get_connection,
-    init_db,
     list_papers_filtered,
     list_summaries,
     save_chunks,
@@ -18,14 +16,6 @@ from academic_paper.db import (
     save_summary,
 )
 from academic_paper.server import app
-
-
-@pytest.fixture
-def temp_db():
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as f:
-        db_path = f.name
-    init_db(db_path)
-    yield db_path
 
 
 @pytest.fixture
