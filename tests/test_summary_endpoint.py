@@ -1,24 +1,13 @@
 """Tests for GET /papers/{id}/summary endpoint."""
 
-import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from academic_paper.config import settings
-from academic_paper.db import get_connection, init_db, save_chunks, save_paper
+from academic_paper.db import get_connection, save_chunks, save_paper
 from academic_paper.server import app
-
-
-@pytest.fixture
-def temp_db():
-    """Create a temporary database for testing."""
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as f:
-        db_path = f.name
-    # Initialize the database schema
-    init_db(db_path)
-    yield db_path
 
 
 @pytest.fixture

@@ -90,6 +90,39 @@ jobs:
             --summary-file summary-pubmed.json \
             ${NCBI_API_KEY:+--api-key "$NCBI_API_KEY"}
 
+      # The S2 / PubMed steps are continue-on-error, so a permanently broken
+      # collector would keep the workflow green forever. This gate fails when a
+      # summary file is missing (script crashed before writing) or every fetched
+      # paper failed to ingest. A fetch_error alone (e.g. keyless S2 rate limit)
+      # only warns (#151).
+      - name: Verify collector results
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+
+          problems = []
+          for name, path in [("semantic-scholar", "summary-s2.json"), ("pubmed", "summary-pubmed.json")]:
+              try:
+                  with open(path) as f:
+                      s = json.load(f)
+              except FileNotFoundError:
+                  problems.append(f"{name}: summary file missing — script crashed before writing it")
+                  continue
+              fetched = s.get("fetched", 0)
+              ok = s.get("ingested", 0) + s.get("duplicate", 0)
+              if s.get("fetch_error") and fetched == 0:
+                  print(f"WARN {name}: search API failed ({s['fetch_error']}) — no papers this run")
+              elif fetched > 0 and ok == 0 and s.get("failed", 0) > 0:
+                  problems.append(f"{name}: all {fetched} fetched papers failed to ingest")
+
+          if problems:
+              print("Collector health check failed:")
+              for p in problems:
+                  print(f"  - {p}")
+              sys.exit(1)
+          print("Collector results OK")
+          EOF
+
       - name: Trigger bulk summarization
         if: ${{ github.event.inputs.summarize != 'false' }}
         run: |
