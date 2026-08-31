@@ -19,7 +19,6 @@ from academic_paper.jobs import Job, JobStore, job_store
 from academic_paper.server import app
 
 
-
 @pytest.fixture
 def mock_summarizer():
     s = MagicMock()
