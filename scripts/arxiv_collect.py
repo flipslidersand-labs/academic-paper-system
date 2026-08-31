@@ -33,12 +33,16 @@ import xml.etree.ElementTree as ET
 from urllib.parse import quote
 
 import httpx
+from _collect_common import download_pdf, ingest_pdf, run_collect
 from cli_utils import check_date_order, iso_date, positive_int
-from ingest_client import submit_and_wait
+
+# academic_paper is importable from repo root (pip install -e .)
+from academic_paper.retry import with_retry
 
 ARXIV_API = "https://export.arxiv.org/api/query"
 ARXIV_PDF_BASE = "https://arxiv.org/pdf"
 FETCH_FACTOR = 5  # multiply max_results when date-filtering to fill the target
+_ARXIV_RETRYABLE = (httpx.TimeoutException, httpx.NetworkError)
 
 
 def _date_to_arxiv(date_str: str, end_of_day: bool = False) -> str:
@@ -83,8 +87,13 @@ def fetch_papers(
         f"&sortBy=submittedDate&sortOrder=descending"
         f"&max_results={fetch_max}"
     )
-    resp = httpx.get(url, timeout=timeout)
-    resp.raise_for_status()
+
+    def _fetch():
+        r = httpx.get(url, timeout=timeout)
+        r.raise_for_status()
+        return r
+
+    resp = with_retry(_fetch, attempts=3, base_delay=2.0, exceptions=_ARXIV_RETRYABLE)
 
     root = ET.fromstring(resp.text)
     ns = {"atom": "http://www.w3.org/2005/Atom"}
@@ -158,20 +167,24 @@ def find_arxiv_id_in_text(text: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _extract_first_page_text(pdf_content: bytes) -> str | None:
-    """Extract page-1 text, or None when pdfplumber is unavailable or extraction fails."""
+def _extract_first_page_text(pdf_content: bytes | str) -> str | None:
+    """Extract page-1 text from PDF bytes or a file path.
+
+    Returns None when pdfplumber is unavailable or extraction fails.
+    """
     try:
         import pdfplumber
     except ImportError:
         return None
     try:
-        with pdfplumber.open(io.BytesIO(pdf_content)) as pdf:
+        source = io.BytesIO(pdf_content) if isinstance(pdf_content, bytes) else pdf_content
+        with pdfplumber.open(source) as pdf:
             return pdf.pages[0].extract_text() or ""
     except Exception:
         return None
 
 
-def verify_arxiv_id(pdf_content: bytes, expected_arxiv_id: str) -> bool | None:
+def verify_arxiv_id(pdf_content: bytes | str, expected_arxiv_id: str) -> bool | None:
     """Check the PDF page-1 watermark against the expected arXiv ID.
 
     Returns True on match, False on mismatch, None when the check could not
@@ -193,45 +206,29 @@ def ingest_paper(
     pdf_timeout: int = 60,
     poll_timeout: int = 300,
 ) -> dict:
-    """Download the PDF and submit it to the async /papers/ingest job."""
-    pdf_resp = httpx.get(paper["pdf_url"], timeout=pdf_timeout, follow_redirects=True)
-    pdf_resp.raise_for_status()
-    if "pdf" not in pdf_resp.headers.get("content-type", "").lower():
-        raise ValueError(f"Not a PDF (content-type: {pdf_resp.headers.get('content-type')})")
-
-    if verify_arxiv_id(pdf_resp.content, paper["arxiv_id"]) is False:
-        print(
-            f"[arxiv-collect] WARN [{paper['arxiv_id']}] PDF watermark does not match the expected "
-            "arXiv ID — downloaded content may belong to a different paper (#163). Ingesting anyway.",
-            file=sys.stderr,
+    """Stream the PDF from arXiv and submit it via the ingest API."""
+    with download_pdf(client, paper["pdf_url"], pdf_timeout) as tmp_path:
+        if verify_arxiv_id(tmp_path, paper["arxiv_id"]) is False:
+            print(
+                f"[arxiv-collect] WARN [{paper['arxiv_id']}] PDF watermark does not match the expected "
+                "arXiv ID — downloaded content may belong to a different paper (#163). Ingesting anyway.",
+                file=sys.stderr,
+            )
+        result = ingest_pdf(
+            client,
+            api_url,
+            paper["file_name"],
+            tmp_path,
+            {
+                "title": paper["title"],
+                "authors": json.dumps(paper["authors"]),
+                "categories": json.dumps(paper["categories"]),
+                "published_date": paper["published_date"] or "",
+                "source": "arxiv",
+            },
+            poll_timeout,
         )
-
-    return submit_and_wait(
-        client,
-        api_url,
-        paper["file_name"],
-        pdf_resp.content,
-        {
-            "title": paper["title"],
-            "authors": json.dumps(paper["authors"]),
-            "categories": json.dumps(paper["categories"]),
-            "published_date": paper["published_date"] or "",
-            "source": "arxiv",
-        },
-        poll_timeout=poll_timeout,
-    )
-
-
-def build_summary(counts: dict, papers: list[dict]) -> str:
-    """Build a human-readable run summary."""
-    lines = [
-        "## arXiv Daily Collect Summary",
-        f"- Fetched : {len(papers)}",
-        f"- Ingested: {counts['ingested']}",
-        f"- Skipped (duplicate): {counts['duplicate']}",
-        f"- Failed  : {counts['failed']}",
-    ]
-    return "\n".join(lines)
+    return {**result, "label": paper["arxiv_id"], "arxiv_id": paper["arxiv_id"]}
 
 
 def main() -> None:
@@ -303,39 +300,12 @@ def main() -> None:
 
     print(f"[arxiv-collect] fetched {len(papers)} papers")
 
-    counts = {"ingested": 0, "duplicate": 0, "failed": 0}
-    detail: list[dict] = []
-
-    with httpx.Client() as client:
-        for paper in papers:
-            arxiv_id = paper["arxiv_id"]
-            try:
-                result = ingest_paper(client, paper, args.api_url, poll_timeout=args.poll_timeout)
-                status = result["status"]
-                counts[status] = counts.get(status, 0) + 1
-                label = "OK  " if status == "ingested" else "SKIP"
-                pid = result.get("paper_id", "-")
-                authors_short = ", ".join(paper["authors"][:2])
-                if len(paper["authors"]) > 2:
-                    authors_short += " et al."
-                print(f"  {label} [{arxiv_id}] id={pid} | {paper['title'][:50]} | {authors_short}")
-                detail.append({"arxiv_id": arxiv_id, "status": status, "paper_id": pid})
-            except Exception as exc:
-                counts["failed"] += 1
-                print(f"  ERR  [{arxiv_id}] {exc}", file=sys.stderr)
-                detail.append({"arxiv_id": arxiv_id, "status": "failed", "error": str(exc)})
-
-    summary = build_summary(counts, papers)
-    print(f"\n{summary}")
-
-    if args.summary_file:
-        payload = {**counts, "fetched": len(papers), "detail": detail}
-        with open(args.summary_file, "w") as f:
-            json.dump(payload, f, indent=2)
-        print(f"[arxiv-collect] summary written to {args.summary_file}")
-
-    if counts["failed"] > 0:
-        sys.exit(1)
+    run_collect(
+        "arXiv",
+        papers,
+        lambda client, paper: ingest_paper(client, paper, args.api_url, poll_timeout=args.poll_timeout),
+        args.summary_file,
+    )
 
 
 if __name__ == "__main__":

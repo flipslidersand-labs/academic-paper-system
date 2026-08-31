@@ -21,8 +21,8 @@ import time
 import xml.etree.ElementTree as ET
 
 import httpx
+from _collect_common import download_pdf, ingest_pdf, run_collect
 from cli_utils import positive_int
-from ingest_client import submit_and_wait
 
 ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
@@ -139,28 +139,25 @@ def ingest_paper(
     pdf_timeout: int = 60,
     poll_timeout: int = 300,
 ) -> dict:
-    """Download the PDF from PMC and submit it to the async /papers/ingest job."""
+    """Stream the PDF from PMC and submit it via the ingest API."""
     pmc_id = paper["pmc_id"]
     pdf_url = PMC_PDF_URL.format(pmc_id=pmc_id)
-    pdf_resp = httpx.get(pdf_url, timeout=pdf_timeout, follow_redirects=True)
-    pdf_resp.raise_for_status()
-    if "pdf" not in pdf_resp.headers.get("content-type", "").lower():
-        raise ValueError(f"Not a PDF (content-type: {pdf_resp.headers.get('content-type')})")
-
-    return submit_and_wait(
-        client,
-        api_url,
-        f"pmc_{pmc_id}.pdf",
-        pdf_resp.content,
-        {
-            "title": paper["title"],
-            "authors": json.dumps(paper["authors"]),
-            "categories": json.dumps(paper["categories"]),
-            "published_date": paper["pub_date"] or "",
-            "source": "pubmed",
-        },
-        poll_timeout=poll_timeout,
-    )
+    with download_pdf(client, pdf_url, pdf_timeout) as tmp_path:
+        result = ingest_pdf(
+            client,
+            api_url,
+            f"pmc_{pmc_id}.pdf",
+            tmp_path,
+            {
+                "title": paper["title"],
+                "authors": json.dumps(paper["authors"]),
+                "categories": json.dumps(paper["categories"]),
+                "published_date": paper["pub_date"] or "",
+                "source": "pubmed",
+            },
+            poll_timeout,
+        )
+    return {**result, "label": f"PMC{pmc_id}", "pmc_id": pmc_id}
 
 
 def main() -> None:
@@ -226,38 +223,11 @@ def main() -> None:
 
     print(f"[pubmed] parsed {len(papers)} articles")
 
-    counts = {"ingested": 0, "duplicate": 0, "failed": 0}
-    detail: list[dict] = []
+    def _ingest(client, paper):
+        time.sleep(0.34)  # respect PMC rate limit (3 req/sec default)
+        return ingest_paper(client, paper, args.api_url, poll_timeout=args.poll_timeout)
 
-    with httpx.Client() as client:
-        for paper in papers:
-            pmc_id = paper["pmc_id"]
-            try:
-                time.sleep(0.34)  # respect rate limit
-                result = ingest_paper(client, paper, args.api_url, poll_timeout=args.poll_timeout)
-                status = result["status"]
-                counts[status] = counts.get(status, 0) + 1
-                label = "OK  " if status == "ingested" else "SKIP"
-                print(f"  {label} [PMC{pmc_id}] {paper['title'][:50]}")
-                detail.append({"pmc_id": pmc_id, "status": status})
-            except Exception as exc:
-                counts["failed"] += 1
-                print(f"  ERR  [PMC{pmc_id}] {exc}", file=sys.stderr)
-                detail.append({"pmc_id": pmc_id, "status": "failed", "error": str(exc)})
-
-    print("\n## PubMed Summary")
-    print(f"- Found    : {len(papers)}")
-    print(f"- Ingested : {counts['ingested']}")
-    print(f"- Duplicate: {counts['duplicate']}")
-    print(f"- Failed   : {counts['failed']}")
-
-    if args.summary_file:
-        with open(args.summary_file, "w") as f:
-            json.dump({**counts, "fetched": len(papers), "detail": detail}, f, indent=2)
-        print(f"[pubmed] summary written to {args.summary_file}")
-
-    if counts["failed"] > 0:
-        sys.exit(1)
+    run_collect("PubMed", papers, _ingest, args.summary_file)
 
 
 if __name__ == "__main__":

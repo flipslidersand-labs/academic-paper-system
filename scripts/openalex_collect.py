@@ -24,8 +24,8 @@ import sys
 import time
 
 import httpx
+from _collect_common import download_pdf, ingest_pdf, run_collect
 from cli_utils import check_date_order, iso_date, positive_int
-from ingest_client import submit_and_wait
 
 OPENALEX_API = "https://api.openalex.org/works"
 FIELDS = ",".join(
@@ -167,17 +167,12 @@ def ingest_paper(
     pdf_timeout: int = 60,
     poll_timeout: int = 300,
 ) -> dict:
-    """Download the PDF and submit it to the async /papers/ingest job."""
+    """Stream the PDF from OpenAlex and submit it via the ingest API."""
     pdf_url = work["_pdf_url"]
-    pdf_resp = httpx.get(pdf_url, timeout=pdf_timeout, follow_redirects=True)
-    pdf_resp.raise_for_status()
-    ct = pdf_resp.headers.get("content-type", "").lower()
-    if "pdf" not in ct and not pdf_url.endswith(".pdf"):
-        raise ValueError(f"Not a PDF (content-type: {ct})")
-
     arxiv_id = extract_arxiv_id(work)
     work_id_short = (work.get("id") or "").split("/")[-1][:12]
     file_name = f"oa_{arxiv_id or work_id_short}.pdf"
+    label = f"arXiv:{arxiv_id}" if arxiv_id else work_id_short
 
     title = (work.get("title") or "").replace("\n", " ").strip()
     authors = [(a.get("author") or {}).get("display_name", "") for a in (work.get("authorships") or [])]
@@ -190,20 +185,23 @@ def ingest_paper(
     )
     pub_date = (work.get("publication_date") or "")[:10] or None
 
-    return submit_and_wait(
-        client,
-        api_url,
-        file_name,
-        pdf_resp.content,
-        {
-            "title": title,
-            "authors": json.dumps([a for a in authors if a]),
-            "categories": json.dumps(topics),
-            "published_date": pub_date or "",
-            "source": "openalex",
-        },
-        poll_timeout=poll_timeout,
-    )
+    with download_pdf(client, pdf_url, pdf_timeout) as tmp_path:
+        result = ingest_pdf(
+            client,
+            api_url,
+            file_name,
+            tmp_path,
+            {
+                "title": title,
+                "authors": json.dumps([a for a in authors if a]),
+                "categories": json.dumps(topics),
+                "published_date": pub_date or "",
+                "source": "openalex",
+            },
+            poll_timeout,
+        )
+    work_id = (work.get("id") or "").split("/")[-1]
+    return {**result, "label": label, "id": work_id, "arxiv_id": arxiv_id}
 
 
 def main() -> None:
@@ -283,40 +281,13 @@ def main() -> None:
             print(f"  {p.get('publication_date', '?')}  {label}  {(p.get('title') or '')[:60]}")
         return
 
-    counts = {"ingested": 0, "duplicate": 0, "failed": 0}
-    detail: list[dict] = []
-
-    with httpx.Client() as client:
-        for work in papers:
-            work_id = (work.get("id") or "").split("/")[-1]
-            arxiv_id = extract_arxiv_id(work)
-            label = f"arXiv:{arxiv_id}" if arxiv_id else work_id[:12]
-            title_short = (work.get("title") or "")[:50]
-            try:
-                result = ingest_paper(client, work, args.api_url, poll_timeout=args.poll_timeout)
-                status = result["status"]
-                counts[status] = counts.get(status, 0) + 1
-                tag = "OK  " if status == "ingested" else "SKIP"
-                print(f"  {tag} [{label}] {title_short}")
-                detail.append({"id": work_id, "arxiv_id": arxiv_id, "status": status})
-            except Exception as exc:
-                counts["failed"] += 1
-                print(f"  ERR  [{label}] {exc}", file=sys.stderr)
-                detail.append({"id": work_id, "arxiv_id": arxiv_id, "status": "failed", "error": str(exc)})
-
-    print("\n## OpenAlex Summary")
-    print(f"- Found    : {len(papers)}")
-    print(f"- Ingested : {counts['ingested']}")
-    print(f"- Duplicate: {counts['duplicate']}")
-    print(f"- Failed   : {counts['failed']}")
-
-    if args.summary_file:
-        with open(args.summary_file, "w") as f:
-            json.dump({**counts, "fetched": len(papers), "fetch_error": fetch_error, "detail": detail}, f, indent=2)
-        print(f"[openalex] summary written to {args.summary_file}")
-
-    if counts["failed"] > 0:
-        sys.exit(1)
+    run_collect(
+        "OpenAlex",
+        papers,
+        lambda client, work: ingest_paper(client, work, args.api_url, poll_timeout=args.poll_timeout),
+        args.summary_file,
+        fetch_error=fetch_error,
+    )
 
 
 if __name__ == "__main__":
