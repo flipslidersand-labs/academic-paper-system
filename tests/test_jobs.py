@@ -1,6 +1,5 @@
 """Tests for POST /jobs/summarize-all, GET /jobs, GET /jobs/{job_id}, and job persistence."""
 
-import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -9,7 +8,6 @@ from fastapi.testclient import TestClient
 from academic_paper.config import settings
 from academic_paper.db import (
     get_connection,
-    init_db,
     load_all_jobs,
     save_chunks,
     save_paper,
@@ -21,22 +19,11 @@ from academic_paper.jobs import Job, JobStore, job_store
 from academic_paper.server import app
 
 
-@pytest.fixture
-def temp_db():
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as f:
-        db_path = f.name
-    init_db(db_path)
-    yield db_path
-
-
 @pytest.fixture(autouse=True)
 def reset_job_store(temp_db):
-    """Reset job store state and point it at the test DB between tests."""
-    job_store._jobs.clear()
+    """Point the job store at the test DB (state reset is in conftest.py)."""
     job_store._db_path = temp_db
     yield
-    job_store._jobs.clear()
-    job_store._db_path = None
 
 
 @pytest.fixture

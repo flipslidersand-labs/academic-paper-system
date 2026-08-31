@@ -103,11 +103,19 @@ def _parse_article(article) -> dict | None:
         if name:
             authors.append(name)
 
-    # Prefer epub date, fall back to any pub-date
-    pub_date_elem = (
-        article.find(".//pub-date[@pub-type='epub']")
-        or article.find(".//pub-date[@date-type='pub']")
-        or article.find(".//pub-date")
+    # Prefer epub date, fall back to any pub-date. Element truthiness is
+    # deprecated (childless elements are falsy), so compare against None.
+    pub_date_elem = next(
+        (
+            elem
+            for elem in (
+                article.find(".//pub-date[@pub-type='epub']"),
+                article.find(".//pub-date[@date-type='pub']"),
+                article.find(".//pub-date"),
+            )
+            if elem is not None
+        ),
+        None,
     )
     pub_date = None
     if pub_date_elem is not None:
