@@ -1,3 +1,4 @@
+import asyncio
 from abc import ABC, abstractmethod
 
 import httpx
@@ -51,7 +52,10 @@ class GeminiClient(BaseLLMClient):
         """
         full_prompt = f"{system}\n{prompt}".strip() if system else prompt
 
-        response = self.client.models.generate_content(
+        # generate_content is a sync blocking call; run in thread pool so the
+        # event loop remains responsive during multi-second LLM generation (#149).
+        response = await asyncio.to_thread(
+            self.client.models.generate_content,
             model="gemini-2.0-flash",
             contents=full_prompt,
         )

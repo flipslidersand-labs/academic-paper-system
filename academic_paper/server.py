@@ -105,7 +105,7 @@ async def _check_embedding_svc(timeout: float = 3.0) -> None:
 async def _probe_startup_health(app: FastAPI) -> None:
     """Probe Qdrant and embedding-svc at startup; log warnings on failure."""
     try:
-        app.state.vector_store.client.get_collections()
+        await asyncio.to_thread(app.state.vector_store.client.get_collections)
         logger.info("Startup probe OK: Qdrant")
     except Exception:
         logger.warning(
@@ -198,7 +198,8 @@ async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_na
     for updating the paper status to 'failed'.
     """
     with tracer.start_as_current_span("pdf.extract"):
-        pages = extract_text(tmp_path)
+        # extract_text is CPU-bound / sync I/O — run in thread pool (#149).
+        pages = await asyncio.to_thread(extract_text, tmp_path)
     if not pages:
         raise ValueError("No text extracted from PDF")
 
@@ -210,7 +211,7 @@ async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_na
     with tracer.start_as_current_span("embed.batch"):
         embeddings = await app.state.embedder.embed(chunk_texts, mode="index")
 
-    app.state.vector_store.ensure_collection()
+    await app.state.vector_store.aensure_collection()
 
     points = []
     for idx, (chunk, embedding) in enumerate(zip(chunks_list, embeddings)):
@@ -230,7 +231,7 @@ async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_na
         )
 
     with tracer.start_as_current_span("qdrant.upsert"):
-        app.state.vector_store.upsert(points)
+        await app.state.vector_store.aupsert(points)
 
     try:
         with db_connection(settings.academic_db) as conn:
@@ -240,7 +241,7 @@ async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_na
         # Qdrant upsert succeeded but DB write failed — compensate by deleting
         # the orphaned vectors so the paper can be re-ingested (#145).
         try:
-            app.state.vector_store.delete_by_paper_id(paper_id)
+            await app.state.vector_store.adelete_by_paper_id(paper_id)
         except Exception as qdrant_exc:
             logger.error("Qdrant compensation delete failed for paper_id=%s: %s", paper_id, qdrant_exc)
         raise
@@ -369,7 +370,7 @@ async def ingest_paper(
                 # _ingest_pipeline already compensates Qdrant on save_chunks failure;
                 # compensate here for embed/upsert errors that leave no Qdrant data.
                 try:
-                    app.state.vector_store.delete_by_paper_id(paper_id)
+                    await app.state.vector_store.adelete_by_paper_id(paper_id)
                 except Exception:
                     pass
                 raise _http_exc_for(e, "Ingest failed: check PDF content and try again")
@@ -711,7 +712,7 @@ async def search(
         elif mode == "vector":
             with tracer.start_as_current_span("embed.query"):
                 query_vector = await app.state.embedder.embed_single(q, mode="search")
-            search_results = app.state.vector_store.search(
+            search_results = await app.state.vector_store.asearch(
                 query_vector=query_vector, limit=limit, paper_id_filter=paper_id
             )
             _vec_qids = [r["id"] for r in search_results]
@@ -756,7 +757,7 @@ async def search(
 
             with tracer.start_as_current_span("embed.query"):
                 query_vector = await app.state.embedder.embed_single(q, mode="search")
-            vector_results = app.state.vector_store.search(
+            vector_results = await app.state.vector_store.asearch(
                 query_vector=query_vector, limit=limit, paper_id_filter=paper_id
             )
 
@@ -847,7 +848,7 @@ async def health():
     overall = "ok"
 
     try:
-        app.state.vector_store.client.get_collections()
+        await asyncio.to_thread(app.state.vector_store.client.get_collections)
     except Exception:
         status["qdrant"] = "error"
         overall = "degraded"

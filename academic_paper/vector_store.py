@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 
 import httpx
@@ -80,3 +81,23 @@ class QdrantStore:
 
         results = with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
         return [{"id": str(r.id), "score": r.score, "payload": r.payload} for r in results.points]
+
+    # ------------------------------------------------------------------
+    # Async wrappers — run sync methods in a thread pool so event-loop
+    # callers don't block (#149). with_retry uses time.sleep which is
+    # safe inside a thread but would stall the loop if called directly.
+    # ------------------------------------------------------------------
+
+    async def aupsert(self, points: list[dict]) -> None:
+        await asyncio.to_thread(self.upsert, points)
+
+    async def adelete_by_paper_id(self, paper_id: int) -> None:
+        await asyncio.to_thread(self.delete_by_paper_id, paper_id)
+
+    async def asearch(
+        self, query_vector: list[float], limit: int = 10, paper_id_filter: int | None = None
+    ) -> list[dict]:
+        return await asyncio.to_thread(self.search, query_vector, limit, paper_id_filter)
+
+    async def aensure_collection(self) -> None:
+        await asyncio.to_thread(self.ensure_collection)

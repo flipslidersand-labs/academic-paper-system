@@ -39,7 +39,7 @@ async def test_summarize_returns_structured_dict():
         {"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "Sample chunk text for page 1"}},
         {"id": "2", "score": 0.85, "payload": {"paper_id": 1, "page_start": 2, "text": "Sample chunk text for page 2"}},
     ]
-    mock_qdrant.search.return_value = chunks
+    mock_qdrant.asearch = AsyncMock(return_value=chunks)
 
     # Create summarizer and test
     summarizer = RAGSummarizer(mock_llm, mock_qdrant)
@@ -72,7 +72,7 @@ async def test_summarize_raises_on_invalid_json():
 
     # Mock chunks
     chunks = [{"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "Sample chunk text"}}]
-    mock_qdrant.search.return_value = chunks
+    mock_qdrant.asearch = AsyncMock(return_value=chunks)
 
     # Create summarizer and test
     summarizer = RAGSummarizer(mock_llm, mock_qdrant)
@@ -109,7 +109,7 @@ async def test_summarize_calls_llm_with_context():
             "payload": {"paper_id": 1, "page_start": 1, "text": "Important paper content for context"},
         }
     ]
-    mock_qdrant.search.return_value = chunks
+    mock_qdrant.asearch = AsyncMock(return_value=chunks)
 
     # Create summarizer and call
     summarizer = RAGSummarizer(mock_llm, mock_qdrant)
@@ -133,7 +133,7 @@ async def test_summarize_qdrant_attr_error_propagates():
     """Regression (#139): AttributeError from qdrant.search is a real bug and must propagate."""
     mock_llm = AsyncMock()
     mock_qdrant = MagicMock()
-    mock_qdrant.search.side_effect = AttributeError("no search")
+    mock_qdrant.asearch = AsyncMock(side_effect=AttributeError("no search"))
     mock_embedder = AsyncMock()
     mock_embedder.embed_single.return_value = [0.1] * 768
 
@@ -154,7 +154,7 @@ async def test_summarize_qdrant_unavailable_falls_back_to_db():
         {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
     )
     mock_qdrant = MagicMock()
-    mock_qdrant.search.side_effect = ResponseHandlingException("connection refused")
+    mock_qdrant.asearch = AsyncMock(side_effect=ResponseHandlingException("connection refused"))
     mock_embedder = AsyncMock()
     mock_embedder.embed_single.return_value = [0.1] * 768
 
@@ -176,7 +176,7 @@ async def test_summarize_raises_when_no_chunks():
     """ValueError raised when chunks list is empty."""
     mock_llm = AsyncMock()
     mock_qdrant = MagicMock()
-    mock_qdrant.search.return_value = []
+    mock_qdrant.asearch = AsyncMock(return_value=[])
 
     summarizer = RAGSummarizer(mock_llm, mock_qdrant)
     with pytest.raises(ValueError, match="No chunks found"):
@@ -188,7 +188,7 @@ async def test_summarize_raises_when_no_valid_text_in_chunks():
     """ValueError raised when chunks exist but all have empty text."""
     mock_llm = AsyncMock()
     mock_qdrant = MagicMock()
-    mock_qdrant.search.return_value = [{"id": "1", "payload": {"paper_id": 1, "page_start": 1, "text": ""}}]
+    mock_qdrant.asearch = AsyncMock(return_value=[{"id": "1", "payload": {"paper_id": 1, "page_start": 1, "text": ""}}])
 
     summarizer = RAGSummarizer(mock_llm, mock_qdrant)
     with pytest.raises(ValueError, match="No valid content"):
@@ -200,9 +200,9 @@ async def test_summarize_keywords_not_list_normalized():
     """When LLM returns keywords as a string it is wrapped in a list."""
     mock_llm = AsyncMock()
     mock_qdrant = MagicMock()
-    mock_qdrant.search.return_value = [
-        {"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "sample text"}}
-    ]
+    mock_qdrant.asearch = AsyncMock(
+        return_value=[{"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "sample text"}}]
+    )
     mock_llm.generate.return_value = json.dumps(
         {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": "single keyword"}
     )
@@ -225,7 +225,7 @@ async def test_summarize_uses_embedder_with_title():
     mock_embedder.embed_single.return_value = query_vec
 
     chunks = [{"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "paper text"}}]
-    mock_qdrant.search.return_value = chunks
+    mock_qdrant.asearch = AsyncMock(return_value=chunks)
     mock_llm.generate.return_value = json.dumps(
         {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
     )
@@ -234,7 +234,7 @@ async def test_summarize_uses_embedder_with_title():
     await summarizer.summarize(paper_id=1, file_hash="abc", title="My Paper Title")
 
     mock_embedder.embed_single.assert_called_once_with("My Paper Title", mode="search")
-    mock_qdrant.search.assert_called_once_with(query_vector=query_vec, limit=5, paper_id_filter=1)
+    mock_qdrant.asearch.assert_called_once_with(query_vector=query_vec, limit=5, paper_id_filter=1)
 
 
 @pytest.mark.anyio
@@ -246,7 +246,7 @@ async def test_summarize_uses_filename_when_no_title():
     mock_embedder.embed_single.return_value = [0.1] * 768
 
     chunks = [{"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "text"}}]
-    mock_qdrant.search.return_value = chunks
+    mock_qdrant.asearch = AsyncMock(return_value=chunks)
     mock_llm.generate.return_value = json.dumps(
         {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
     )
