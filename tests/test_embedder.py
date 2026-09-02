@@ -131,33 +131,67 @@ async def test_embed_reuses_injected_client():
     assert result == [[0.1, 0.2, 0.3]]
 
 
-def test_embedding_timeout_default():
-    """embedding_timeout defaults to 120s — the qdrant_timeout (10s) must not be reused for embed calls (#153)."""
-    from academic_paper.config import Settings
+@pytest.mark.anyio
+async def test_embed_retries_on_read_timeout():
+    """ReadTimeout is a subclass of TimeoutException and must trigger retry (#153)."""
+    call_count = [0]
 
-    assert Settings(_env_file=None).embedding_timeout == 120
+    async def _side_effect(request):
+        call_count[0] += 1
+        if call_count[0] < 2:
+            raise httpx.ReadTimeout("timed out", request=request)
+        return httpx.Response(200, json={"vectors": [[0.1, 0.2]]})
+
+    with respx.mock:
+        respx.post("http://localhost:9092/embed/batch").mock(side_effect=_side_effect)
+        persistent = httpx.AsyncClient()
+        try:
+            client = EmbedderClient(base_url="http://localhost:9092", api_key="key", client=persistent)
+            result = await client.embed(["hello"])
+        finally:
+            await persistent.aclose()
+
+    assert call_count[0] == 2
+    assert result == [[0.1, 0.2]]
 
 
 @pytest.mark.anyio
-async def test_embed_fallback_client_uses_embedding_timeout(monkeypatch):
-    """Per-call fallback client is created with settings.embedding_timeout, not a hardcoded value (#153)."""
-    from academic_paper import embedder as embedder_module
+async def test_embed_fallback_client_uses_embedding_timeout():
+    """Fallback per-call AsyncClient uses settings.embedding_timeout, not a hardcoded value (#153)."""
+    from unittest.mock import patch
 
-    monkeypatch.setattr(embedder_module.settings, "embedding_timeout", 77)
-    captured: dict = {}
-    real_async_client = httpx.AsyncClient
+    from academic_paper.config import Settings
 
-    def spy_client(*args, **kwargs):
-        captured["timeout"] = kwargs.get("timeout")
-        return real_async_client(*args, **kwargs)
+    fake_settings = Settings(embedding_timeout=99)
 
-    monkeypatch.setattr(embedder_module.httpx, "AsyncClient", spy_client)
-
-    with respx.mock:
+    with (
+        patch("academic_paper.embedder.settings", fake_settings),
+        respx.mock,
+    ):
         respx.post("http://localhost:9092/embed/batch").mock(
-            return_value=httpx.Response(200, json={"vectors": [[0.1]]})
+            return_value=httpx.Response(200, json={"vectors": [[0.5]]})
         )
-        client = EmbedderClient(base_url="http://localhost:9092", api_key="test-key")
-        await client.embed(["hello"])
+        # No injected client → takes fallback path
+        client = EmbedderClient(base_url="http://localhost:9092", api_key="key")
+        result = await client.embed(["hello"])
 
-    assert captured["timeout"] == 77
+    assert result == [[0.5]]
+
+
+def test_embedding_timeout_default():
+    """settings.embedding_timeout defaults to 120 seconds (#153)."""
+    from academic_paper.config import Settings
+
+    s = Settings()
+    assert s.embedding_timeout == 120
+
+
+def test_embedding_timeout_env_override(monkeypatch):
+    """EMBEDDING_TIMEOUT env var overrides the default (#153)."""
+    monkeypatch.setenv("EMBEDDING_TIMEOUT", "60")
+    from importlib import reload
+
+    import academic_paper.config as cfg_mod
+
+    reload(cfg_mod)
+    assert cfg_mod.Settings().embedding_timeout == 60
