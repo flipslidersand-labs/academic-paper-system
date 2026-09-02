@@ -10,9 +10,13 @@ result (e.g. `wait=true`), the result is returned directly without polling.
 """
 
 import io
+import os
 import time
 
 import httpx
+
+_API_KEY = os.getenv("INGEST_API_KEY", "")
+_AUTH_HEADERS = {"X-API-Key": _API_KEY} if _API_KEY else {}
 
 
 def submit_and_wait(
@@ -51,6 +55,7 @@ def submit_and_wait(
         f"{api_url}/papers/ingest",
         files={"file": (file_name, io.BytesIO(pdf_bytes), "application/pdf")},
         data=metadata,
+        headers=_AUTH_HEADERS,
         timeout=submit_timeout,
     )
     if resp.status_code == 409:
