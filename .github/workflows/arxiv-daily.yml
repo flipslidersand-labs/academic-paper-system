@@ -37,6 +37,10 @@ jobs:
       API_URL: ${{ github.event.inputs.api_url || 'http://localhost:8020' }}
       CATEGORIES: ${{ github.event.inputs.categories || 'cs.AI cs.LG cs.CL' }}
       MAX_RESULTS: ${{ github.event.inputs.max_results || '20' }}
+      # Write-endpoint auth (#183). ingest_client reads this env; curl steps
+      # pass it as X-API-Key. Empty when the secret is unset — the server then
+      # runs with auth disabled and ignores the header.
+      PAPER_API_KEY: ${{ secrets.PAPER_API_KEY }}
 
     steps:
       - uses: actions/checkout@v7
@@ -143,6 +147,7 @@ jobs:
 
           # POST /jobs/summarize-all — capture HTTP status and body separately
           HTTP_CODE=$(curl -s -o /tmp/job_response.json -w "%{http_code}" \
+            ${PAPER_API_KEY:+-H "X-API-Key: $PAPER_API_KEY"} \
             -X POST "$API_URL/jobs/summarize-all")
 
           if [ "$HTTP_CODE" = "202" ]; then
@@ -207,6 +212,7 @@ jobs:
       - name: Score papers
         run: |
           HTTP_CODE=$(curl -s -o /tmp/score_response.json -w "%{http_code}" \
+            ${PAPER_API_KEY:+-H "X-API-Key: $PAPER_API_KEY"} \
             -X POST "$API_URL/papers/score-all")
           if [ "$HTTP_CODE" = "200" ]; then
             echo "=== Score results ==="

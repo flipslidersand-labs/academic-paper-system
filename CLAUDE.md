@@ -195,6 +195,8 @@ file: <PDF file>
 | `OLLAMA_MODEL` | Ollama モデル | `mistral` |
 | `OTEL_ENDPOINT` | OpenTelemetry コレクタエンドポイント | (空) |
 | `PORT` | API サーバーポート | `8020` |
+| `API_KEY` | 書き込み系エンドポイントの X-API-Key（空=認証無効） | (空) |
+| `PAPER_API_KEY` | コレクタ側が送る X-API-Key（cron は repo secret 経由） | (空) |
 
 ## テスト
 
