@@ -69,3 +69,76 @@ def test_search_with_paper_id_filter():
         assert call_kwargs["query_filter"] is not None
         assert len(results) == 1
         assert results[0]["score"] == 0.95
+
+
+def test_upsert_calls_qdrant_client():
+    """upsert がポイントを Qdrant に送信することを確認 (#201)"""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+
+        store = QdrantStore(url="http://test", collection="test-collection")
+        points = [
+            {
+                "id": "aaaaaaaa-0000-0000-0000-000000000001",
+                "vector": [0.1] * 768,
+                "payload": {"paper_id": 1, "chunk_index": 0, "text": "hello"},
+            }
+        ]
+        store.upsert(points)
+
+        mock_client.upsert.assert_called_once()
+        call_kwargs = mock_client.upsert.call_args[1]
+        assert call_kwargs["collection_name"] == "test-collection"
+        assert len(call_kwargs["points"]) == 1
+
+
+def test_upsert_passes_retry_params():
+    """upsert が with_retry に attempts=3 と retryable exceptions を渡すことを確認 (#201)"""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+
+        with patch("academic_paper.vector_store.with_retry") as mock_retry:
+            mock_retry.return_value = None
+
+            store = QdrantStore(url="http://test", collection="test-collection")
+            points = [{"id": "aaa", "vector": [0.1] * 768, "payload": {}}]
+            store.upsert(points)
+
+        mock_retry.assert_called_once()
+        _, kw = mock_retry.call_args
+        assert kw["attempts"] == 3
+
+
+def test_delete_by_paper_id_calls_qdrant_client():
+    """delete_by_paper_id が paper_id フィルタで Qdrant を呼ぶことを確認 (#201)"""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+
+        store = QdrantStore(url="http://test", collection="test-collection")
+        store.delete_by_paper_id(42)
+
+        mock_client.delete.assert_called_once()
+        call_kwargs = mock_client.delete.call_args[1]
+        assert call_kwargs["collection_name"] == "test-collection"
+        # points_selector は FilterSelector で paper_id=42 フィルタを持つ
+        assert call_kwargs["points_selector"] is not None
+
+
+def test_delete_by_paper_id_retries_on_network_error():
+    """delete_by_paper_id が NetworkError 時に with_retry でリトライすることを確認 (#201)"""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+
+        with patch("academic_paper.vector_store.with_retry") as mock_retry:
+            mock_retry.return_value = None
+
+            store = QdrantStore(url="http://test", collection="test-collection")
+            store.delete_by_paper_id(7)
+
+        mock_retry.assert_called_once()
+        _, kw = mock_retry.call_args
+        assert kw["attempts"] == 3

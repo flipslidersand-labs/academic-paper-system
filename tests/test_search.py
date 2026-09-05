@@ -263,3 +263,158 @@ def test_search_keyword_mode(client):
         assert data["mode"] == "keyword"
         assert data["query"] == "machine learning"
         assert len(data["results"]) == 2
+
+
+def test_search_nugget_mode_returns_results(client):
+    """nugget mode returns results with mode='nugget' (#201)."""
+    mock_fts_results = [
+        {
+            "chunk_id": 1,
+            "paper_id": 1,
+            "text": "Deep learning is a subset of machine learning. It uses neural networks. Results are impressive.",
+            "rank": -5.0,
+            "chunk_index": 0,
+        }
+    ]
+    mock_vector_results = [
+        {
+            "id": "qdrant-id-1",
+            "score": 0.90,
+            "payload": {
+                "paper_id": 1,
+                "chunk_index": 0,
+                "chunk_id": 1,
+                "text": "Deep learning is a subset of machine learning. It uses neural networks. Results are impressive.",
+            },
+        }
+    ]
+    client.app.state.vector_store.asearch = AsyncMock(return_value=mock_vector_results)
+    # embed returns vectors for each sentence (3 sentences in chunk)
+    client.app.state.embedder.embed = AsyncMock(return_value=[[0.1] * 768, [0.2] * 768, [0.3] * 768])
+
+    with (
+        patch("academic_paper.server.search_fts") as mock_search_fts,
+        patch("academic_paper.server.get_connection") as mock_get_conn,
+    ):
+        mock_search_fts.return_value = mock_fts_results
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_get_conn.return_value = mock_conn
+        # fetchall is called multiple times: FTS chunk_index enrichment, then page_start lookup
+        mock_cursor.execute.return_value.fetchall.side_effect = [
+            [{"id": 1, "chunk_index": 0}],           # FTS chunk_index enrichment
+            [],                                        # missing qdrant_id → chunk_id map
+            [{"id": 1, "page_start": 2}],             # page_start lookup for merged results
+        ]
+
+        response = client.get("/search?q=deep learning&mode=nugget")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["mode"] == "nugget"
+        assert data["query"] == "deep learning"
+        assert len(data["results"]) > 0
+        # snippet is a nugget-extracted string, not the full chunk
+        assert isinstance(data["results"][0]["snippet"], str)
+
+
+def test_search_nugget_mode_calls_embed_single_and_embed(client):
+    """nugget mode calls both embed_single (query) and embed (sentences) (#201)."""
+    mock_fts_results = [
+        {
+            "chunk_id": 1,
+            "paper_id": 1,
+            "text": "Sentence one. Sentence two. Sentence three.",
+            "rank": -4.0,
+            "chunk_index": 0,
+        }
+    ]
+    mock_vector_results = [
+        {
+            "id": "qdrant-id-1",
+            "score": 0.88,
+            "payload": {
+                "paper_id": 1,
+                "chunk_index": 0,
+                "chunk_id": 1,
+                "text": "Sentence one. Sentence two. Sentence three.",
+            },
+        }
+    ]
+    client.app.state.vector_store.asearch = AsyncMock(return_value=mock_vector_results)
+    client.app.state.embedder.embed = AsyncMock(return_value=[[0.1] * 768, [0.2] * 768, [0.3] * 768])
+
+    with (
+        patch("academic_paper.server.search_fts") as mock_search_fts,
+        patch("academic_paper.server.get_connection") as mock_get_conn,
+    ):
+        mock_search_fts.return_value = mock_fts_results
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_get_conn.return_value = mock_conn
+        mock_cursor.execute.return_value.fetchall.side_effect = [
+            [{"id": 1, "chunk_index": 0}],
+            [],
+            [{"id": 1, "page_start": 1}],
+        ]
+
+        response = client.get("/search?q=sentence&mode=nugget&nugget_embed_weight=0.7")
+
+        assert response.status_code == 200
+        # embed_single called for query vector
+        client.app.state.embedder.embed_single.assert_called_once_with("sentence", mode="search")
+        # embed called for sentence batch
+        client.app.state.embedder.embed.assert_called_once()
+
+
+def test_search_nugget_mode_embed_weight_zero_skips_batch_embed(client):
+    """nugget mode with embed_weight=0.0 does NOT call batch embed (#201)."""
+    mock_fts_results = [
+        {
+            "chunk_id": 1,
+            "paper_id": 1,
+            "text": "Sentence one. Sentence two.",
+            "rank": -4.0,
+            "chunk_index": 0,
+        }
+    ]
+    mock_vector_results = [
+        {
+            "id": "qdrant-id-1",
+            "score": 0.88,
+            "payload": {
+                "paper_id": 1,
+                "chunk_index": 0,
+                "chunk_id": 1,
+                "text": "Sentence one. Sentence two.",
+            },
+        }
+    ]
+    client.app.state.vector_store.asearch = AsyncMock(return_value=mock_vector_results)
+    client.app.state.embedder.embed = AsyncMock(return_value=[])
+
+    with (
+        patch("academic_paper.server.search_fts") as mock_search_fts,
+        patch("academic_paper.server.get_connection") as mock_get_conn,
+    ):
+        mock_search_fts.return_value = mock_fts_results
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_get_conn.return_value = mock_conn
+        mock_cursor.execute.return_value.fetchall.side_effect = [
+            [{"id": 1, "chunk_index": 0}],
+            [],
+            [{"id": 1, "page_start": 1}],
+        ]
+
+        response = client.get("/search?q=sentence&mode=nugget&nugget_embed_weight=0.0")
+
+        assert response.status_code == 200
+        # embed (batch) must NOT be called when embed_weight=0.0
+        client.app.state.embedder.embed.assert_not_called()
