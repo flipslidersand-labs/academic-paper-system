@@ -63,9 +63,17 @@ jobs:
 
       - name: Collect arXiv papers
         run: |
-          # $CATEGORIES is intentionally unquoted: space-separated list → argv
+          # Validate $CATEGORIES to prevent argparse injection via word splitting
+          # (#193). Only allow alphanumeric, dots, commas, and spaces.
+          if ! echo "$CATEGORIES" | grep -qE '^[a-zA-Z0-9., ]+$'; then
+            echo "ERROR: Invalid CATEGORIES value: '$CATEGORIES'" >&2
+            exit 1
+          fi
+          # Use read -ra to safely split the validated whitespace-separated list
+          # into an array, then pass each element as a discrete argv token.
+          read -ra CATS <<< "$CATEGORIES"
           python scripts/arxiv_collect.py \
-            --categories $CATEGORIES \
+            --categories "${CATS[@]}" \
             --max "$MAX_RESULTS" \
             --api-url "$API_URL" \
             --summary-file summary-arxiv.json
@@ -76,7 +84,7 @@ jobs:
           SEMANTIC_SCHOLAR_API_KEY: ${{ secrets.SEMANTIC_SCHOLAR_API_KEY }}
         run: |
           python scripts/semantic_scholar_collect.py \
-            --topics "machine learning" "deep learning" "natural language processing" \
+            --query "machine learning deep learning natural language processing" \
             --max "$MAX_RESULTS" \
             --api-url "$API_URL" \
             --summary-file summary-s2.json \
