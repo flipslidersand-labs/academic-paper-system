@@ -1,4 +1,4 @@
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     )
     max_upload_mb: int = Field(default=50, description="Maximum PDF upload size in megabytes")
     api_key: str = Field(default="", description="X-API-Key for write endpoints; empty = no auth")
+
+    @field_validator("embedding_svc_url", "qdrant_url")
+    @classmethod
+    def reject_placeholder(cls, v: str) -> str:
+        if "<" in v:
+            raise ValueError(
+                f"Invalid URL {v!r}: contains placeholder. "
+                "Set EMBEDDING_SVC_URL and QDRANT_URL environment variables before starting."
+            )
+        return v
 
     @property
     def preferred_categories_list(self) -> list[str]:
