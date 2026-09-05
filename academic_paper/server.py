@@ -574,6 +574,10 @@ async def _run_summarize_all(job_id: str) -> None:
     job.status = "running"
     job_store.persist(job)
     try:
+        if app.state.summarizer is None:
+            job.status = "failed"
+            job.errors.append("Summarizer not initialized (LLM unavailable at job start)")
+            return
         with db_connection(settings.academic_db) as conn:
             cursor = conn.cursor()
             cursor.execute("""
