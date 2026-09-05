@@ -844,7 +844,7 @@ async def search(
 
 @app.get("/health")
 async def health():
-    """Qdrant / embedding-svc 疎通チェック"""
+    """Qdrant / embedding-svc 疎通チェック。全アップストリーム障害時は HTTP 503 を返す (#195)。"""
     status = {"qdrant": "ok", "embedding_svc": "ok"}
     overall = "ok"
 
@@ -860,7 +860,8 @@ async def health():
         status["embedding_svc"] = "error"
         overall = "degraded"
 
-    return {"status": overall, **status}
+    http_status = 503 if overall == "degraded" else 200
+    return JSONResponse(content={"status": overall, **status}, status_code=http_status)
 
 
 @app.get("/stats")
