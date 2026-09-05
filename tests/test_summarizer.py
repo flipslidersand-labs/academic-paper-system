@@ -258,14 +258,21 @@ async def test_summarize_uses_filename_when_no_title():
 
 
 @pytest.mark.anyio
-async def test_summarize_falls_back_to_db_on_embed_failure():
-    """When embed_single raises, summarizer takes DB chunks instead of a zero-vector search (#139)."""
+async def test_summarize_falls_back_to_db_on_embed_http_failure():
+    """When embed_single raises httpx.HTTPError, summarizer falls back to DB chunks (#187).
+
+    httpx.HTTPError covers network/HTTP errors from the embedding-svc (the
+    expected transient failure mode). A zero-vector search would cache a
+    degraded summary, so DB chunk order is used instead.
+    """
     from unittest.mock import patch
+
+    import httpx
 
     mock_llm = AsyncMock()
     mock_qdrant = MagicMock()
     mock_embedder = AsyncMock()
-    mock_embedder.embed_single.side_effect = RuntimeError("embedding-svc down")
+    mock_embedder.embed_single.side_effect = httpx.ConnectError("embedding-svc down")
 
     mock_llm.generate.return_value = json.dumps(
         {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
@@ -280,3 +287,20 @@ async def test_summarize_falls_back_to_db_on_embed_failure():
     assert "objective" in result
     mock_db.assert_called_once_with(1, 5)
     mock_qdrant.search.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_summarize_embed_runtime_error_propagates():
+    """Non-httpx exceptions from embed_single (e.g. RuntimeError) must propagate (#187).
+
+    Before the fix, bare `except Exception:` silently swallowed these and
+    cached a low-quality summary. Now they surface as real errors.
+    """
+    mock_llm = AsyncMock()
+    mock_qdrant = MagicMock()
+    mock_embedder = AsyncMock()
+    mock_embedder.embed_single.side_effect = RuntimeError("client misconfigured")
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
+    with pytest.raises(RuntimeError, match="client misconfigured"):
+        await summarizer.summarize(paper_id=1, file_hash="abc", title="Test")
