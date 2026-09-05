@@ -21,6 +21,14 @@ on:
         description: "Run bulk summarization after collection (true/false)"
         default: "true"
         required: false
+      from_date:
+        description: "PubMed --from-date override (YYYY-MM-DD; empty = yesterday)"
+        default: ""
+        required: false
+      until_date:
+        description: "PubMed --until-date override (YYYY-MM-DD; empty = today)"
+        default: ""
+        required: false
 
 jobs:
   collect:
@@ -86,11 +94,20 @@ jobs:
         continue-on-error: true
         env:
           NCBI_API_KEY: ${{ secrets.NCBI_API_KEY }}
+          # Yesterday's date in YYYY-MM-DD — filters to papers published in the
+          # last 24 hours so cron runs stay incremental (#197).
+          PUBMED_FROM_DATE: ${{ github.event.inputs.from_date || '' }}
+          PUBMED_UNTIL_DATE: ${{ github.event.inputs.until_date || '' }}
         run: |
+          # Compute yesterday as the default from-date when no override is given.
+          FROM_DATE="${PUBMED_FROM_DATE:-$(date -u -d 'yesterday' '+%Y-%m-%d' 2>/dev/null || date -u -v-1d '+%Y-%m-%d')}"
+          UNTIL_DATE="${PUBMED_UNTIL_DATE:-$(date -u '+%Y-%m-%d')}"
           python scripts/pubmed_collect.py \
             --terms "artificial intelligence" "machine learning" \
             --max 5 \
             --api-url "$API_URL" \
+            --from-date "$FROM_DATE" \
+            --until-date "$UNTIL_DATE" \
             --summary-file summary-pubmed.json \
             ${NCBI_API_KEY:+--api-key "$NCBI_API_KEY"}
 
