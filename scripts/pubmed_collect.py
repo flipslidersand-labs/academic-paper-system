@@ -22,7 +22,7 @@ import xml.etree.ElementTree as ET
 
 import httpx
 from _collect_common import download_pdf, ingest_pdf, run_collect
-from cli_utils import positive_int
+from cli_utils import check_date_order, iso_date, positive_int
 
 ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
@@ -35,6 +35,8 @@ def fetch_pmc_ids(
     api_key: str = "",
     timeout: int = 30,
     client: httpx.Client | None = None,
+    from_date: str = "",
+    until_date: str = "",
 ) -> list[str]:
     """Search PMC for open-access paper IDs.
 
@@ -52,6 +54,12 @@ def fetch_pmc_ids(
     }
     if api_key:
         params["api_key"] = api_key
+    if from_date or until_date:
+        params["datetype"] = "pdat"
+        if from_date:
+            params["mindate"] = from_date
+        if until_date:
+            params["maxdate"] = until_date
 
     if client is not None:
         resp = client.get(ESEARCH_URL, params=params, timeout=timeout)
@@ -219,11 +227,26 @@ def main() -> None:
         help="NCBI API key (optional; raises rate limit to 10 req/sec)",
     )
     parser.add_argument(
+        "--from-date",
+        type=iso_date,
+        default="",
+        metavar="YYYY-MM-DD",
+        help="Only return papers published on or after this date (pdat filter)",
+    )
+    parser.add_argument(
+        "--until-date",
+        type=iso_date,
+        default="",
+        metavar="YYYY-MM-DD",
+        help="Only return papers published on or before this date (pdat filter)",
+    )
+    parser.add_argument(
         "--summary-file",
         default=None,
         help="Write run summary JSON to this path",
     )
     args = parser.parse_args()
+    check_date_order(parser, args.from_date, args.until_date)
 
     print(f"[pubmed] terms={args.terms} max={args.max_results} api={args.api_url}")
 
@@ -231,7 +254,14 @@ def main() -> None:
     # connections to NCBI and the ingest API are reused (#192).
     with httpx.Client() as shared_client:
         try:
-            pmc_ids = fetch_pmc_ids(args.terms, args.max_results, args.api_key, client=shared_client)
+            pmc_ids = fetch_pmc_ids(
+                args.terms,
+                args.max_results,
+                args.api_key,
+                client=shared_client,
+                from_date=args.from_date,
+                until_date=args.until_date,
+            )
         except Exception as exc:
             print(f"[pubmed] ERROR fetching PMC IDs: {exc}", file=sys.stderr)
             sys.exit(1)
