@@ -74,7 +74,7 @@ def submit_and_wait(
     paper_id = body.get("paper_id")
     deadline = time.monotonic() + poll_timeout
     while True:
-        jresp = client.get(f"{api_url}/jobs/{job_id}", timeout=submit_timeout)
+        jresp = client.get(f"{api_url}/jobs/{job_id}", headers=_auth_headers(), timeout=submit_timeout)
         jresp.raise_for_status()
         job = jresp.json()
         status = job["status"]
