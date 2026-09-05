@@ -34,8 +34,14 @@ def fetch_pmc_ids(
     max_results: int,
     api_key: str = "",
     timeout: int = 30,
+    client: httpx.Client | None = None,
 ) -> list[str]:
-    """Search PMC for open-access paper IDs."""
+    """Search PMC for open-access paper IDs.
+
+    Args:
+        client: Optional shared httpx.Client. If None, a bare httpx.get() call
+                is made (backwards-compatible fallback).
+    """
     query = " OR ".join(f'"{t}"' for t in terms) + " AND open access[filter]"
     params: dict = {
         "db": "pmc",
@@ -47,7 +53,10 @@ def fetch_pmc_ids(
     if api_key:
         params["api_key"] = api_key
 
-    resp = httpx.get(ESEARCH_URL, params=params, timeout=timeout)
+    if client is not None:
+        resp = client.get(ESEARCH_URL, params=params, timeout=timeout)
+    else:
+        resp = httpx.get(ESEARCH_URL, params=params, timeout=timeout)
     resp.raise_for_status()
     return resp.json().get("esearchresult", {}).get("idlist", [])
 
@@ -56,8 +65,14 @@ def fetch_paper_metadata(
     pmc_ids: list[str],
     api_key: str = "",
     timeout: int = 60,
+    client: httpx.Client | None = None,
 ) -> list[dict]:
-    """Fetch XML metadata for a batch of PMC IDs."""
+    """Fetch XML metadata for a batch of PMC IDs.
+
+    Args:
+        client: Optional shared httpx.Client. If None, a bare httpx.get() call
+                is made (backwards-compatible fallback).
+    """
     if not pmc_ids:
         return []
     params: dict = {
@@ -69,7 +84,10 @@ def fetch_paper_metadata(
     if api_key:
         params["api_key"] = api_key
 
-    resp = httpx.get(EFETCH_URL, params=params, timeout=timeout)
+    if client is not None:
+        resp = client.get(EFETCH_URL, params=params, timeout=timeout)
+    else:
+        resp = httpx.get(EFETCH_URL, params=params, timeout=timeout)
     resp.raise_for_status()
 
     papers: list[dict] = []
@@ -209,33 +227,36 @@ def main() -> None:
 
     print(f"[pubmed] terms={args.terms} max={args.max_results} api={args.api_url}")
 
-    try:
-        pmc_ids = fetch_pmc_ids(args.terms, args.max_results, args.api_key)
-    except Exception as exc:
-        print(f"[pubmed] ERROR fetching PMC IDs: {exc}", file=sys.stderr)
-        sys.exit(1)
+    # Use a single shared Client for the entire run (fetch + ingest) so TCP
+    # connections to NCBI and the ingest API are reused (#192).
+    with httpx.Client() as shared_client:
+        try:
+            pmc_ids = fetch_pmc_ids(args.terms, args.max_results, args.api_key, client=shared_client)
+        except Exception as exc:
+            print(f"[pubmed] ERROR fetching PMC IDs: {exc}", file=sys.stderr)
+            sys.exit(1)
 
-    print(f"[pubmed] found {len(pmc_ids)} PMC IDs")
-    if not pmc_ids:
-        if args.summary_file:
-            with open(args.summary_file, "w") as f:
-                json.dump({"fetched": 0, "ingested": 0, "duplicate": 0, "failed": 0, "detail": []}, f)
-        sys.exit(0)
+        print(f"[pubmed] found {len(pmc_ids)} PMC IDs")
+        if not pmc_ids:
+            if args.summary_file:
+                with open(args.summary_file, "w") as f:
+                    json.dump({"fetched": 0, "ingested": 0, "duplicate": 0, "failed": 0, "detail": []}, f)
+            sys.exit(0)
 
-    time.sleep(0.34)  # respect 3 req/sec default rate limit
-    try:
-        papers = fetch_paper_metadata(pmc_ids, args.api_key)
-    except Exception as exc:
-        print(f"[pubmed] ERROR fetching metadata: {exc}", file=sys.stderr)
-        sys.exit(1)
+        time.sleep(0.34)  # respect 3 req/sec default rate limit
+        try:
+            papers = fetch_paper_metadata(pmc_ids, args.api_key, client=shared_client)
+        except Exception as exc:
+            print(f"[pubmed] ERROR fetching metadata: {exc}", file=sys.stderr)
+            sys.exit(1)
 
-    print(f"[pubmed] parsed {len(papers)} articles")
+        print(f"[pubmed] parsed {len(papers)} articles")
 
-    def _ingest(client, paper):
-        time.sleep(0.34)  # respect PMC rate limit (3 req/sec default)
-        return ingest_paper(client, paper, args.api_url, poll_timeout=args.poll_timeout)
+        def _ingest(client, paper):
+            time.sleep(0.34)  # respect PMC rate limit (3 req/sec default)
+            return ingest_paper(client, paper, args.api_url, poll_timeout=args.poll_timeout)
 
-    run_collect("PubMed", papers, _ingest, args.summary_file)
+        run_collect("PubMed", papers, _ingest, args.summary_file)
 
 
 if __name__ == "__main__":

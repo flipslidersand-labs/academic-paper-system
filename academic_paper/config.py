@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     gemini_timeout_ms: int = Field(default=60000, description="Gemini API HTTP timeout in milliseconds")
     ollama_url: str = Field(default="http://localhost:11434", description="Ollama service URL")
     ollama_model: str = Field(default="mistral", description="Ollama model to use")
+    ollama_timeout: int = Field(default=300, description="Ollama HTTP timeout in seconds")
     otel_endpoint: str = Field(default="", description="OpenTelemetry endpoint")
     log_level: str = Field(default="INFO", description="Root log level (DEBUG/INFO/WARNING/ERROR)")
     log_format: str = Field(default="json", description="Log format: 'json' or 'text'")

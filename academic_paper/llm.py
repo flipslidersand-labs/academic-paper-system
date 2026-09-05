@@ -65,15 +65,38 @@ class GeminiClient(BaseLLMClient):
 class OllamaClient(BaseLLMClient):
     """Client for Ollama HTTP API."""
 
-    def __init__(self, base_url: str | None = None, model: str | None = None):
+    def __init__(
+        self,
+        base_url: str | None = None,
+        model: str | None = None,
+        client: httpx.AsyncClient | None = None,
+    ):
         """Initialize Ollama client.
 
         Args:
             base_url: Ollama service URL. If None, uses settings.ollama_url
             model: Model name. If None, uses settings.ollama_model
+            client: Injected persistent AsyncClient (managed by lifespan).
+                    If None, a per-call client is created as fallback (tests /
+                    direct instantiation without lifespan).
         """
         self.base_url = base_url or settings.ollama_url
         self.model = model or settings.ollama_model
+        # Persistent client injected from lifespan; None → per-call fallback.
+        self._client = client
+
+    async def _post(self, client: httpx.AsyncClient, prompt: str, system: str) -> str:
+        response = await client.post(
+            f"{self.base_url}/api/generate",
+            json={
+                "model": self.model,
+                "prompt": prompt,
+                "system": system,
+                "stream": False,
+            },
+        )
+        response.raise_for_status()
+        return response.json().get("response", "")
 
     async def generate(self, prompt: str, system: str = "") -> str:
         """Generate text using Ollama API.
@@ -85,19 +108,11 @@ class OllamaClient(BaseLLMClient):
         Returns:
             Generated text response
         """
-        async with httpx.AsyncClient(timeout=300.0) as client:
-            response = await client.post(
-                f"{self.base_url}/api/generate",
-                json={
-                    "model": self.model,
-                    "prompt": prompt,
-                    "system": system,
-                    "stream": False,
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data.get("response", "")
+        if self._client is not None:
+            return await self._post(self._client, prompt, system)
+        # Fallback: per-call client (tests / direct instantiation without lifespan).
+        async with httpx.AsyncClient(timeout=settings.ollama_timeout) as client:
+            return await self._post(client, prompt, system)
 
 
 def get_llm_client() -> BaseLLMClient | None:

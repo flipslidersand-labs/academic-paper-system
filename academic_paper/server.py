@@ -42,7 +42,7 @@ from academic_paper.embedder import EmbedderClient
 from academic_paper.extractor import extract_text, hash_file
 from academic_paper.hybrid import rrf_merge
 from academic_paper.jobs import job_store
-from academic_paper.llm import get_llm_client
+from academic_paper.llm import OllamaClient, get_llm_client
 from academic_paper.logging_config import configure_logging
 from academic_paper.nugget import extract_nuggets, split_sentences
 from academic_paper.scorer import compute_score
@@ -136,7 +136,13 @@ async def lifespan(app: FastAPI):
     embed_client = httpx.AsyncClient(timeout=settings.embedding_timeout)
     app.state.embedder = EmbedderClient(client=embed_client)
     app.state.vector_store = QdrantStore()
+    # Build OllamaClient with a lifespan-managed persistent AsyncClient so TCP
+    # connections are reused across summarize-all iterations (#192).
+    ollama_http_client: httpx.AsyncClient | None = None
     llm_client = get_llm_client()
+    if isinstance(llm_client, OllamaClient):
+        ollama_http_client = httpx.AsyncClient(timeout=settings.ollama_timeout)
+        llm_client._client = ollama_http_client
     app.state.llm = llm_client
     if llm_client is not None:
         app.state.summarizer = RAGSummarizer(llm_client, app.state.vector_store, app.state.embedder)
@@ -148,6 +154,8 @@ async def lifespan(app: FastAPI):
     yield
     app.state.probe_task.cancel()
     await embed_client.aclose()
+    if ollama_http_client is not None:
+        await ollama_http_client.aclose()
 
 
 def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
