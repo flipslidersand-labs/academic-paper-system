@@ -1,6 +1,7 @@
 """FastAPI server for academic paper ingestion and retrieval."""
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -184,11 +185,15 @@ Instrumentator().instrument(app).expose(app)
 
 
 async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
-    """Require X-API-Key on write endpoints when API_KEY env var is set (#146)."""
+    """Require X-API-Key on write endpoints when API_KEY env var is set (#146).
+
+    Uses hmac.compare_digest for constant-time comparison to prevent
+    timing attacks that could leak key length / prefix (#190).
+    """
     configured = settings.api_key
     if not configured:
         return  # auth disabled
-    if x_api_key != configured:
+    if not hmac.compare_digest(x_api_key or "", configured):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
@@ -634,7 +639,7 @@ async def start_summarize_all(background_tasks: BackgroundTasks):
     return {"job_id": job.id, "status": job.status}
 
 
-@app.get("/jobs/{job_id}")
+@app.get("/jobs/{job_id}", dependencies=[Depends(verify_api_key)])
 def get_job_endpoint(job_id: str):
     """Get status of a background job by ID."""
     job = job_store.get(job_id)
@@ -643,9 +648,9 @@ def get_job_endpoint(job_id: str):
     return job.to_dict()
 
 
-@app.get("/jobs")
+@app.get("/jobs", dependencies=[Depends(verify_api_key)])
 def list_jobs_endpoint():
-    """List all background jobs."""
+    """List all background jobs (#190: require auth — exposes all job IDs / paper metadata)."""
     return {"jobs": [j.to_dict() for j in job_store.list_all()]}
 
 
