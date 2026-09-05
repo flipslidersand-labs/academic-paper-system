@@ -13,8 +13,9 @@ jobs:
     uses: flipslidersand-labs/qa-workflows/.github/workflows/python-test.yml@fcccf3f5895340faa5c6ef2469068b7b32a6c60e
     with:
       # Measured academic_paper coverage is ~90.5% with tests/ and scripts/
-      # omitted (pyproject [tool.coverage.run] omit); 88 leaves a small margin.
-      coverage-threshold: 88
+      # omitted (pyproject [tool.coverage.run] omit); 90 tracks actual coverage
+      # with a 0.5pt margin (raised from 88, #199).
+      coverage-threshold: 90
       # Pin ruff so an upstream ruff release can't break lint mid-PR.
       ruff-version: "0.16.2"
 
