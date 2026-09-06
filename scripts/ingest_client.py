@@ -12,6 +12,7 @@ result (e.g. `wait=true`), the result is returned directly without polling.
 import io
 import os
 import time
+from typing import BinaryIO
 
 import httpx
 
@@ -26,7 +27,7 @@ def submit_and_wait(
     client: httpx.Client,
     api_url: str,
     file_name: str,
-    pdf_bytes: bytes,
+    pdf_data: bytes | BinaryIO,
     metadata: dict,
     *,
     submit_timeout: int = 30,
@@ -39,7 +40,9 @@ def submit_and_wait(
         client: A reusable httpx.Client.
         api_url: academic-paper-system base URL.
         file_name: Upload filename.
-        pdf_bytes: Raw PDF content.
+        pdf_data: Raw PDF bytes or an open binary file handle.  Passing a file
+            handle avoids the extra in-memory copy that ``bytes`` requires when
+            the content was already streamed to a temp file (#194).
         metadata: Form fields (title/authors/categories/published_date/source).
         submit_timeout: Timeout (s) for the POST and each poll request.
         poll_timeout: Max seconds to wait for the job to finish.
@@ -54,9 +57,10 @@ def submit_and_wait(
         RuntimeError: The ingest job reported status "failed".
         TimeoutError: The job did not finish within poll_timeout.
     """
+    file_obj: BinaryIO = pdf_data if hasattr(pdf_data, "read") else io.BytesIO(pdf_data)
     resp = client.post(
         f"{api_url}/papers/ingest",
-        files={"file": (file_name, io.BytesIO(pdf_bytes), "application/pdf")},
+        files={"file": (file_name, file_obj, "application/pdf")},
         data=metadata,
         headers=_auth_headers(),
         timeout=submit_timeout,
