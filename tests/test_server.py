@@ -293,7 +293,7 @@ def test_health_returns_ok(client):
 
 
 def test_health_returns_degraded_on_qdrant_error(client):
-    """Test GET /health returns degraded when Qdrant is unavailable."""
+    """Test GET /health returns 503 degraded when Qdrant is unavailable (#195)."""
     # Mock vector_store to raise exception
     mock_client = MagicMock()
     mock_client.get_collections.side_effect = Exception("Connection failed")
@@ -306,7 +306,7 @@ def test_health_returns_degraded_on_qdrant_error(client):
         mock_httpx.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
 
         response = client.get("/health")
-        assert response.status_code == 200
+        assert response.status_code == 503
         data = response.json()
         assert data["status"] == "degraded"
         assert data["qdrant"] == "error"
@@ -395,7 +395,7 @@ def _mock_embedding_response(status_code: int) -> MagicMock:
 
 
 def test_health_embedding_svc_degraded(client):
-    """Test GET /health returns degraded when embedding-svc returns 5xx."""
+    """Test GET /health returns 503 degraded when embedding-svc returns 5xx (#195)."""
     mock_client = MagicMock()
     mock_client.get_collections.return_value = MagicMock(collections=[])
     client.app.state.vector_store.client = mock_client
@@ -404,7 +404,7 @@ def test_health_embedding_svc_degraded(client):
         mock_httpx.return_value.__aenter__.return_value.get = AsyncMock(return_value=_mock_embedding_response(503))
 
         response = client.get("/health")
-        assert response.status_code == 200
+        assert response.status_code == 503
         data = response.json()
         assert data["status"] == "degraded"
         assert data["qdrant"] == "ok"
@@ -412,7 +412,7 @@ def test_health_embedding_svc_degraded(client):
 
 
 def test_health_embedding_svc_auth_failure_degraded(client):
-    """Regression (#142): a 401 from embedding-svc must report degraded, not ok."""
+    """Regression (#142, #195): a 401 from embedding-svc must report degraded with HTTP 503."""
     mock_client = MagicMock()
     mock_client.get_collections.return_value = MagicMock(collections=[])
     client.app.state.vector_store.client = mock_client
@@ -421,6 +421,7 @@ def test_health_embedding_svc_auth_failure_degraded(client):
         mock_httpx.return_value.__aenter__.return_value.get = AsyncMock(return_value=_mock_embedding_response(401))
 
         response = client.get("/health")
+        assert response.status_code == 503
         data = response.json()
         assert data["status"] == "degraded"
         assert data["embedding_svc"] == "error"
