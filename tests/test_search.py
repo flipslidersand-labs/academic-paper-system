@@ -299,12 +299,13 @@ def test_search_nugget_mode_returns_results(client):
 
     with (
         patch("academic_paper.server.search_fts") as mock_search_fts,
-        patch("academic_paper.server.get_connection") as mock_get_conn,
+        patch("academic_paper.server.db_connection") as mock_get_conn,
     ):
         mock_search_fts.return_value = mock_fts_results
 
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
         mock_get_conn.return_value = mock_conn
         # fetchall is called multiple times: FTS chunk_index enrichment, then page_start lookup
@@ -353,12 +354,13 @@ def test_search_nugget_mode_calls_embed_single_and_embed(client):
 
     with (
         patch("academic_paper.server.search_fts") as mock_search_fts,
-        patch("academic_paper.server.get_connection") as mock_get_conn,
+        patch("academic_paper.server.db_connection") as mock_get_conn,
     ):
         mock_search_fts.return_value = mock_fts_results
 
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
         mock_get_conn.return_value = mock_conn
         mock_cursor.execute.return_value.fetchall.side_effect = [
@@ -404,12 +406,13 @@ def test_search_nugget_mode_embed_weight_zero_skips_batch_embed(client):
 
     with (
         patch("academic_paper.server.search_fts") as mock_search_fts,
-        patch("academic_paper.server.get_connection") as mock_get_conn,
+        patch("academic_paper.server.db_connection") as mock_get_conn,
     ):
         mock_search_fts.return_value = mock_fts_results
 
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
         mock_get_conn.return_value = mock_conn
         mock_cursor.execute.return_value.fetchall.side_effect = [
