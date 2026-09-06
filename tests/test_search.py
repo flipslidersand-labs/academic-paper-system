@@ -304,9 +304,9 @@ def test_search_nugget_mode_returns_results(client):
         mock_get_conn.return_value = mock_conn
         # fetchall is called multiple times: FTS chunk_index enrichment, then page_start lookup
         mock_cursor.execute.return_value.fetchall.side_effect = [
-            [{"id": 1, "chunk_index": 0}],           # FTS chunk_index enrichment
-            [],                                        # missing qdrant_id → chunk_id map
-            [{"id": 1, "page_start": 2}],             # page_start lookup for merged results
+            [{"id": 1, "chunk_index": 0}],  # FTS chunk_index enrichment
+            [],  # missing qdrant_id → chunk_id map
+            [{"id": 1, "page_start": 2}],  # page_start lookup for merged results
         ]
 
         response = client.get("/search?q=deep learning&mode=nugget")
