@@ -131,8 +131,7 @@ class JobStore:
         """
         with self._lock:
             return any(
-                j.status in ("pending", "running") and (kind is None or j.kind == kind)
-                for j in self._jobs.values()
+                j.status in ("pending", "running") and (kind is None or j.kind == kind) for j in self._jobs.values()
             )
 
     def persist(self, job: Job) -> None:
