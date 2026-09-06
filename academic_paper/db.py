@@ -39,103 +39,102 @@ def init_db(db_path: str) -> None:
     Creates tables: papers, chunks, summaries, jobs, and FTS5 virtual table.
     Runs ALTER TABLE migrations for columns added after v1.
     """
-    conn = get_connection(db_path)
-    cursor = conn.cursor()
+    with db_connection(db_path) as conn:
+        cursor = conn.cursor()
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS papers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_name TEXT NOT NULL,
-            file_hash TEXT NOT NULL UNIQUE,
-            title TEXT,
-            authors TEXT,
-            year INTEGER,
-            pages INTEGER,
-            ingested_at TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'pending'
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS papers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                file_name TEXT NOT NULL,
+                file_hash TEXT NOT NULL UNIQUE,
+                title TEXT,
+                authors TEXT,
+                year INTEGER,
+                pages INTEGER,
+                ingested_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending'
+            )
+        """)
+
+        # Migration: add columns introduced after v1
+        _migrate_add_columns(
+            cursor,
+            "papers",
+            [
+                ("categories", "TEXT"),
+                ("published_date", "TEXT"),
+                ("source", "TEXT"),
+                ("score", "REAL"),
+                ("arxiv_id", "TEXT"),
+            ],
         )
-    """)
 
-    # Migration: add columns introduced after v1
-    _migrate_add_columns(
-        cursor,
-        "papers",
-        [
-            ("categories", "TEXT"),
-            ("published_date", "TEXT"),
-            ("source", "TEXT"),
-            ("score", "REAL"),
-            ("arxiv_id", "TEXT"),
-        ],
-    )
+        # Backfill arxiv_id for rows ingested before the column existed (#163).
+        for row_id, file_name in cursor.execute(
+            "SELECT id, file_name FROM papers WHERE arxiv_id IS NULL AND file_name LIKE 'arxiv\\_%' ESCAPE '\\'"
+        ).fetchall():
+            arxiv_id = arxiv_id_from_file_name(file_name)
+            if arxiv_id:
+                cursor.execute("UPDATE papers SET arxiv_id = ? WHERE id = ?", (arxiv_id, row_id))
 
-    # Backfill arxiv_id for rows ingested before the column existed (#163).
-    for row_id, file_name in cursor.execute(
-        "SELECT id, file_name FROM papers WHERE arxiv_id IS NULL AND file_name LIKE 'arxiv\\_%' ESCAPE '\\'"
-    ).fetchall():
-        arxiv_id = arxiv_id_from_file_name(file_name)
-        if arxiv_id:
-            cursor.execute("UPDATE papers SET arxiv_id = ? WHERE id = ?", (arxiv_id, row_id))
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS chunks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                paper_id INTEGER NOT NULL REFERENCES papers(id),
+                chunk_index INTEGER NOT NULL,
+                page_start INTEGER,
+                page_end INTEGER,
+                text TEXT NOT NULL,
+                token_count INTEGER,
+                qdrant_id TEXT NOT NULL UNIQUE,
+                UNIQUE (paper_id, chunk_index)
+            )
+        """)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS chunks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            paper_id INTEGER NOT NULL REFERENCES papers(id),
-            chunk_index INTEGER NOT NULL,
-            page_start INTEGER,
-            page_end INTEGER,
-            text TEXT NOT NULL,
-            token_count INTEGER,
-            qdrant_id TEXT NOT NULL UNIQUE,
-            UNIQUE (paper_id, chunk_index)
-        )
-    """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS summaries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                paper_id INTEGER NOT NULL UNIQUE REFERENCES papers(id),
+                model TEXT NOT NULL,
+                objective TEXT,
+                method TEXT,
+                results TEXT,
+                limitations TEXT,
+                keywords TEXT,
+                raw_json TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS summaries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            paper_id INTEGER NOT NULL UNIQUE REFERENCES papers(id),
-            model TEXT NOT NULL,
-            objective TEXT,
-            method TEXT,
-            results TEXT,
-            limitations TEXT,
-            keywords TEXT,
-            raw_json TEXT,
-            created_at TEXT NOT NULL
-        )
-    """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS jobs (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL DEFAULT 'pending',
+                kind TEXT NOT NULL DEFAULT '',
+                total INTEGER NOT NULL DEFAULT 0,
+                processed INTEGER NOT NULL DEFAULT 0,
+                failed INTEGER NOT NULL DEFAULT 0,
+                errors TEXT NOT NULL DEFAULT '[]',
+                started_at REAL NOT NULL,
+                finished_at REAL
+            )
+        """)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS jobs (
-            id TEXT PRIMARY KEY,
-            status TEXT NOT NULL DEFAULT 'pending',
-            kind TEXT NOT NULL DEFAULT '',
-            total INTEGER NOT NULL DEFAULT 0,
-            processed INTEGER NOT NULL DEFAULT 0,
-            failed INTEGER NOT NULL DEFAULT 0,
-            errors TEXT NOT NULL DEFAULT '[]',
-            started_at REAL NOT NULL,
-            finished_at REAL
-        )
-    """)
+        # Migration for databases created before the kind column existed.
+        cursor.execute("PRAGMA table_info(jobs)")
+        if "kind" not in [row[1] for row in cursor.fetchall()]:
+            cursor.execute("ALTER TABLE jobs ADD COLUMN kind TEXT NOT NULL DEFAULT ''")
 
-    # Migration for databases created before the kind column existed.
-    cursor.execute("PRAGMA table_info(jobs)")
-    if "kind" not in [row[1] for row in cursor.fetchall()]:
-        cursor.execute("ALTER TABLE jobs ADD COLUMN kind TEXT NOT NULL DEFAULT ''")
+        cursor.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                text,
+                content='chunks',
+                content_rowid='id',
+                tokenize='unicode61'
+            )
+        """)
 
-    cursor.execute("""
-        CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
-            text,
-            content='chunks',
-            content_rowid='id',
-            tokenize='unicode61'
-        )
-    """)
-
-    conn.commit()
-    conn.close()
+        conn.commit()
 
 
 _ARXIV_FILE_NAME_RE = re.compile(r"^arxiv_(\d{4}\.\d{4,5})(?:v\d+)?\.pdf$")
@@ -218,8 +217,17 @@ def update_paper_status(conn: sqlite3.Connection, paper_id: int, status: str) ->
 
 
 def delete_paper(conn: sqlite3.Connection, paper_id: int) -> None:
-    """Delete a paper and its chunks/summary by id (#145)."""
+    """Delete a paper and its chunks/summary by id (#145).
+
+    chunks_fts is an FTS5 external-content table (content='chunks').  SQLite
+    does NOT auto-update FTS indexes when the content table changes, so we
+    must delete the FTS rows explicitly before removing the chunks rows (#188).
+    """
     cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM chunks_fts WHERE rowid IN (SELECT id FROM chunks WHERE paper_id = ?)",
+        (paper_id,),
+    )
     cursor.execute("DELETE FROM chunks WHERE paper_id = ?", (paper_id,))
     cursor.execute("DELETE FROM summaries WHERE paper_id = ?", (paper_id,))
     cursor.execute("DELETE FROM papers WHERE id = ?", (paper_id,))
