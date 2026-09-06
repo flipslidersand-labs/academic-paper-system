@@ -53,9 +53,9 @@ def ingest_pdf(
     On HTTP error, extracts ``{"detail": ...}`` from the response body so the
     error message shown in cron logs is the server reason, not just the status.
     """
-    pdf_bytes = Path(tmp_path).read_bytes()
     try:
-        return submit_and_wait(client, api_url, file_name, pdf_bytes, metadata, poll_timeout=poll_timeout)
+        with open(tmp_path, "rb") as fh:
+            return submit_and_wait(client, api_url, file_name, fh, metadata, poll_timeout=poll_timeout)
     except httpx.HTTPStatusError as exc:
         try:
             detail = exc.response.json().get("detail", exc.response.text[:200])
