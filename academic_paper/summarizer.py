@@ -4,6 +4,7 @@ import json
 import logging
 import re
 
+import httpx
 from qdrant_client.http.exceptions import ApiException, ResponseHandlingException
 
 from academic_paper.embedder import EmbedderClient
@@ -82,9 +83,12 @@ class RAGSummarizer:
         if self.embedder is not None:
             try:
                 query_vector = await self.embedder.embed_single(query_text, mode="search")
-            except Exception:
-                # A zero-vector search would return arbitrary chunks and cache a
-                # degraded summary as success — take leading DB chunks instead.
+            except httpx.HTTPError:
+                # embedding-svc is unavailable (network / HTTP error) — a
+                # zero-vector search would return arbitrary chunks and cache a
+                # degraded summary as success, so fall back to DB chunk order
+                # instead. Non-httpx exceptions (AttributeError, RuntimeError,
+                # etc.) indicate real bugs and must propagate (#187).
                 logger.warning(
                     "embed_single failed for summarize query=%r — falling back to DB chunk order", query_text
                 )
