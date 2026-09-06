@@ -30,7 +30,7 @@ async def test_gemini_client_generate():
 
 @pytest.mark.anyio
 async def test_ollama_client_generate():
-    """Test OllamaClient.generate() returns a string response."""
+    """Test OllamaClient.generate() fallback path (per-call AsyncClient)."""
     with patch("academic_paper.llm.httpx.AsyncClient") as mock_async_client:
         # Mock the HTTP response
         mock_response = MagicMock()
@@ -41,7 +41,7 @@ async def test_ollama_client_generate():
         mock_client_instance.post.return_value = mock_response
         mock_async_client.return_value.__aenter__.return_value = mock_client_instance
 
-        # Create client and generate
+        # Create client without injected client → exercises fallback path
         client = OllamaClient(base_url="http://localhost:11434", model="mistral")
         result = await client.generate("Test prompt", system="System message")
 
@@ -49,6 +49,26 @@ async def test_ollama_client_generate():
         assert isinstance(result, str)
         assert result == "Test response from Ollama"
         mock_client_instance.post.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_ollama_client_generate_with_injected_client():
+    """Test OllamaClient.generate() reuses an injected persistent AsyncClient (#192)."""
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"response": "Test response from Ollama"}
+
+    persistent_client = AsyncMock()
+    persistent_client.post.return_value = mock_response
+
+    # Inject the persistent client — no AsyncClient context manager should be opened
+    with patch("academic_paper.llm.httpx.AsyncClient") as mock_async_client:
+        client = OllamaClient(base_url="http://localhost:11434", model="mistral", client=persistent_client)
+        result = await client.generate("Test prompt", system="System message")
+
+    assert result == "Test response from Ollama"
+    persistent_client.post.assert_called_once()
+    # Persistent-client path must not open a new AsyncClient
+    mock_async_client.assert_not_called()
 
 
 def test_get_llm_client_returns_gemini_when_api_key_set(monkeypatch):
