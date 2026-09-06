@@ -64,9 +64,10 @@ def test_search_returns_results(client):
     client.app.state.vector_store.asearch = AsyncMock(return_value=mock_search_results)
 
     # Mock database query for page_start
-    with patch("academic_paper.server.get_connection") as mock_get_conn:
+    with patch("academic_paper.server.db_connection") as mock_get_conn:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
         mock_get_conn.return_value = mock_conn
 
@@ -107,9 +108,10 @@ def test_search_vector_mode(client):
     ]
     client.app.state.vector_store.asearch = AsyncMock(return_value=mock_search_results)
 
-    with patch("academic_paper.server.get_connection") as mock_get_conn:
+    with patch("academic_paper.server.db_connection") as mock_get_conn:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
         mock_get_conn.return_value = mock_conn
         mock_cursor.fetchone.return_value = {"page_start": 1}
@@ -139,9 +141,10 @@ def test_search_with_paper_id_filter(client):
     ]
     client.app.state.vector_store.asearch = AsyncMock(return_value=mock_search_results)
 
-    with patch("academic_paper.server.get_connection") as mock_get_conn:
+    with patch("academic_paper.server.db_connection") as mock_get_conn:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
         mock_get_conn.return_value = mock_conn
         mock_cursor.fetchone.return_value = {"page_start": 1}
@@ -194,12 +197,13 @@ def test_search_hybrid_mode(client):
 
     with (
         patch("academic_paper.server.search_fts") as mock_search_fts,
-        patch("academic_paper.server.get_connection") as mock_get_conn,
+        patch("academic_paper.server.db_connection") as mock_get_conn,
     ):
         mock_search_fts.return_value = mock_fts_results
 
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
         mock_get_conn.return_value = mock_conn
 
@@ -231,12 +235,13 @@ def test_search_keyword_mode(client):
 
     with (
         patch("academic_paper.server.search_fts") as mock_search_fts,
-        patch("academic_paper.server.get_connection") as mock_get_conn,
+        patch("academic_paper.server.db_connection") as mock_get_conn,
     ):
         mock_search_fts.return_value = mock_fts_results
 
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
         mock_get_conn.return_value = mock_conn
 
