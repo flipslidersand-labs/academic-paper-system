@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sqlite3
 import tempfile
 import time
@@ -336,7 +337,10 @@ async def ingest_paper(
             raise HTTPException(status_code=415, detail="Not a PDF file (missing %PDF- header)")
 
         file_hash = hash_file(tmp_path)
-        file_name = file.filename or "unknown.pdf"
+        # Sanitize filename to prevent log injection and stored XSS (#189).
+        # Allow only word chars, dots, hyphens, spaces; replace everything else with '_'.
+        raw_name = file.filename or "unknown.pdf"
+        file_name = re.sub(r"[^\w.\- ]", "_", raw_name)[:255]
 
         with db_connection(settings.academic_db) as conn:
             cursor = conn.cursor()
