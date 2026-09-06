@@ -124,6 +124,33 @@ async def _probe_startup_health(app: FastAPI) -> None:
         )
 
 
+async def _cleanup_orphaned_ingests(app: FastAPI) -> None:
+    """On startup, mark papers stuck in 'pending' as 'failed' and remove orphaned Qdrant vectors.
+
+    A paper stays 'pending' when the server is killed mid-ingest (after Qdrant
+    upsert but before save_chunks commits).  The JobStore already marks the
+    corresponding job 'failed'; this function ensures the paper row and any
+    partially-uploaded vectors are also cleaned up so the file can be re-ingested.
+    """
+    try:
+        with db_connection(settings.academic_db) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM papers WHERE status = 'pending'")
+            stuck_ids = [row[0] for row in cursor.fetchall()]
+        if not stuck_ids:
+            return
+        logger.warning("Startup: found %d papers stuck in 'pending'; cleaning up Qdrant vectors", len(stuck_ids))
+        for paper_id in stuck_ids:
+            try:
+                await app.state.vector_store.adelete_by_paper_id(paper_id)
+            except Exception as exc:
+                logger.warning("Startup cleanup: Qdrant delete failed for paper_id=%s: %s", paper_id, exc)
+            with db_connection(settings.academic_db) as conn:
+                update_paper_status(conn, paper_id, "failed")
+    except Exception as exc:
+        logger.warning("Startup cleanup failed (non-fatal): %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize database and services on startup."""
@@ -149,10 +176,23 @@ async def lifespan(app: FastAPI):
         app.state.summarizer = RAGSummarizer(llm_client, app.state.vector_store, app.state.embedder)
     else:
         app.state.summarizer = None
+    # Track active background ingest tasks so shutdown can wait for them (#194).
+    app.state.active_ingest_tasks: set[asyncio.Task] = set()
     # Keep a reference so the task isn't garbage-collected mid-flight
     # (documented asyncio pitfall), and cancel it on shutdown.
     app.state.probe_task = asyncio.create_task(_probe_startup_health(app))
+    await _cleanup_orphaned_ingests(app)
     yield
+    # Graceful shutdown: wait up to 30 s for in-flight ingest tasks (#194).
+    active = list(app.state.active_ingest_tasks)
+    if active:
+        logger.info("Shutdown: waiting for %d active ingest task(s) (timeout 30s)", len(active))
+        try:
+            await asyncio.wait_for(asyncio.gather(*active, return_exceptions=True), timeout=30.0)
+        except asyncio.TimeoutError:
+            logger.warning("Shutdown: ingest tasks did not finish in 30s; cancelling")
+            for t in active:
+                t.cancel()
     app.state.probe_task.cancel()
     await embed_client.aclose()
     if ollama_http_client is not None:
@@ -294,7 +334,6 @@ async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str,
 
 @app.post("/papers/ingest", dependencies=[Depends(verify_api_key)])
 async def ingest_paper(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     title: str | None = Form(None, max_length=1000),
     authors: str | None = Form(None, max_length=10000),
@@ -400,7 +439,11 @@ async def ingest_paper(
 
         job = job_store.create(kind="ingest")
         keep_tmp = True  # background task now owns tmp cleanup
-        background_tasks.add_task(_run_ingest, job.id, tmp_path, paper_id, file_hash, file_name)
+        task = asyncio.create_task(_run_ingest(job.id, tmp_path, paper_id, file_hash, file_name))
+        active = getattr(app.state, "active_ingest_tasks", None)
+        if active is not None:
+            active.add(task)
+            task.add_done_callback(active.discard)
         return JSONResponse(
             status_code=202,
             content={"job_id": job.id, "paper_id": paper_id, "status": "pending"},

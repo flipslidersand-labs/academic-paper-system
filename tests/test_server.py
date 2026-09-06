@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from academic_paper.config import settings
 from academic_paper.db import get_chunks, get_connection, save_chunks, save_paper
-from academic_paper.server import app
+from academic_paper.server import _cleanup_orphaned_ingests, app
 
 
 @pytest.fixture
@@ -817,3 +817,53 @@ def test_write_endpoints_pass_without_api_key_when_unconfigured(client):
                 files={"file": ("c.pdf", BytesIO(create_minimal_pdf()), "application/pdf")},
             )
         assert r.status_code != 401
+
+
+# --- _cleanup_orphaned_ingests tests (#194) ---
+
+
+@pytest.mark.anyio
+async def test_cleanup_orphaned_ingests_no_stuck_papers(temp_db):
+    """_cleanup_orphaned_ingests does nothing when no papers are stuck."""
+    mock_app = MagicMock()
+    mock_qdrant = MagicMock()
+    mock_qdrant.adelete_by_paper_id = AsyncMock()
+    mock_app.state.vector_store = mock_qdrant
+
+    with patch.object(settings, "academic_db", temp_db):
+        await _cleanup_orphaned_ingests(mock_app)
+
+    mock_qdrant.adelete_by_paper_id.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_cleanup_orphaned_ingests_cleans_stuck_paper(temp_db):
+    """_cleanup_orphaned_ingests deletes Qdrant vectors and marks papers failed."""
+    conn = get_connection(temp_db)
+    paper_id = save_paper(conn, "stuck.pdf", "hash_stuck")
+    conn.execute("UPDATE papers SET status = 'pending' WHERE id = ?", (paper_id,))
+    conn.commit()
+    conn.close()
+
+    mock_app = MagicMock()
+    mock_qdrant = MagicMock()
+    mock_qdrant.adelete_by_paper_id = AsyncMock()
+    mock_app.state.vector_store = mock_qdrant
+
+    with patch.object(settings, "academic_db", temp_db):
+        await _cleanup_orphaned_ingests(mock_app)
+
+    mock_qdrant.adelete_by_paper_id.assert_called_once_with(paper_id)
+
+    updated = get_connection(temp_db).execute("SELECT status FROM papers WHERE id = ?", (paper_id,)).fetchone()
+    assert updated["status"] == "failed"
+
+
+@pytest.mark.anyio
+async def test_cleanup_orphaned_ingests_handles_db_error_non_fatal():
+    """_cleanup_orphaned_ingests swallows DB errors (non-fatal startup)."""
+    mock_app = MagicMock()
+    mock_app.state.vector_store = MagicMock()
+
+    with patch("academic_paper.server.db_connection", side_effect=Exception("db down")):
+        await _cleanup_orphaned_ingests(mock_app)  # must not raise
