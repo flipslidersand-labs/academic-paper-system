@@ -13,7 +13,11 @@ from academic_paper.server import app
 @pytest.fixture
 def client(temp_db):
     """Create a test client with patched settings and mocked services."""
-    with patch.object(settings, "academic_db", temp_db):
+    with (
+        patch.object(settings, "academic_db", temp_db),
+        # Disable API key auth so tests are not affected by a non-empty .env (#220).
+        patch.object(settings, "api_key", ""),
+    ):
         # Create mock instances for EmbedderClient and QdrantStore
         mock_embedder = MagicMock()
         mock_embedder.embed = AsyncMock(return_value=[[0.1] * 768])  # 768-dim vector
