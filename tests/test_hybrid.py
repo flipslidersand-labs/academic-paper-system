@@ -84,6 +84,23 @@ def test_rrf_merge_empty_inputs():
     assert len(result) == 0
 
 
+def test_rrf_merge_skips_vector_result_without_chunk_id():
+    """Vector results without chunk_id in payload are skipped (hybrid.py:44-45)."""
+    fts_results = [
+        {"chunk_id": 1, "paper_id": 1, "chunk_index": 0, "text": "Test", "rank": -5.0},
+    ]
+    vector_results = [
+        {"id": "vec-no-id", "score": 0.9, "payload": {"paper_id": 1}},  # no chunk_id
+        {"id": "vec-ok", "score": 0.8, "payload": {"chunk_id": 2, "paper_id": 1, "chunk_index": 1, "text": "Other"}},
+    ]
+
+    result = rrf_merge(fts_results, vector_results)
+
+    ids = [r["chunk_id"] for r in result]
+    assert 2 in ids
+    assert all(r.get("chunk_id") is not None for r in result)
+
+
 def test_rrf_merge_sorted_by_score():
     """Test that results are sorted by rrf_score in descending order."""
     fts_results = [
