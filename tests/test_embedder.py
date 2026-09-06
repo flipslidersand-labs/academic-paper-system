@@ -187,11 +187,14 @@ def test_embedding_timeout_default():
 
 
 def test_embedding_timeout_env_override(monkeypatch):
-    """EMBEDDING_TIMEOUT env var overrides the default (#153)."""
+    """EMBEDDING_TIMEOUT env var overrides the default (#153, #201).
+
+    Uses monkeypatch + direct Settings() instantiation instead of
+    importlib.reload to avoid polluting the module-global state that
+    subsequent tests read.
+    """
     monkeypatch.setenv("EMBEDDING_TIMEOUT", "60")
-    from importlib import reload
+    from academic_paper.config import Settings
 
-    import academic_paper.config as cfg_mod
-
-    reload(cfg_mod)
-    assert cfg_mod.Settings().embedding_timeout == 60
+    s = Settings()
+    assert s.embedding_timeout == 60
