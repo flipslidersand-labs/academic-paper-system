@@ -142,6 +142,10 @@ def main():
     papers = fetch_all(f"{api}/papers?sort=score")
     print(f"  {len(papers)} papers", file=sys.stderr)
 
+    if not papers:
+        print("ERROR: no papers fetched — aborting to prevent empty HTML commit", file=sys.stderr)
+        sys.exit(1)
+
     print("Fetching summaries ...", file=sys.stderr)
     summaries = fetch_all(f"{api}/summaries?")
     summaries_by_id = {s["paper_id"]: s for s in summaries}
