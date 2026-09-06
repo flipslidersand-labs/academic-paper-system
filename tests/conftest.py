@@ -1,7 +1,12 @@
 """Shared fixtures for the test suite."""
 
+import os
 import tempfile
 from pathlib import Path
+
+# Set valid URLs before any module-level Settings() instantiation (#200).
+os.environ.setdefault("EMBEDDING_SVC_URL", "http://localhost:9092")
+os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
 
 import pytest
 
