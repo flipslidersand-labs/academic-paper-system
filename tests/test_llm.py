@@ -1,6 +1,8 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
+from google.genai import errors as genai_errors
 
 from academic_paper.llm import GeminiClient, OllamaClient, get_llm_client
 
@@ -26,6 +28,66 @@ async def test_gemini_client_generate():
         assert isinstance(result, str)
         assert result == "Test response from Gemini"
         mock_client_instance.models.generate_content.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_gemini_client_retries_on_server_error(monkeypatch):
+    """A transient ServerError from generate_content is retried and succeeds (#234)."""
+    monkeypatch.setattr("academic_paper.retry.asyncio.sleep", AsyncMock())
+
+    with patch("google.genai.Client") as mock_genai_client:
+        mock_client_instance = MagicMock()
+        mock_genai_client.return_value = mock_client_instance
+
+        mock_response = MagicMock()
+        mock_response.text = "Test response from Gemini"
+        mock_client_instance.models.generate_content.side_effect = [
+            genai_errors.ServerError(503, {"error": "unavailable"}),
+            mock_response,
+        ]
+
+        client = GeminiClient(api_key="test-key")
+        result = await client.generate("Test prompt", system="System message")
+
+        assert result == "Test response from Gemini"
+        assert mock_client_instance.models.generate_content.call_count == 2
+
+
+@pytest.mark.anyio
+async def test_gemini_client_does_not_retry_on_client_error():
+    """A ClientError (4xx) from generate_content is not retried (#234)."""
+    with patch("google.genai.Client") as mock_genai_client:
+        mock_client_instance = MagicMock()
+        mock_genai_client.return_value = mock_client_instance
+        mock_client_instance.models.generate_content.side_effect = genai_errors.ClientError(
+            400, {"error": "bad request"}
+        )
+
+        client = GeminiClient(api_key="test-key")
+        with pytest.raises(genai_errors.ClientError):
+            await client.generate("Test prompt")
+
+        assert mock_client_instance.models.generate_content.call_count == 1
+
+
+@pytest.mark.anyio
+async def test_ollama_client_retries_on_timeout(monkeypatch):
+    """A ReadTimeout from Ollama is retried and succeeds on the second attempt (#234)."""
+    monkeypatch.setattr("academic_paper.retry.asyncio.sleep", AsyncMock())
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"response": "Test response from Ollama"}
+
+    persistent_client = AsyncMock()
+    persistent_client.post.side_effect = [
+        httpx.ReadTimeout("timed out"),
+        mock_response,
+    ]
+
+    client = OllamaClient(base_url="http://localhost:11434", model="mistral", client=persistent_client)
+    result = await client.generate("Test prompt", system="System message")
+
+    assert result == "Test response from Ollama"
+    assert persistent_client.post.call_count == 2
 
 
 @pytest.mark.anyio
