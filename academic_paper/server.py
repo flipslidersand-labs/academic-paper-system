@@ -197,6 +197,7 @@ async def lifespan(app: FastAPI):
     await embed_client.aclose()
     if ollama_http_client is not None:
         await ollama_http_client.aclose()
+    await app.state.vector_store.aclose()
 
 
 def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
