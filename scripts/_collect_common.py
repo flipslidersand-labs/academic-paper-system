@@ -15,14 +15,21 @@ from pathlib import Path
 import httpx
 from ingest_client import submit_and_wait
 
+from academic_paper.config import settings
+
 
 @contextlib.contextmanager
-def download_pdf(client: httpx.Client, url: str, timeout: int = 60):
+def download_pdf(client: httpx.Client, url: str, timeout: int = 60, max_mb: int | None = None):
     """Stream a PDF from *url* using *client* into a named temp file.
 
     Yields the temp-file path.  The file is deleted on exit.
     Raises ValueError when the response content-type does not contain "pdf".
+    Raises ValueError when the cumulative downloaded size exceeds *max_mb*
+    (defaults to ``settings.max_upload_mb``, the same limit the server
+    enforces on ``/papers/ingest``), aborting the stream immediately to
+    avoid exhausting disk on an oversized or unbounded response.
     """
+    max_bytes = (max_mb if max_mb is not None else settings.max_upload_mb) * 1024 * 1024
     tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
     tmp_path = tmp.name
     tmp.close()
@@ -32,8 +39,12 @@ def download_pdf(client: httpx.Client, url: str, timeout: int = 60):
             ct = resp.headers.get("content-type", "").lower()
             if "pdf" not in ct and not url.lower().endswith(".pdf"):
                 raise ValueError(f"Not a PDF (content-type: {ct})")
+            written = 0
             with open(tmp_path, "wb") as fh:
                 for chunk in resp.iter_bytes(chunk_size=65536):
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise ValueError(f"PDF exceeds max size ({max_bytes // (1024 * 1024)} MB): {url}")
                     fh.write(chunk)
         yield tmp_path
     finally:
