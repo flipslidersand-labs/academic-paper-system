@@ -66,6 +66,36 @@ def test_download_pdf_allows_pdf_url_extension_without_content_type():
         assert Path(path).read_bytes() == b"%PDF-1.4"
 
 
+def test_download_pdf_raises_when_size_exceeds_limit():
+    """Streaming aborts as soon as cumulative bytes exceed max_mb, without buffering the rest."""
+
+    class _FakeOversizedResp:
+        headers = {"content-type": "application/pdf"}
+
+        def raise_for_status(self):
+            pass
+
+        def iter_bytes(self, chunk_size=65536):
+            # Each chunk is 1 MB; limit below is 1 MB so the 2nd chunk trips it.
+            for _ in range(5):
+                yield b"x" * (1024 * 1024)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+    class _FakeClient:
+        def stream(self, method, url, **kwargs):
+            return _FakeOversizedResp()
+
+    client = _FakeClient()
+    with pytest.raises(ValueError, match="exceeds max size"):
+        with download_pdf(client, "http://example.com/huge.pdf", max_mb=1) as _:
+            pass
+
+
 def test_download_pdf_cleanup_on_exception():
     """Temp file is deleted even when an exception occurs inside the with block."""
 
