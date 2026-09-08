@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from academic_paper.config import settings
@@ -623,6 +624,17 @@ def test_parse_list_field_comma_separated(client):
     assert _parse_list_field('["a", "b"]') == ["a", "b"]
     assert _parse_list_field("a,b,c") == ["a", "b", "c"]
     assert _parse_list_field("not json {[") == ["not json {["]
+
+
+def test_parse_list_field_rejects_non_array_json(client):
+    """Valid JSON that isn't an array of strings must be rejected, not silently
+    CSV-split into corrupted fragments (#231)."""
+    from academic_paper.server import _parse_list_field
+
+    for value in ('{"name": "Alice"}', "42", "true", '"just a string"', "[1, 2, 3]"):
+        with pytest.raises(HTTPException) as exc_info:
+            _parse_list_field(value, "authors")
+        assert exc_info.value.status_code == 422
 
 
 def test_score_all_endpoint(client, temp_db):
