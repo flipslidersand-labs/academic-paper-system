@@ -101,3 +101,10 @@ class QdrantStore:
 
     async def aensure_collection(self) -> None:
         await asyncio.to_thread(self.ensure_collection)
+
+    def close(self) -> None:
+        """QdrantClient のコネクションプールを解放する（#228）。"""
+        self.client.close()
+
+    async def aclose(self) -> None:
+        await asyncio.to_thread(self.close)

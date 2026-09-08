@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import MagicMock, patch
 
 from academic_paper.vector_store import QdrantStore, make_qdrant_id
@@ -142,3 +143,27 @@ def test_delete_by_paper_id_retries_on_network_error():
         mock_retry.assert_called_once()
         _, kw = mock_retry.call_args
         assert kw["attempts"] == 3
+
+
+def test_close_closes_underlying_qdrant_client():
+    """close() が内部の QdrantClient.close() を呼ぶことを確認 (#228)"""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+
+        store = QdrantStore(url="http://test", collection="test-collection")
+        store.close()
+
+        mock_client.close.assert_called_once()
+
+
+def test_aclose_closes_underlying_qdrant_client():
+    """aclose() が内部の QdrantClient.close() を呼ぶことを確認 (#228)"""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+
+        store = QdrantStore(url="http://test", collection="test-collection")
+        asyncio.run(store.aclose())
+
+        mock_client.close.assert_called_once()
