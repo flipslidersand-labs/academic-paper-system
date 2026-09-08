@@ -1,10 +1,12 @@
 """Tests for academic_paper.db module."""
 
 import json
+import sqlite3
 
 import pytest
 
 from academic_paper.db import (
+    _migrate_add_columns,
     arxiv_id_from_file_name,
     get_chunks,
     get_connection,
@@ -13,6 +15,27 @@ from academic_paper.db import (
     save_paper,
     search_fts,
 )
+
+
+def test_migrate_add_columns_ignores_duplicate_column(temp_db):
+    """Re-adding an existing column should be silently ignored (idempotent migration)."""
+    conn = get_connection(temp_db)
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)")
+
+    # Should not raise even though "name" already exists.
+    _migrate_add_columns(cursor, "t", [("name", "TEXT")])
+    conn.close()
+
+
+def test_migrate_add_columns_reraises_real_errors(temp_db):
+    """A genuine OperationalError (e.g. missing table) must not be swallowed."""
+    conn = get_connection(temp_db)
+    cursor = conn.cursor()
+
+    with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        _migrate_add_columns(cursor, "nonexistent_table", [("col", "TEXT")])
+    conn.close()
 
 
 def test_init_db_creates_tables(temp_db):
