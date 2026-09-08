@@ -172,6 +172,43 @@ async def test_summarize_qdrant_unavailable_falls_back_to_db():
 
 
 @pytest.mark.anyio
+async def test_summarize_db_fallback_runs_off_event_loop_thread():
+    """_chunks_from_db is offloaded via asyncio.to_thread, not called on the event loop (#232).
+
+    Regression guard: a naive synchronous call would run on the current
+    thread, which for the running event loop's thread is exactly the bug
+    #232 reports. Recording the executing thread's identity proves the
+    fallback runs elsewhere.
+    """
+    import threading
+    from unittest.mock import patch
+
+    from qdrant_client.http.exceptions import ResponseHandlingException
+
+    mock_llm = AsyncMock()
+    mock_llm.generate.return_value = json.dumps(
+        {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
+    )
+    mock_qdrant = MagicMock()
+    mock_qdrant.asearch = AsyncMock(side_effect=ResponseHandlingException("connection refused"))
+    mock_embedder = AsyncMock()
+    mock_embedder.embed_single.return_value = [0.1] * 768
+
+    calling_thread_ids: list[int] = []
+
+    def fake_chunks_from_db(paper_id, top_k):
+        calling_thread_ids.append(threading.get_ident())
+        return [{"payload": {"page_start": 1, "text": "db text"}}]
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
+    with patch.object(summarizer, "_chunks_from_db", side_effect=fake_chunks_from_db):
+        await summarizer.summarize(paper_id=1, file_hash="hash1", title="Test")
+
+    assert calling_thread_ids
+    assert calling_thread_ids[0] != threading.get_ident()
+
+
+@pytest.mark.anyio
 async def test_summarize_raises_when_no_chunks():
     """ValueError raised when chunks list is empty."""
     mock_llm = AsyncMock()
