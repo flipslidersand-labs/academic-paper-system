@@ -1,5 +1,6 @@
 """RAG-based paper summarizer using LLM and vector store."""
 
+import asyncio
 import json
 import logging
 import re
@@ -92,7 +93,7 @@ class RAGSummarizer:
                 logger.warning(
                     "embed_single failed for summarize query=%r — falling back to DB chunk order", query_text
                 )
-                chunks = self._chunks_from_db(paper_id, top_k)
+                chunks = await asyncio.to_thread(self._chunks_from_db, paper_id, top_k)
             else:
                 try:
                     chunks = await self.qdrant.asearch(
@@ -102,7 +103,7 @@ class RAGSummarizer:
                     )
                 except QDRANT_UNAVAILABLE_ERRORS:
                     logger.warning("Qdrant unavailable for paper_id=%s — falling back to DB chunk order", paper_id)
-                    chunks = self._chunks_from_db(paper_id, top_k)
+                    chunks = await asyncio.to_thread(self._chunks_from_db, paper_id, top_k)
         else:
             # No embedder configured (test convenience): degraded zero-vector search
             chunks = await self.qdrant.asearch(
