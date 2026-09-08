@@ -156,7 +156,6 @@ def _migrate_add_columns(cursor: sqlite3.Cursor, table: str, columns: list[tuple
                 raise  # not a "column already exists" error — surface real failures
 
 
-
 def save_paper(
     conn: sqlite3.Connection,
     file_name: str,
