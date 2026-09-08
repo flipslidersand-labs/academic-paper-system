@@ -5,7 +5,15 @@ import httpx
 from academic_paper.config import settings
 from academic_paper.retry import async_with_retry
 
-_EMBED_RETRYABLE = (httpx.NetworkError, httpx.TimeoutException)
+
+class _RetryableStatusError(httpx.HTTPStatusError):
+    """Raised for 5xx responses so retries target transient server errors only.
+
+    4xx responses still raise the plain httpx.HTTPStatusError and are never retried.
+    """
+
+
+_EMBED_RETRYABLE = (httpx.NetworkError, httpx.TimeoutException, _RetryableStatusError)
 _BATCH_MAX = 256  # embedding-svc /embed/batch hard limit
 
 
@@ -75,7 +83,12 @@ class EmbedderClient:
             json={"texts": texts, "mode": mode, "collection": collection},
             headers={"X-API-Key": self.api_key},
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if response.status_code >= 500:
+                raise _RetryableStatusError(str(exc), request=exc.request, response=exc.response) from exc
+            raise
         return response.json()["vectors"]
 
     async def embed_single(self, text: str, mode: str = "search", collection: str = "facts") -> list[float]:
