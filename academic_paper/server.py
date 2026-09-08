@@ -62,21 +62,21 @@ def _parse_list_field(value: str | None, field: str = "field") -> list[str] | No
     previously coerced via str(x) and stored as Python reprs (#144).
 
     Raises:
-        HTTPException 422: JSON array contains non-string elements.
+        HTTPException 422: value is valid JSON but not an array of strings
+        (e.g. a JSON object or number), or is a JSON array with non-string
+        elements (#231).
     """
     if not value:
         return None
     try:
         parsed = json.loads(value)
-        if isinstance(parsed, list):
-            if not all(isinstance(x, str) for x in parsed):
-                raise HTTPException(
-                    status_code=422, detail=f"{field} must be a JSON array of strings or a comma-separated string"
-                )
-            return parsed
     except json.JSONDecodeError:
-        pass
-    return [x.strip() for x in value.split(",") if x.strip()]
+        return [x.strip() for x in value.split(",") if x.strip()]
+    if not isinstance(parsed, list) or not all(isinstance(x, str) for x in parsed):
+        raise HTTPException(
+            status_code=422, detail=f"{field} must be a JSON array of strings or a comma-separated string"
+        )
+    return parsed
 
 
 def _validate_published_date(value: str | None, field: str = "published_date") -> None:
