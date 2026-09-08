@@ -22,3 +22,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build Docker image
         run: docker build -t academic-paper-system:test .
+
+  gitleaks:
+    permissions:
+      contents: read
+    uses: flipslidersand-labs/qa-workflows/.github/workflows/gitleaks.yml@main
