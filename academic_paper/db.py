@@ -151,8 +151,9 @@ def _migrate_add_columns(cursor: sqlite3.Cursor, table: str, columns: list[tuple
     for col_name, col_def in columns:
         try:
             cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_def}")
-        except sqlite3.OperationalError:
-            pass  # column already exists
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e):
+                raise  # not a "column already exists" error — surface real failures
 
 
 def save_paper(
