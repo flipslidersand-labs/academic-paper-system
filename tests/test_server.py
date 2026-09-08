@@ -501,6 +501,29 @@ def test_ingest_extract_value_error_returns_400(client):
         assert response.status_code == 400
 
 
+def test_ingest_embedding_count_mismatch_returns_400(client):
+    """embedder returns fewer vectors than chunks (#227) → 400, not silently truncated by zip()."""
+    pdf_content = create_minimal_pdf()
+
+    with (
+        patch("academic_paper.server.extract_text") as mock_extract,
+        patch("academic_paper.server.chunk_pages") as mock_chunk,
+    ):
+        mock_extract.return_value = [{"page": 1, "text": "Some text"}]
+        mock_chunk.return_value = [
+            {"text": "chunk one", "page_start": 1},
+            {"text": "chunk two", "page_start": 1},
+        ]
+        # Simulate a partial/degraded embedding-svc batch response (#227).
+        client.app.state.embedder.embed = AsyncMock(return_value=[[0.1] * 768])
+
+        response = client.post(
+            "/papers/ingest?wait=true",
+            files={"file": ("mismatch.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert response.status_code == 400
+
+
 def test_ingest_async_returns_202_and_completes_job(client):
     """Default ingest is async: returns 202 + job_id, job completes to done."""
     pdf_content = create_minimal_pdf()

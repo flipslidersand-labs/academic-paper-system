@@ -265,6 +265,9 @@ async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_na
     with tracer.start_as_current_span("embed.batch"):
         embeddings = await app.state.embedder.embed(chunk_texts, mode="index")
 
+    if len(embeddings) != len(chunk_texts):
+        raise ValueError(f"Embedding count mismatch: expected {len(chunk_texts)} embeddings, got {len(embeddings)}")
+
     await app.state.vector_store.aensure_collection()
 
     points = []
