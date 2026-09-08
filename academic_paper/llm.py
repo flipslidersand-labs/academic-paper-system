@@ -2,8 +2,13 @@ import asyncio
 from abc import ABC, abstractmethod
 
 import httpx
+from google.genai import errors as genai_errors
 
 from academic_paper.config import settings
+from academic_paper.retry import async_with_retry
+
+_GEMINI_RETRYABLE = (genai_errors.ServerError,)
+_OLLAMA_RETRYABLE = (httpx.NetworkError, httpx.TimeoutException)
 
 
 class BaseLLMClient(ABC):
@@ -54,10 +59,15 @@ class GeminiClient(BaseLLMClient):
 
         # generate_content is a sync blocking call; run in thread pool so the
         # event loop remains responsive during multi-second LLM generation (#149).
-        response = await asyncio.to_thread(
+        # Retries only transient server-side errors (#234); ClientError (4xx) is not retried.
+        response = await async_with_retry(
+            asyncio.to_thread,
             self.client.models.generate_content,
             model="gemini-2.0-flash",
             contents=full_prompt,
+            attempts=3,
+            base_delay=1.0,
+            exceptions=_GEMINI_RETRYABLE,
         )
         return response.text
 
@@ -109,10 +119,26 @@ class OllamaClient(BaseLLMClient):
             Generated text response
         """
         if self._client is not None:
-            return await self._post(self._client, prompt, system)
+            return await async_with_retry(
+                self._post,
+                self._client,
+                prompt,
+                system,
+                attempts=3,
+                base_delay=1.0,
+                exceptions=_OLLAMA_RETRYABLE,
+            )
         # Fallback: per-call client (tests / direct instantiation without lifespan).
         async with httpx.AsyncClient(timeout=settings.ollama_timeout) as client:
-            return await self._post(client, prompt, system)
+            return await async_with_retry(
+                self._post,
+                client,
+                prompt,
+                system,
+                attempts=3,
+                base_delay=1.0,
+                exceptions=_OLLAMA_RETRYABLE,
+            )
 
 
 def get_llm_client() -> BaseLLMClient | None:

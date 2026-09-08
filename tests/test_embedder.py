@@ -1,5 +1,7 @@
 """Tests for embedder client."""
 
+from unittest.mock import AsyncMock
+
 import httpx
 import pytest
 import respx
@@ -176,6 +178,53 @@ async def test_embed_fallback_client_uses_embedding_timeout():
         result = await client.embed(["hello"])
 
     assert result == [[0.5]]
+
+
+@pytest.mark.anyio
+async def test_embed_retries_on_5xx(monkeypatch):
+    """A transient 5xx response is retried and succeeds on the second attempt (#234)."""
+    monkeypatch.setattr("academic_paper.retry.asyncio.sleep", AsyncMock())
+    call_count = [0]
+
+    async def _side_effect(request):
+        call_count[0] += 1
+        if call_count[0] < 2:
+            return httpx.Response(503, text="service unavailable")
+        return httpx.Response(200, json={"vectors": [[0.1, 0.2]]})
+
+    with respx.mock:
+        respx.post("http://localhost:9092/embed/batch").mock(side_effect=_side_effect)
+        persistent = httpx.AsyncClient()
+        try:
+            client = EmbedderClient(base_url="http://localhost:9092", api_key="key", client=persistent)
+            result = await client.embed(["hello"])
+        finally:
+            await persistent.aclose()
+
+    assert call_count[0] == 2
+    assert result == [[0.1, 0.2]]
+
+
+@pytest.mark.anyio
+async def test_embed_does_not_retry_on_4xx():
+    """A 4xx response is not retried — it fails on the first attempt (#234)."""
+    call_count = [0]
+
+    async def _side_effect(request):
+        call_count[0] += 1
+        return httpx.Response(400, text="bad request")
+
+    with respx.mock:
+        respx.post("http://localhost:9092/embed/batch").mock(side_effect=_side_effect)
+        persistent = httpx.AsyncClient()
+        try:
+            client = EmbedderClient(base_url="http://localhost:9092", api_key="key", client=persistent)
+            with pytest.raises(httpx.HTTPStatusError):
+                await client.embed(["hello"])
+        finally:
+            await persistent.aclose()
+
+    assert call_count[0] == 1
 
 
 def test_embedding_timeout_default():
