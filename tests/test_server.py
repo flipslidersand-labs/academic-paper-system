@@ -637,6 +637,53 @@ def test_parse_list_field_rejects_non_array_json(client):
         assert exc_info.value.status_code == 422
 
 
+def test_sanitize_text_strips_control_chars():
+    """_sanitize_text removes control chars (incl. newlines) from external metadata (#233)."""
+    from academic_paper.server import _sanitize_text
+
+    assert _sanitize_text(None) is None
+    assert _sanitize_text("Normal Title") == "Normal Title"
+    assert _sanitize_text("Evil\ntitle\r\nOK  1.0.0 [x] fake-log-line") == "Evil title  OK  1.0.0 [x] fake-log-line"
+    assert _sanitize_text("<script>alert(1)</script>\x00\x1f") == "<script>alert(1)</script>"
+    assert _sanitize_text("\n\r\t") is None
+
+
+def test_parse_list_field_strips_control_chars():
+    """_parse_list_field sanitizes each item of authors/categories (#233)."""
+    from academic_paper.server import _parse_list_field
+
+    assert _parse_list_field('["A\\nlice", "Bob"]') == ["A lice", "Bob"]
+    assert _parse_list_field("A\nlice,Bob\r\n") == ["A lice", "Bob"]
+
+
+def test_ingest_sanitizes_title_and_source(client):
+    """title/source with control chars are sanitized before being stored (#233)."""
+    pdf_content = create_minimal_pdf()
+
+    with patch("academic_paper.server.extract_text") as mock_extract:
+        mock_extract.return_value = [{"page": 1, "text": "Test Document content"}]
+
+        response = client.post(
+            "/papers/ingest?wait=true",
+            files={"file": ("sanitize.pdf", BytesIO(pdf_content), "application/pdf")},
+            data={
+                "title": "Evil\ntitle  OK  1.0.0 [x] fake-log-line",
+                "authors": "A\nlice,Bob",
+                "source": "arxiv\r\n",
+            },
+        )
+
+        assert response.status_code == 200
+        paper_id = response.json()["paper_id"]
+
+    detail = client.get(f"/papers/{paper_id}").json()
+    assert "\n" not in detail["title"]
+    assert "\r" not in detail["title"]
+    assert detail["title"] == "Evil title  OK  1.0.0 [x] fake-log-line"
+    assert detail["authors"] == ["A lice", "Bob"]
+    assert detail["source"] == "arxiv"
+
+
 def test_score_all_endpoint(client, temp_db):
     """POST /papers/score-all computes scores for all papers."""
     conn = get_connection(temp_db)

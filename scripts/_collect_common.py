@@ -8,6 +8,7 @@ Provides:
 
 import contextlib
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -16,6 +17,8 @@ import httpx
 from ingest_client import submit_and_wait
 
 from academic_paper.config import settings
+
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
 @contextlib.contextmanager
@@ -104,6 +107,9 @@ def run_collect(
                 counts[status] = counts.get(status, 0) + 1
                 tag = "OK  " if status == "ingested" else "SKIP"
                 title = (paper.get("title") or "")[:50] if isinstance(paper, dict) else ""
+                # Strip control chars (incl. newlines) before printing — externally
+                # sourced titles can otherwise forge/inject cron log lines (#233).
+                title = _CONTROL_CHARS_RE.sub(" ", title)
                 print(f"  {tag} [{label}] {title}")
                 detail.append({"label": label, "status": status, **result})
             except Exception as exc:

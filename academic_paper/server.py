@@ -55,11 +55,30 @@ logger = logging.getLogger(__name__)
 tracer = get_tracer()
 
 
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _sanitize_text(value: str | None) -> str | None:
+    """Strip control characters (incl. newlines) from externally-sourced metadata.
+
+    title/authors/categories/source come from arXiv/OpenAlex/PubMed/Semantic
+    Scholar, sources anyone can post free-form text to. Left unsanitized they
+    are stored verbatim and later exposed via /papers, /summaries, and cron
+    logs — enabling log injection and stored XSS (#233), the same class of
+    issue file_name was fixed for in #189.
+    """
+    if value is None:
+        return None
+    cleaned = _CONTROL_CHARS_RE.sub(" ", value).strip()
+    return cleaned or None
+
+
 def _parse_list_field(value: str | None, field: str = "field") -> list[str] | None:
     """Parse a JSON array string or comma-separated string into a list.
 
     JSON arrays must contain only strings — nested objects/arrays were
     previously coerced via str(x) and stored as Python reprs (#144).
+    Each resulting item is sanitized of control characters (#233).
 
     Raises:
         HTTPException 422: value is valid JSON but not an array of strings
@@ -71,12 +90,12 @@ def _parse_list_field(value: str | None, field: str = "field") -> list[str] | No
     try:
         parsed = json.loads(value)
     except json.JSONDecodeError:
-        return [x.strip() for x in value.split(",") if x.strip()]
+        return [s for s in (_sanitize_text(x) for x in value.split(",")) if s]
     if not isinstance(parsed, list) or not all(isinstance(x, str) for x in parsed):
         raise HTTPException(
             status_code=422, detail=f"{field} must be a JSON array of strings or a comma-separated string"
         )
-    return parsed
+    return [s for s in (_sanitize_text(x) for x in parsed) if s]
 
 
 def _validate_published_date(value: str | None, field: str = "published_date") -> None:
@@ -413,11 +432,11 @@ async def ingest_paper(
                 conn,
                 file_name,
                 file_hash,
-                title=title,
+                title=_sanitize_text(title),
                 authors=_parse_list_field(authors, "authors"),
                 categories=_parse_list_field(categories, "categories"),
                 published_date=published_date or None,
-                source=source or None,
+                source=_sanitize_text(source),
             )
 
         if wait:
