@@ -7,11 +7,14 @@ Provides:
 """
 
 import contextlib
+import ipaddress
 import json
 import re
+import socket
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 from ingest_client import submit_and_wait
@@ -19,6 +22,32 @@ from ingest_client import submit_and_wait
 from academic_paper.config import settings
 
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+_ALLOWED_SCHEMES = {"http", "https"}
+
+
+def assert_safe_url(url: str) -> None:
+    """Raise ValueError if *url* is not a safe http(s) URL to fetch (SSRF guard).
+
+    Third-party indexes (e.g. OpenAlex) return arbitrary externally-supplied
+    URLs. Reject anything but http(s), and reject hosts that resolve to a
+    private, loopback, link-local, or otherwise non-public address (e.g. the
+    169.254.169.254 cloud metadata endpoint) so a malicious record can't make
+    the collector reach into internal infrastructure.
+    """
+    parts = urlsplit(url)
+    if parts.scheme not in _ALLOWED_SCHEMES:
+        raise ValueError(f"Refusing to fetch URL with disallowed scheme {parts.scheme!r}: {url}")
+    host = parts.hostname
+    if not host:
+        raise ValueError(f"Refusing to fetch URL with no host: {url}")
+    try:
+        addrinfos = socket.getaddrinfo(host, None)
+    except socket.gaierror as exc:
+        raise ValueError(f"Could not resolve host {host!r}: {exc}") from exc
+    for info in addrinfos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global:
+            raise ValueError(f"Refusing to fetch URL resolving to non-public address {ip}: {url}")
 
 
 @contextlib.contextmanager
@@ -26,12 +55,14 @@ def download_pdf(client: httpx.Client, url: str, timeout: int = 60, max_mb: int 
     """Stream a PDF from *url* using *client* into a named temp file.
 
     Yields the temp-file path.  The file is deleted on exit.
-    Raises ValueError when the response content-type does not contain "pdf".
-    Raises ValueError when the cumulative downloaded size exceeds *max_mb*
+    Raises ValueError when the URL fails the SSRF safety check (see
+    ``assert_safe_url``), when the response content-type does not contain
+    "pdf", or when the cumulative downloaded size exceeds *max_mb*
     (defaults to ``settings.max_upload_mb``, the same limit the server
     enforces on ``/papers/ingest``), aborting the stream immediately to
     avoid exhausting disk on an oversized or unbounded response.
     """
+    assert_safe_url(url)
     max_bytes = (max_mb if max_mb is not None else settings.max_upload_mb) * 1024 * 1024
     tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
     tmp_path = tmp.name
