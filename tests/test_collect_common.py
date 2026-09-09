@@ -12,7 +12,7 @@ import pytest
 SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from _collect_common import _paper_label, download_pdf, ingest_pdf, run_collect  # noqa: E402
+from _collect_common import _paper_label, assert_safe_url, download_pdf, ingest_pdf, run_collect  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # download_pdf
@@ -42,6 +42,47 @@ def _mock_stream_response(content: bytes, content_type: str = "application/pdf")
             return _FakeStreamResp()
 
     return _FakeClient()
+
+
+# ---------------------------------------------------------------------------
+# assert_safe_url / SSRF guard (#230)
+# ---------------------------------------------------------------------------
+
+
+def test_assert_safe_url_rejects_non_http_scheme():
+    with pytest.raises(ValueError, match="disallowed scheme"):
+        assert_safe_url("file:///etc/passwd")
+
+
+def test_assert_safe_url_rejects_loopback_host():
+    with pytest.raises(ValueError, match="non-public address"):
+        assert_safe_url("http://127.0.0.1/paper.pdf")
+
+
+def test_assert_safe_url_rejects_cloud_metadata_ip():
+    with pytest.raises(ValueError, match="non-public address"):
+        assert_safe_url("http://169.254.169.254/latest/meta-data/")
+
+
+def test_assert_safe_url_rejects_private_ip():
+    with pytest.raises(ValueError, match="non-public address"):
+        assert_safe_url("http://10.0.0.5/paper.pdf")
+
+
+def test_assert_safe_url_allows_public_host():
+    assert_safe_url("https://arxiv.org/pdf/2001.00001.pdf")
+
+
+def test_download_pdf_rejects_unsafe_url_before_streaming():
+    """download_pdf must refuse an SSRF-unsafe URL without ever calling client.stream."""
+
+    class _ExplodingClient:
+        def stream(self, method, url, **kwargs):
+            raise AssertionError("client.stream() must not be called for an unsafe URL")
+
+    with pytest.raises(ValueError, match="non-public address"):
+        with download_pdf(_ExplodingClient(), "http://169.254.169.254/latest/meta-data/") as _:
+            pass
 
 
 def test_download_pdf_writes_tempfile():
