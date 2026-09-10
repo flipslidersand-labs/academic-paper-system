@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     )
     max_upload_mb: int = Field(default=50, description="Maximum PDF upload size in megabytes")
     api_key: str = Field(default="", description="X-API-Key for write endpoints; empty = no auth")
+    pdf_extract_timeout: int = Field(
+        default=120,
+        description=(
+            "Max seconds for extract_text() before the ingest job is failed (#238); "
+            "there is no page-count cap, only wall-clock, so malformed/huge PDFs can't hang a job forever"
+        ),
+    )
 
     @field_validator("embedding_svc_url", "qdrant_url")
     @classmethod

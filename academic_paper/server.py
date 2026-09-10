@@ -273,7 +273,14 @@ async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_na
     """
     with tracer.start_as_current_span("pdf.extract"):
         # extract_text is CPU-bound / sync I/O — run in thread pool (#149).
-        pages = await asyncio.to_thread(extract_text, tmp_path)
+        # extract_text() has no page/time limit of its own, so a malformed or
+        # huge PDF can otherwise hang the job forever (#238); bound the wait here.
+        try:
+            pages = await asyncio.wait_for(
+                asyncio.to_thread(extract_text, tmp_path), timeout=settings.pdf_extract_timeout
+            )
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(f"PDF extraction exceeded {settings.pdf_extract_timeout}s timeout (#238)") from exc
     if not pages:
         raise ValueError("No text extracted from PDF")
 
