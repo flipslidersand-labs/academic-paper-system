@@ -12,7 +12,9 @@ class Settings(BaseSettings):
     )
     qdrant_url: str = Field(default="http://<internal-host>:6333", description="Qdrant vector database URL")
     qdrant_api_key: str = Field(default="", description="API key for Qdrant")
-    qdrant_timeout: int = Field(default=10, description="Qdrant client timeout in seconds")
+    qdrant_timeout: int = Field(
+        default=30, description="Qdrant client timeout in seconds; upsert batches are capped at 200 points (#236)"
+    )
     academic_db: str = Field(default="/data/academic.db", description="Path to academic database")
     chunk_size: int = Field(default=512, description="Size of text chunks for processing")
     chunk_overlap: int = Field(default=64, description="Overlap between consecutive chunks")
