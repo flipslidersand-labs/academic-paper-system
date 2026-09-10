@@ -94,6 +94,52 @@ def test_upsert_calls_qdrant_client():
         assert len(call_kwargs["points"]) == 1
 
 
+def test_upsert_splits_into_batches():
+    """points が _UPSERT_BATCH_MAX を超える場合、複数回に分割して upsert されることを確認 (#236)"""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+
+        store = QdrantStore(url="http://test", collection="test-collection")
+        points = [
+            {
+                "id": f"aaaaaaaa-0000-0000-0000-{i:012d}",
+                "vector": [0.1] * 768,
+                "payload": {"paper_id": 1, "chunk_index": i, "text": "hello"},
+            }
+            for i in range(450)
+        ]
+        store.upsert(points)
+
+        # 200件ずつ: 200, 200, 50 の3回に分割される
+        assert mock_client.upsert.call_count == 3
+        sizes = [len(call.kwargs["points"]) for call in mock_client.upsert.call_args_list]
+        assert sizes == [200, 200, 50]
+        for call in mock_client.upsert.call_args_list:
+            assert call.kwargs["collection_name"] == "test-collection"
+
+
+def test_upsert_single_batch_when_under_limit():
+    """points が上限未満の場合は1回だけ upsert が呼ばれることを確認 (#236)"""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+
+        store = QdrantStore(url="http://test", collection="test-collection")
+        points = [
+            {
+                "id": f"aaaaaaaa-0000-0000-0000-{i:012d}",
+                "vector": [0.1] * 768,
+                "payload": {"paper_id": 1, "chunk_index": i, "text": "hello"},
+            }
+            for i in range(50)
+        ]
+        store.upsert(points)
+
+        mock_client.upsert.assert_called_once()
+        assert len(mock_client.upsert.call_args.kwargs["points"]) == 50
+
+
 def test_upsert_passes_retry_params():
     """upsert が with_retry に attempts=3 と retryable exceptions を渡すことを確認 (#201)"""
     with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
