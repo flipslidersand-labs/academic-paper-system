@@ -170,6 +170,40 @@ def test_ingest_cleans_up_tmpfile_on_error(client):
     assert not os.path.exists(captured["path"]), "temp file should be deleted even on error"
 
 
+def test_ingest_extract_timeout_fails_job_and_cleans_tmpfile(client):
+    """extract_text() taking longer than pdf_extract_timeout must fail the job, not hang it (#238)."""
+    import os
+    import time
+
+    pdf_content = create_minimal_pdf()
+    captured = {}
+
+    original_ntf = tempfile.NamedTemporaryFile
+
+    def fake_ntf(**kwargs):
+        ctx = original_ntf(**kwargs)
+        captured["path"] = ctx.name
+        return ctx
+
+    def slow_extract(_path):
+        time.sleep(0.3)
+        return [{"page": 1, "text": "should never get here"}]
+
+    with (
+        patch.object(settings, "pdf_extract_timeout", 0.05),
+        patch("academic_paper.server.tempfile.NamedTemporaryFile", side_effect=fake_ntf),
+        patch("academic_paper.server.extract_text", side_effect=slow_extract),
+    ):
+        response = client.post(
+            "/papers/ingest?wait=true",
+            files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert response.status_code in (400, 500)
+
+    assert "path" in captured
+    assert not os.path.exists(captured["path"]), "temp file should be deleted after a timed-out extraction"
+
+
 def test_ingest_duplicate_pdf(client):
     """Test POST /papers/ingest with duplicate PDF returns 409."""
     pdf_content = create_minimal_pdf()
