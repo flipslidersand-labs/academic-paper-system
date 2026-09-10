@@ -70,11 +70,12 @@ select = ["E", "F", "W", "I", "N"]
 ignore = ["E501"]  # line-too-long is handled by formatter
 
 # CI passes --cov=. (source is then overridden), so omit is what actually
-# keeps tests/ (inflating) and scripts/ (deflating) out of the denominator.
+# keeps tests/ (inflating) out of the denominator. scripts/ is included in
+# source so its daily-run collectors are covered by the 88% gate (#240).
 [tool.coverage.run]
 branch = true
-source = ["academic_paper"]
-omit = ["tests/*", "scripts/*", ".venv/*", "htmlcov/*", "frontend/*"]
+source = ["academic_paper", "scripts"]
+omit = ["tests/*", ".venv/*", "htmlcov/*", "frontend/*"]
 
 [tool.coverage.report]
 precision = 2
