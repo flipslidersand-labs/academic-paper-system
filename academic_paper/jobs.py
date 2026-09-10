@@ -134,6 +134,23 @@ class JobStore:
                 j.status in ("pending", "running") and (kind is None or j.kind == kind) for j in self._jobs.values()
             )
 
+    def create_if_not_running(self, kind: str = "") -> Job | None:
+        """Atomically check for a running/pending job of `kind` and create one if none exists.
+
+        has_running() and create() each take self._lock independently, so a caller doing
+        "check then create" (e.g. the summarize-all endpoint) still races: two callers can
+        both see has_running() == False before either has created a job (see #235). This
+        method performs the check and the create under a single lock acquisition, closing
+        that window. Returns None if a job of this kind is already pending/running.
+        """
+        with self._lock:
+            if any(j.status in ("pending", "running") and j.kind == kind for j in self._jobs.values()):
+                return None
+            job = Job(id=str(uuid.uuid4()), status="pending", kind=kind)
+            self._jobs[job.id] = job
+        self._persist(job)
+        return job
+
     def persist(self, job: Job) -> None:
         """Persist job state to SQLite (call on status transitions)."""
         self._persist(job)

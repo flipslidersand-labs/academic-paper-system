@@ -715,12 +715,12 @@ async def _run_summarize_all(job_id: str) -> None:
 @app.post("/jobs/summarize-all", status_code=202, dependencies=[Depends(verify_api_key)])
 async def start_summarize_all(background_tasks: BackgroundTasks):
     """Start a background job to summarize all papers without a cached summary."""
-    if job_store.has_running(kind="summarize-all"):
-        raise HTTPException(status_code=409, detail="A summarize-all job is already running")
     if app.state.llm is None or app.state.summarizer is None:
         raise HTTPException(status_code=503, detail="LLM not configured")
 
-    job = job_store.create(kind="summarize-all")
+    job = job_store.create_if_not_running(kind="summarize-all")
+    if job is None:
+        raise HTTPException(status_code=409, detail="A summarize-all job is already running")
     background_tasks.add_task(_run_summarize_all, job.id)
     return {"job_id": job.id, "status": job.status}
 
