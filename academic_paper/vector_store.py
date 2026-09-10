@@ -12,6 +12,7 @@ from academic_paper.retry import with_retry
 PAPER_NS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
 _QDRANT_RETRYABLE = (UnexpectedResponse, httpx.NetworkError, httpx.TimeoutException)
+_UPSERT_BATCH_MAX = 200  # keep single requests well under qdrant_timeout (#236)
 
 
 def make_qdrant_id(file_hash: str, chunk_index: int) -> str:
@@ -39,16 +40,22 @@ class QdrantStore:
             )
 
     def upsert(self, points: list[dict]) -> None:
-        """チャンクをQdrantにupsertする（失敗時3回リトライ）
+        """チャンクをQdrantにupsertする（失敗時3回リトライ、200件ずつバッチ分割 #236）
         points要素: {"id": str(UUID), "vector": List[float], "payload": dict}
         payload例: {"paper_id": int, "chunk_index": int, "text": str, "file_name": str}
+
+        大容量PDFで数千chunkを一括送信するとqdrant_timeoutを超過しやすく、
+        with_retryは同一の巨大リクエストをそのまま再送するだけでサイズ起因の
+        タイムアウトは解消しない（embedder.pyの/embed/batch分割と同様の対処）。
         """
-        structs = [PointStruct(id=p["id"], vector=p["vector"], payload=p["payload"]) for p in points]
+        for i in range(0, len(points), _UPSERT_BATCH_MAX):
+            batch = points[i : i + _UPSERT_BATCH_MAX]
+            structs = [PointStruct(id=p["id"], vector=p["vector"], payload=p["payload"]) for p in batch]
 
-        def _do():
-            self.client.upsert(collection_name=self.collection, points=structs)
+            def _do(structs=structs):
+                self.client.upsert(collection_name=self.collection, points=structs)
 
-        with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
+            with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
 
     def delete_by_paper_id(self, paper_id: int) -> None:
         """Qdrant から paper_id に属する全ポイントを削除（補償用、#145）。"""
