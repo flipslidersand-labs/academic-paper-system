@@ -248,6 +248,39 @@ def test_completed_job_persisted_to_sqlite(client, temp_db):
     assert rows[0]["finished_at"] is not None
 
 
+# --- create_if_not_running atomicity (#235) ---
+
+
+def test_create_if_not_running_is_atomic_under_concurrency(temp_db):
+    """Concurrent create_if_not_running(kind) calls must yield exactly one created Job.
+
+    Regression for #235: has_running() + create() as two separate lock acquisitions let
+    two concurrent callers both observe "not running" and both create a job. This drives
+    many threads at create_if_not_running() at once and asserts only one succeeds.
+    """
+    import threading
+
+    store = JobStore()
+    store._db_path = temp_db
+
+    results: list[Job | None] = []
+    barrier = threading.Barrier(20)
+
+    def worker():
+        barrier.wait()
+        results.append(store.create_if_not_running(kind="ingest"))
+
+    threads = [threading.Thread(target=worker) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    created = [r for r in results if r is not None]
+    assert len(created) == 1
+    assert len(store._jobs) == 1
+
+
 def test_job_store_init_loads_existing_jobs(temp_db):
     """JobStore.init() loads previously persisted jobs from SQLite."""
     import time as time_mod
