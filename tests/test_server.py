@@ -671,6 +671,30 @@ def test_parse_list_field_rejects_non_array_json(client):
         assert exc_info.value.status_code == 422
 
 
+def test_validate_published_date_rejects_out_of_range():
+    """_validate_published_date rejects future dates and unreasonably old ones,
+    even when they are formally valid ISO dates (#271)."""
+    from academic_paper.server import _validate_published_date
+
+    _validate_published_date(None)
+    _validate_published_date("2024-01-15")
+
+    with pytest.raises(HTTPException) as exc_info:
+        _validate_published_date("9999-12-31")
+    assert exc_info.value.status_code == 422
+
+    with pytest.raises(HTTPException) as exc_info:
+        _validate_published_date("0001-01-01")
+    assert exc_info.value.status_code == 422
+
+    from datetime import date, timedelta
+
+    future = (date.today() + timedelta(days=1)).isoformat()
+    with pytest.raises(HTTPException) as exc_info:
+        _validate_published_date(future)
+    assert exc_info.value.status_code == 422
+
+
 def test_sanitize_text_strips_control_chars():
     """_sanitize_text removes control chars (incl. newlines) from external metadata (#233)."""
     from academic_paper.server import _sanitize_text

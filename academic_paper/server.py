@@ -98,14 +98,29 @@ def _parse_list_field(value: str | None, field: str = "field") -> list[str] | No
     return [s for s in (_sanitize_text(x) for x in parsed) if s]
 
 
+_MIN_PUBLISHED_YEAR = 1900
+
+
 def _validate_published_date(value: str | None, field: str = "published_date") -> None:
-    """Reject non-ISO dates instead of letting them silently degrade scoring (#144)."""
+    """Reject non-ISO dates, and dates outside a sane range, before they reach scoring.
+
+    date.fromisoformat() alone accepts formally valid but meaningless dates
+    (e.g. 0001-01-01, 9999-12-31) or future dates; score_all_papers/score_paper
+    compute freshness from days-since-published, so such values silently
+    produce nonsense scores instead of erroring (#271).
+    """
     if not value:
         return
     try:
-        date.fromisoformat(value)
+        parsed = date.fromisoformat(value)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"{field} must be an ISO date (YYYY-MM-DD), got {value!r}")
+    if parsed > date.today():
+        raise HTTPException(status_code=422, detail=f"{field} must not be in the future, got {value!r}")
+    if parsed.year < _MIN_PUBLISHED_YEAR:
+        raise HTTPException(
+            status_code=422, detail=f"{field} must be on or after {_MIN_PUBLISHED_YEAR}-01-01, got {value!r}"
+        )
 
 
 async def _check_embedding_svc(timeout: float = 3.0) -> None:
