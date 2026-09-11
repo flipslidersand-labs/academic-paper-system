@@ -107,6 +107,24 @@ def test_download_pdf_allows_pdf_url_extension_without_content_type():
         assert Path(path).read_bytes() == b"%PDF-1.4"
 
 
+def test_download_pdf_rejects_content_type_with_pdf_as_substring():
+    """A spoofed content-type merely containing 'pdf' (e.g. text/pdfxml) must not
+    pass on substring matching alone (#275)."""
+    client = _mock_stream_response(b"<html>not a pdf</html>", "text/pdfxml")
+    with pytest.raises(ValueError, match="Not a PDF"):
+        with download_pdf(client, "http://example.com/some-page") as _:
+            pass
+
+
+def test_download_pdf_rejects_body_without_pdf_magic_number():
+    """Even when Content-Type is spoofed as application/pdf and the URL ends in
+    .pdf, a body that doesn't start with the %PDF- magic number is rejected (#275)."""
+    client = _mock_stream_response(b"<html>fake pdf</html>", "application/pdf")
+    with pytest.raises(ValueError, match="magic number"):
+        with download_pdf(client, "http://example.com/paper.pdf") as _:
+            pass
+
+
 def test_download_pdf_raises_when_size_exceeds_limit():
     """Streaming aborts as soon as cumulative bytes exceed max_mb, without buffering the rest."""
 
@@ -118,7 +136,9 @@ def test_download_pdf_raises_when_size_exceeds_limit():
 
         def iter_bytes(self, chunk_size=65536):
             # Each chunk is 1 MB; limit below is 1 MB so the 2nd chunk trips it.
-            for _ in range(5):
+            # First chunk starts with the PDF magic number so it passes that check.
+            yield b"%PDF-" + b"x" * (1024 * 1024 - 5)
+            for _ in range(4):
                 yield b"x" * (1024 * 1024)
 
         def __enter__(self):
@@ -147,7 +167,7 @@ def test_download_pdf_cleanup_on_exception():
             pass
 
         def iter_bytes(self, chunk_size=65536):
-            yield b"%PDF"
+            yield b"%PDF-"
 
         def __enter__(self):
             return self
