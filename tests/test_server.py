@@ -935,6 +935,79 @@ def test_write_endpoints_pass_without_api_key_when_unconfigured(client):
         assert r.status_code != 401
 
 
+def test_read_endpoints_require_api_key_when_configured(client, temp_db):
+    """Regression (#241): read endpoints (list/detail/summary/search) also return 401
+    when API_KEY is set and the key is missing or wrong — the read side must not be
+    an unauthenticated hole while write/job endpoints are gated (#190)."""
+    with patch.object(settings, "api_key", "secret-key"):
+        assert client.get("/papers").status_code == 401
+        assert client.get("/papers", headers={"X-API-Key": "wrong"}).status_code == 401
+        assert client.get("/papers", headers={"X-API-Key": "secret-key"}).status_code == 200
+
+        assert client.get("/papers/1").status_code == 401
+        assert client.get("/papers/1", headers={"X-API-Key": "secret-key"}).status_code in (200, 404)
+
+        assert client.get("/papers/1/summary").status_code == 401
+        assert client.get("/papers/1/summary", headers={"X-API-Key": "secret-key"}).status_code in (200, 404)
+
+        assert client.get("/search?q=alpha").status_code == 401
+        assert client.get("/search?q=alpha", headers={"X-API-Key": "secret-key"}).status_code != 401
+
+
+def test_read_endpoints_pass_without_api_key_when_unconfigured(client):
+    """When API_KEY is empty (default), read endpoints accept requests without key."""
+    with patch.object(settings, "api_key", ""):
+        assert client.get("/papers").status_code != 401
+        assert client.get("/papers/1").status_code != 401
+        assert client.get("/papers/1/summary").status_code != 401
+        assert client.get("/search?q=alpha").status_code != 401
+
+
+def _lifespan_client(temp_db):
+    """Build a real TestClient (runs lifespan) with I/O services mocked out,
+    mirroring the `client` fixture but as a plain context manager so callers
+    can control caplog capture around the startup event."""
+    mock_embedder = MagicMock()
+    mock_embedder.embed = AsyncMock(return_value=[[0.1] * 768])
+    mock_qdrant = MagicMock()
+    mock_qdrant.aupsert = AsyncMock(return_value=None)
+    mock_qdrant.asearch = AsyncMock(return_value=[])
+    mock_qdrant.adelete_by_paper_id = AsyncMock(return_value=None)
+    mock_qdrant.aensure_collection = AsyncMock(return_value=None)
+    mock_qdrant.aclose = AsyncMock(return_value=None)
+    mock_qdrant.client.get_collections = MagicMock(return_value=None)
+    return (
+        patch.object(settings, "academic_db", temp_db),
+        patch("academic_paper.server.EmbedderClient", return_value=mock_embedder),
+        patch("academic_paper.server.QdrantStore", return_value=mock_qdrant),
+    )
+
+
+def test_startup_warns_when_api_key_unset(capsys, temp_db):
+    """Regression (#241): lifespan logs an explicit warning when API_KEY is empty so
+    an accidentally-unauthenticated deployment isn't silently invisible at startup.
+
+    configure_logging() replaces root handlers with a stdout JSON handler (removing
+    caplog's), so the startup log is asserted via captured stdout instead of caplog.
+    """
+    p1, p2, p3 = _lifespan_client(temp_db)
+    with patch.object(settings, "api_key", ""), p1, p2, p3:
+        with TestClient(app):
+            pass
+
+    assert "API_KEY is not set" in capsys.readouterr().out
+
+
+def test_startup_no_warning_when_api_key_set(capsys, temp_db):
+    """No spurious warning when API_KEY is configured."""
+    p1, p2, p3 = _lifespan_client(temp_db)
+    with patch.object(settings, "api_key", "secret-key"), p1, p2, p3:
+        with TestClient(app):
+            pass
+
+    assert "API_KEY is not set" not in capsys.readouterr().out
+
+
 # --- _cleanup_orphaned_ingests tests (#194) ---
 
 

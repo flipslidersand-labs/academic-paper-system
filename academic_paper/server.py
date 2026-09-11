@@ -201,6 +201,8 @@ async def lifespan(app: FastAPI):
     # (documented asyncio pitfall), and cancel it on shutdown.
     app.state.probe_task = asyncio.create_task(_probe_startup_health(app))
     await _cleanup_orphaned_ingests(app)
+    if not settings.api_key:
+        logger.warning("API_KEY is not set — all endpoints (including write endpoints) are unauthenticated (#241)")
     yield
     # Graceful shutdown: wait up to 30 s for in-flight ingest tasks (#194).
     active = list(app.state.active_ingest_tasks)
@@ -253,7 +255,11 @@ Instrumentator().instrument(app).expose(app)
 
 
 async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
-    """Require X-API-Key on write endpoints when API_KEY env var is set (#146).
+    """Require X-API-Key on write and read endpoints when API_KEY env var is set (#146).
+
+    Applied to read endpoints too (#241): paper text/search snippets are at least
+    as sensitive as the job metadata already gated behind auth (#190), so the
+    boundary must not be asymmetric.
 
     Uses hmac.compare_digest for constant-time comparison to prevent
     timing attacks that could leak key length / prefix (#190).
@@ -492,7 +498,7 @@ async def ingest_paper(
                 pass
 
 
-@app.get("/papers")
+@app.get("/papers", dependencies=[Depends(verify_api_key)])
 def list_papers_endpoint(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -508,7 +514,7 @@ def list_papers_endpoint(
     return {"total": total, "papers": papers}
 
 
-@app.get("/papers/{paper_id}")
+@app.get("/papers/{paper_id}", dependencies=[Depends(verify_api_key)])
 def get_paper_endpoint(paper_id: int):
     """Get paper details by ID."""
     with db_connection(settings.academic_db) as conn:
@@ -518,7 +524,7 @@ def get_paper_endpoint(paper_id: int):
     return paper
 
 
-@app.get("/papers/{paper_id}/summary")
+@app.get("/papers/{paper_id}/summary", dependencies=[Depends(verify_api_key)])
 async def get_summary_endpoint(paper_id: int):
     """Return the cached summary only. GET is safe/idempotent (#140):
     crawler or monitoring access must never trigger LLM generation or DB
@@ -747,7 +753,7 @@ def list_jobs_endpoint():
     return {"jobs": [j.to_dict() for j in job_store.list_all()]}
 
 
-@app.get("/search")
+@app.get("/search", dependencies=[Depends(verify_api_key)])
 async def search(
     q: str = Query(..., min_length=1),
     mode: str = Query("hybrid", pattern="^(vector|keyword|hybrid|nugget)$"),
