@@ -1,4 +1,4 @@
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,30 +8,34 @@ class Settings(BaseSettings):
     embedding_svc_url: str = Field(default="http://<internal-host>:9092", description="Embedding service URL")
     embedding_api_key: str = Field(default="", description="API key for embedding service")
     embedding_timeout: int = Field(
-        default=120, description="embedding-svc HTTP timeout in seconds; large batches (up to 256 chunks) can take >30s"
+        default=120,
+        gt=0,
+        description="embedding-svc HTTP timeout in seconds; large batches (up to 256 chunks) can take >30s",
     )
     qdrant_url: str = Field(default="http://<internal-host>:6333", description="Qdrant vector database URL")
     qdrant_api_key: str = Field(default="", description="API key for Qdrant")
     qdrant_timeout: int = Field(
-        default=30, description="Qdrant client timeout in seconds; upsert batches are capped at 200 points (#236)"
+        default=30,
+        gt=0,
+        description="Qdrant client timeout in seconds; upsert batches are capped at 200 points (#236)",
     )
     academic_db: str = Field(default="/data/academic.db", description="Path to academic database")
-    chunk_size: int = Field(default=512, description="Size of text chunks for processing")
+    chunk_size: int = Field(default=512, gt=0, description="Size of text chunks for processing")
     chunk_overlap: int = Field(default=64, description="Overlap between consecutive chunks")
     qdrant_collection: str = Field(default="academic-papers", description="Qdrant collection name")
-    port: int = Field(default=8020, description="Port for API server")
+    port: int = Field(default=8020, gt=0, description="Port for API server")
     google_api_key: str = Field(default="", description="Google API key for generative AI")
-    gemini_timeout_ms: int = Field(default=60000, description="Gemini API HTTP timeout in milliseconds")
+    gemini_timeout_ms: int = Field(default=60000, gt=0, description="Gemini API HTTP timeout in milliseconds")
     ollama_url: str = Field(default="http://localhost:11434", description="Ollama service URL")
     ollama_model: str = Field(default="mistral", description="Ollama model to use")
-    ollama_timeout: int = Field(default=300, description="Ollama HTTP timeout in seconds")
+    ollama_timeout: int = Field(default=300, gt=0, description="Ollama HTTP timeout in seconds")
     otel_endpoint: str = Field(default="", description="OpenTelemetry endpoint")
     log_level: str = Field(default="INFO", description="Root log level (DEBUG/INFO/WARNING/ERROR)")
     log_format: str = Field(default="json", description="Log format: 'json' or 'text'")
     preferred_categories: str = Field(
         default="cs.AI,cs.LG,cs.CL", description="Comma-separated preferred arXiv categories for scoring"
     )
-    max_upload_mb: int = Field(default=50, description="Maximum PDF upload size in megabytes")
+    max_upload_mb: int = Field(default=50, gt=0, description="Maximum PDF upload size in megabytes")
     api_key: str = Field(default="", description="X-API-Key for write endpoints; empty = no auth")
     pdf_extract_timeout: int = Field(
         default=120,
@@ -41,15 +45,27 @@ class Settings(BaseSettings):
         ),
     )
 
-    @field_validator("embedding_svc_url", "qdrant_url")
+    @field_validator(
+        "embedding_svc_url", "qdrant_url", "api_key", "embedding_api_key", "qdrant_api_key", "google_api_key"
+    )
     @classmethod
     def reject_placeholder(cls, v: str) -> str:
         if "<" in v:
             raise ValueError(
-                f"Invalid URL {v!r}: contains placeholder. "
-                "Set EMBEDDING_SVC_URL and QDRANT_URL environment variables before starting."
+                f"Invalid value {v!r}: contains placeholder. "
+                "Set the corresponding environment variable before starting."
             )
         return v
+
+    @model_validator(mode="after")
+    def check_chunk_overlap(self) -> "Settings":
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError(
+                f"chunk_overlap ({self.chunk_overlap}) must be smaller than chunk_size ({self.chunk_size}); "
+                "otherwise the sliding window step (chunk_size - chunk_overlap) is <= 0 and chunk_pages() "
+                "can loop forever. Set CHUNK_OVERLAP and CHUNK_SIZE environment variables consistently."
+            )
+        return self
 
     @property
     def preferred_categories_list(self) -> list[str]:
