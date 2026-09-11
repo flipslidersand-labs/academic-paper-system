@@ -78,7 +78,25 @@ class RAGSummarizer:
 
         Raises:
             ValueError: If no chunks found or LLM returns invalid JSON
+            TimeoutError: If the call exceeds settings.summarize_total_timeout
         """
+        # The embedding/Qdrant/LLM wait_for calls below are awaited sequentially,
+        # so their individual timeouts stack in the worst case (#269). Wrap the
+        # whole call in one overall deadline instead of relying on their sum.
+        return await asyncio.wait_for(
+            self._summarize_impl(paper_id, file_hash, top_k=top_k, title=title, file_name=file_name),
+            timeout=settings.summarize_total_timeout,
+        )
+
+    async def _summarize_impl(
+        self,
+        paper_id: int,
+        file_hash: str,
+        top_k: int = 5,
+        title: str | None = None,
+        file_name: str | None = None,
+    ) -> dict:
+        """Implementation of summarize(), bounded overall by settings.summarize_total_timeout."""
         # Build a real query vector from title or filename for semantic chunk retrieval
         query_text = title or (file_name.removesuffix(".pdf") if file_name else None) or "academic paper"
         chunks: list[dict]
