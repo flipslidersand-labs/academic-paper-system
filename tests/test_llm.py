@@ -159,6 +159,33 @@ def test_get_llm_client_returns_ollama_when_url_set(monkeypatch):
         assert isinstance(client, OllamaClient)
 
 
+def test_gemini_client_close_and_aclose():
+    """GeminiClient.close()/aclose() release the underlying genai.Client HTTP session (#262)."""
+    with patch("google.genai.Client") as mock_genai_client:
+        mock_client_instance = MagicMock()
+        mock_client_instance.aio.aclose = AsyncMock()
+        mock_genai_client.return_value = mock_client_instance
+
+        client = GeminiClient(api_key="test-key")
+        client.close()
+        mock_client_instance.close.assert_called_once()
+
+        import asyncio
+
+        asyncio.run(client.aclose())
+        mock_client_instance.aio.aclose.assert_awaited_once()
+
+
+def test_ollama_client_close_and_aclose_are_noop():
+    """BaseLLMClient's default close()/aclose() are no-ops for clients without HTTP resources to release (#262)."""
+    client = OllamaClient(base_url="http://localhost:11434", model="mistral")
+    client.close()
+
+    import asyncio
+
+    asyncio.run(client.aclose())
+
+
 def test_get_llm_client_returns_none_when_no_config(monkeypatch):
     """Test get_llm_client returns None when no configuration is available."""
     # Mock settings with empty values
