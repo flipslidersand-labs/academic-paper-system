@@ -963,6 +963,19 @@ def test_read_endpoints_pass_without_api_key_when_unconfigured(client):
         assert client.get("/search?q=alpha").status_code != 401
 
 
+def test_summaries_and_stats_require_api_key_when_configured(client):
+    """Regression (#261): /summaries and /stats were missing dependencies=[Depends(verify_api_key)],
+    leaving an unauthenticated hole while equally or less sensitive read endpoints were gated."""
+    with patch.object(settings, "api_key", "secret-key"):
+        assert client.get("/summaries").status_code == 401
+        assert client.get("/summaries", headers={"X-API-Key": "wrong"}).status_code == 401
+        assert client.get("/summaries", headers={"X-API-Key": "secret-key"}).status_code != 401
+
+        assert client.get("/stats").status_code == 401
+        assert client.get("/stats", headers={"X-API-Key": "wrong"}).status_code == 401
+        assert client.get("/stats", headers={"X-API-Key": "secret-key"}).status_code != 401
+
+
 def _lifespan_client(temp_db):
     """Build a real TestClient (runs lifespan) with I/O services mocked out,
     mirroring the `client` fixture but as a plain context manager so callers

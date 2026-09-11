@@ -654,7 +654,7 @@ def score_paper(paper_id: int):
     return {"paper_id": paper_id, "score": score}
 
 
-@app.get("/summaries")
+@app.get("/summaries", dependencies=[Depends(verify_api_key)])
 def list_summaries_endpoint(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -964,7 +964,7 @@ async def health():
     return JSONResponse(content={"status": overall, **status}, status_code=http_status)
 
 
-@app.get("/stats")
+@app.get("/stats", dependencies=[Depends(verify_api_key)])
 def stats():
     """DB統計情報"""
     with db_connection(settings.academic_db) as conn:
