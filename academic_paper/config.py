@@ -36,7 +36,7 @@ class Settings(BaseSettings):
         default="cs.AI,cs.LG,cs.CL", description="Comma-separated preferred arXiv categories for scoring"
     )
     max_upload_mb: int = Field(default=50, gt=0, description="Maximum PDF upload size in megabytes")
-    api_key: str = Field(default="", description="X-API-Key for write endpoints; empty = no auth")
+    api_key: str = Field(default="", description="X-API-Key for write and read endpoints; empty = no auth (#241)")
     pdf_extract_timeout: int = Field(
         default=120,
         description=(
