@@ -320,14 +320,29 @@ def list_papers_filtered(
 
     order_by = "COALESCE(score, -1) DESC" if sort == "score" else "ingested_at DESC"
 
-    cursor.execute(f"SELECT COUNT(*) FROM papers {where}", params)
-    total = cursor.fetchone()[0]
+    # COUNT and the paginated SELECT must see the same snapshot, or a
+    # concurrent writer committing between the two queries can make `total`
+    # disagree with the rows actually returned across a page walk. Python's
+    # sqlite3 module doesn't open an implicit transaction for SELECTs, so
+    # wrap both reads in one explicit deferred transaction (unless we're
+    # already inside a caller-managed transaction, in which case that
+    # transaction already provides the same guarantee).
+    started_transaction = not conn.in_transaction
+    if started_transaction:
+        cursor.execute("BEGIN DEFERRED")
+    try:
+        cursor.execute(f"SELECT COUNT(*) FROM papers {where}", params)
+        total = cursor.fetchone()[0]
 
-    cursor.execute(
-        f"SELECT * FROM papers {where} ORDER BY {order_by} LIMIT ? OFFSET ?",
-        params + [limit, offset],
-    )
-    papers = [_deserialize_paper(row) for row in cursor.fetchall()]
+        cursor.execute(
+            f"SELECT * FROM papers {where} ORDER BY {order_by} LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        )
+        papers = [_deserialize_paper(row) for row in cursor.fetchall()]
+    finally:
+        if started_transaction:
+            conn.rollback()
+
     return total, papers
 
 
