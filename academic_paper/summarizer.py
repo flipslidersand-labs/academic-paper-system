@@ -8,6 +8,7 @@ import re
 import httpx
 from qdrant_client.http.exceptions import ApiException, ResponseHandlingException
 
+from academic_paper.config import settings
 from academic_paper.embedder import EmbedderClient
 from academic_paper.llm import BaseLLMClient
 from academic_paper.vector_store import QdrantStore
@@ -83,33 +84,49 @@ class RAGSummarizer:
         chunks: list[dict]
         if self.embedder is not None:
             try:
-                query_vector = await self.embedder.embed_single(query_text, mode="search")
-            except httpx.HTTPError:
-                # embedding-svc is unavailable (network / HTTP error) — a
-                # zero-vector search would return arbitrary chunks and cache a
-                # degraded summary as success, so fall back to DB chunk order
-                # instead. Non-httpx exceptions (AttributeError, RuntimeError,
-                # etc.) indicate real bugs and must propagate (#187).
+                # Bounded by settings.embedding_timeout in addition to the
+                # embedder's own httpx timeout — a hung TCP connection (no
+                # HTTP error, no response) would otherwise block forever (#237).
+                query_vector = await asyncio.wait_for(
+                    self.embedder.embed_single(query_text, mode="search"), timeout=settings.embedding_timeout
+                )
+            except (httpx.HTTPError, TimeoutError):
+                # embedding-svc is unavailable (network / HTTP error) or hung
+                # past embedding_timeout (#237) — a zero-vector search would
+                # return arbitrary chunks and cache a degraded summary as
+                # success, so fall back to DB chunk order instead. Non-httpx,
+                # non-timeout exceptions (AttributeError, RuntimeError, etc.)
+                # indicate real bugs and must propagate (#187).
                 logger.warning(
-                    "embed_single failed for summarize query=%r — falling back to DB chunk order", query_text
+                    "embed_single failed or timed out for summarize query=%r — falling back to DB chunk order",
+                    query_text,
                 )
                 chunks = await asyncio.to_thread(self._chunks_from_db, paper_id, top_k)
             else:
                 try:
-                    chunks = await self.qdrant.asearch(
-                        query_vector=query_vector,
-                        limit=top_k,
-                        paper_id_filter=paper_id,
+                    # asyncio.TimeoutError is a TimeoutError, already covered by
+                    # QDRANT_UNAVAILABLE_ERRORS below — bounds a hung Qdrant
+                    # connection that never raises its own error (#237).
+                    chunks = await asyncio.wait_for(
+                        self.qdrant.asearch(
+                            query_vector=query_vector,
+                            limit=top_k,
+                            paper_id_filter=paper_id,
+                        ),
+                        timeout=settings.qdrant_timeout,
                     )
                 except QDRANT_UNAVAILABLE_ERRORS:
                     logger.warning("Qdrant unavailable for paper_id=%s — falling back to DB chunk order", paper_id)
                     chunks = await asyncio.to_thread(self._chunks_from_db, paper_id, top_k)
         else:
             # No embedder configured (test convenience): degraded zero-vector search
-            chunks = await self.qdrant.asearch(
-                query_vector=[0.0] * 768,
-                limit=top_k,
-                paper_id_filter=paper_id,
+            chunks = await asyncio.wait_for(
+                self.qdrant.asearch(
+                    query_vector=[0.0] * 768,
+                    limit=top_k,
+                    paper_id_filter=paper_id,
+                ),
+                timeout=settings.qdrant_timeout,
             )
 
         if not chunks:
@@ -144,7 +161,13 @@ Please respond ONLY with valid JSON in this exact format:
     "keywords": ["keyword1", "keyword2", "keyword3"]
 }}"""
 
-        response = await self.llm.generate(prompt, system=SYSTEM_PROMPT)
+        # No exception handling around the LLM backend previously (#237): a
+        # hung backend blocked the job forever. asyncio.TimeoutError is left
+        # to propagate so the caller records the job as failed (server.py
+        # summarize endpoints already catch Exception and set status=failed).
+        response = await asyncio.wait_for(
+            self.llm.generate(prompt, system=SYSTEM_PROMPT), timeout=settings.llm_generate_timeout
+        )
 
         # Parse JSON response
         try:

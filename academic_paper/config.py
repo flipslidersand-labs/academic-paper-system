@@ -44,6 +44,14 @@ class Settings(BaseSettings):
             "there is no page-count cap, only wall-clock, so malformed/huge PDFs can't hang a job forever"
         ),
     )
+    llm_generate_timeout: int = Field(
+        default=300,
+        description=(
+            "Ceiling in seconds for RAGSummarizer's llm.generate() call (#237); "
+            "must stay >= the slowest configured LLM client timeout (ollama_timeout) "
+            "so it never truncates a legitimate in-flight generation"
+        ),
+    )
 
     @field_validator(
         "embedding_svc_url", "qdrant_url", "api_key", "embedding_api_key", "qdrant_api_key", "google_api_key"
