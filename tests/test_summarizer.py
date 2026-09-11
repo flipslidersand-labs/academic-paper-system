@@ -1,10 +1,12 @@
 """Tests for academic_paper.summarizer module."""
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from academic_paper.config import settings
 from academic_paper.summarizer import SYSTEM_PROMPT, RAGSummarizer
 
 
@@ -341,3 +343,92 @@ async def test_summarize_embed_runtime_error_propagates():
     summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
     with pytest.raises(RuntimeError, match="client misconfigured"):
         await summarizer.summarize(paper_id=1, file_hash="abc", title="Test")
+
+
+@pytest.mark.anyio
+async def test_summarize_falls_back_to_db_on_embed_timeout(monkeypatch):
+    """A hung embed_single (no HTTP error, no response) must not block forever (#237).
+
+    embedding_timeout bounds the wait; on expiry the summarizer falls back to
+    DB chunk order, same as the httpx.HTTPError path (#187).
+    """
+    from unittest.mock import patch
+
+    monkeypatch.setattr(settings, "embedding_timeout", 0.05)
+
+    mock_llm = AsyncMock()
+    mock_llm.generate.return_value = json.dumps(
+        {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
+    )
+    mock_qdrant = MagicMock()
+    mock_embedder = AsyncMock()
+
+    async def _hang(*args, **kwargs):
+        await asyncio.sleep(10)
+
+    mock_embedder.embed_single.side_effect = _hang
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
+    with patch.object(
+        summarizer, "_chunks_from_db", return_value=[{"payload": {"page_start": 1, "text": "db text"}}]
+    ) as mock_db:
+        result = await summarizer.summarize(paper_id=1, file_hash="abc", title="Test")
+
+    assert "objective" in result
+    mock_db.assert_called_once_with(1, 5)
+    mock_qdrant.asearch.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_summarize_falls_back_to_db_on_qdrant_timeout(monkeypatch):
+    """A hung Qdrant search must not block forever; falls back to DB chunk order (#237)."""
+    from unittest.mock import patch
+
+    monkeypatch.setattr(settings, "qdrant_timeout", 0.05)
+
+    mock_llm = AsyncMock()
+    mock_llm.generate.return_value = json.dumps(
+        {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
+    )
+    mock_qdrant = MagicMock()
+
+    async def _hang(*args, **kwargs):
+        await asyncio.sleep(10)
+
+    mock_qdrant.asearch = AsyncMock(side_effect=_hang)
+    mock_embedder = AsyncMock()
+    mock_embedder.embed_single.return_value = [0.1] * 768
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
+    with patch.object(
+        summarizer, "_chunks_from_db", return_value=[{"payload": {"page_start": 1, "text": "db text"}}]
+    ) as mock_db:
+        result = await summarizer.summarize(paper_id=1, file_hash="abc", title="Test")
+
+    assert "objective" in result
+    mock_db.assert_called_once_with(1, 5)
+
+
+@pytest.mark.anyio
+async def test_summarize_llm_timeout_propagates(monkeypatch):
+    """A hung LLM backend must not block forever; TimeoutError propagates so the
+
+    caller (server.py) records the job as failed (#237). Unlike embed/Qdrant,
+    there is no fallback path for LLM generation.
+    """
+    monkeypatch.setattr(settings, "llm_generate_timeout", 0.05)
+
+    mock_llm = AsyncMock()
+
+    async def _hang(*args, **kwargs):
+        await asyncio.sleep(10)
+
+    mock_llm.generate.side_effect = _hang
+    mock_qdrant = MagicMock()
+    mock_qdrant.asearch = AsyncMock(
+        return_value=[{"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "sample text"}}]
+    )
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant)
+    with pytest.raises(TimeoutError):
+        await summarizer.summarize(paper_id=1, file_hash="abc")
