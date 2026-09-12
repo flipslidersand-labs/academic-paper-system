@@ -176,7 +176,7 @@ async def lifespan(app: FastAPI):
     configure_logging(level=settings.log_level, fmt=settings.log_format)
     setup_telemetry(app, settings.otel_endpoint)
     init_db(settings.academic_db)
-    job_store.init(settings.academic_db)
+    await job_store.init(settings.academic_db)
     # Separate clients: embedding batches can take 60–120 s for large PDFs
     # (EMBEDDING_TIMEOUT); Qdrant calls are fast point operations (QDRANT_TIMEOUT).
     # Using qdrant_timeout for both caused ReadTimeout on big ingest batches (#153).
@@ -346,7 +346,7 @@ async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str,
         return
     job.status = "running"
     job.total = 1
-    job_store.persist(job)
+    await job_store.persist(job)
     try:
         chunks = await _ingest_pipeline(tmp_path, paper_id, file_hash, file_name)
         job.result = {"paper_id": paper_id, "file_name": file_name, "chunks": chunks, "status": "indexed"}
@@ -361,7 +361,7 @@ async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str,
         job.status = "failed"
     finally:
         job.finished_at = time.time()
-        job_store.persist(job)
+        await job_store.persist(job)
         try:
             os.unlink(tmp_path)
         except OSError:
@@ -473,7 +473,7 @@ async def ingest_paper(
                 "status": "indexed",
             }
 
-        job = job_store.create(kind="ingest")
+        job = await job_store.create(kind="ingest")
         keep_tmp = True  # background task now owns tmp cleanup
         task = asyncio.create_task(_run_ingest(job.id, tmp_path, paper_id, file_hash, file_name))
         active = getattr(app.state, "active_ingest_tasks", None)
@@ -672,7 +672,7 @@ async def _run_summarize_all(job_id: str) -> None:
         return
 
     job.status = "running"
-    job_store.persist(job)
+    await job_store.persist(job)
     try:
         if app.state.summarizer is None:
             job.status = "failed"
@@ -722,7 +722,7 @@ async def _run_summarize_all(job_id: str) -> None:
         job.errors.append(str(e))
     finally:
         job.finished_at = time.time()
-        job_store.persist(job)
+        await job_store.persist(job)
 
 
 @app.post("/jobs/summarize-all", status_code=202, dependencies=[Depends(verify_api_key)])
@@ -731,7 +731,7 @@ async def start_summarize_all(background_tasks: BackgroundTasks):
     if app.state.llm is None or app.state.summarizer is None:
         raise HTTPException(status_code=503, detail="LLM not configured")
 
-    job = job_store.create_if_not_running(kind="summarize-all")
+    job = await job_store.create_if_not_running(kind="summarize-all")
     if job is None:
         raise HTTPException(status_code=409, detail="A summarize-all job is already running")
     background_tasks.add_task(_run_summarize_all, job.id)

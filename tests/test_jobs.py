@@ -248,6 +248,61 @@ def test_completed_job_persisted_to_sqlite(client, temp_db):
     assert rows[0]["finished_at"] is not None
 
 
+# --- Sync SQLite writes must not block the event loop (#277) ---
+
+
+@pytest.mark.anyio
+async def test_persist_runs_off_event_loop_thread(temp_db):
+    """JobStore.persist() offloads the synchronous sqlite3 write via asyncio.to_thread.
+
+    Regression for #277: a naive `await`-less synchronous call would run
+    _persist() directly on the event loop thread, which is exactly the bug
+    #277 reports (it blocks the loop for up to busy_timeout=5000ms, delaying
+    unrelated asyncio.wait_for timeouts elsewhere in the process). Recording
+    the executing thread's identity proves the write runs elsewhere.
+    """
+    import threading
+
+    store = JobStore()
+    store._db_path = temp_db
+    job = Job(id="thread-check", status="pending", kind="ingest")
+
+    calling_thread_ids: list[int] = []
+    real_persist = store._persist
+
+    def spy_persist(j):
+        calling_thread_ids.append(threading.get_ident())
+        return real_persist(j)
+
+    with patch.object(store, "_persist", side_effect=spy_persist):
+        await store.persist(job)
+
+    assert calling_thread_ids
+    assert calling_thread_ids[0] != threading.get_ident()
+
+
+@pytest.mark.anyio
+async def test_create_runs_off_event_loop_thread(temp_db):
+    """JobStore.create() also offloads its SQLite persist via asyncio.to_thread (#277)."""
+    import threading
+
+    store = JobStore()
+    store._db_path = temp_db
+
+    calling_thread_ids: list[int] = []
+    real_persist = store._persist
+
+    def spy_persist(j):
+        calling_thread_ids.append(threading.get_ident())
+        return real_persist(j)
+
+    with patch.object(store, "_persist", side_effect=spy_persist):
+        await store.create(kind="ingest")
+
+    assert calling_thread_ids
+    assert calling_thread_ids[0] != threading.get_ident()
+
+
 # --- create_if_not_running atomicity (#235) ---
 
 
@@ -257,7 +312,14 @@ def test_create_if_not_running_is_atomic_under_concurrency(temp_db):
     Regression for #235: has_running() + create() as two separate lock acquisitions let
     two concurrent callers both observe "not running" and both create a job. This drives
     many threads at create_if_not_running() at once and asserts only one succeeds.
+
+    create_if_not_running() is async (#277: its SQLite persist runs via
+    asyncio.to_thread so it doesn't block the event loop), so each worker thread
+    drives its own event loop with asyncio.run() — the lock-protected check-and-create
+    section it guards is still shared, real-OS-thread state, so the race it tests for
+    is unaffected.
     """
+    import asyncio
     import threading
 
     store = JobStore()
@@ -268,7 +330,7 @@ def test_create_if_not_running_is_atomic_under_concurrency(temp_db):
 
     def worker():
         barrier.wait()
-        results.append(store.create_if_not_running(kind="ingest"))
+        results.append(asyncio.run(store.create_if_not_running(kind="ingest")))
 
     threads = [threading.Thread(target=worker) for _ in range(20)]
     for t in threads:
@@ -281,7 +343,8 @@ def test_create_if_not_running_is_atomic_under_concurrency(temp_db):
     assert len(store._jobs) == 1
 
 
-def test_job_store_init_loads_existing_jobs(temp_db):
+@pytest.mark.anyio
+async def test_job_store_init_loads_existing_jobs(temp_db):
     """JobStore.init() loads previously persisted jobs from SQLite."""
     import time as time_mod
 
@@ -290,7 +353,7 @@ def test_job_store_init_loads_existing_jobs(temp_db):
     conn.close()
 
     store = JobStore()
-    store.init(temp_db)
+    await store.init(temp_db)
 
     job = store.get("job-abc")
     assert job is not None
@@ -299,7 +362,8 @@ def test_job_store_init_loads_existing_jobs(temp_db):
     assert job.processed == 3
 
 
-def test_running_job_converted_to_failed_on_init(temp_db):
+@pytest.mark.anyio
+async def test_running_job_converted_to_failed_on_init(temp_db):
     """Jobs with status='running' are converted to 'failed' when JobStore reloads."""
     import time as time_mod
 
@@ -308,7 +372,7 @@ def test_running_job_converted_to_failed_on_init(temp_db):
     conn.close()
 
     store = JobStore()
-    store.init(temp_db)
+    await store.init(temp_db)
 
     job = store.get("job-crash")
     assert job is not None

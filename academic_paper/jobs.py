@@ -1,5 +1,6 @@
 """Background job tracking for bulk operations."""
 
+import asyncio
 import threading
 import time
 import uuid
@@ -43,16 +44,29 @@ class JobStore:
         self._db_path: str | None = None
         self._lock = threading.Lock()
 
-    def init(self, db_path: str) -> None:
+    async def init(self, db_path: str) -> None:
         """Load existing jobs from SQLite into memory on startup.
 
         Jobs that were 'pending' or 'running' at last shutdown are converted to
         'failed' — their BackgroundTasks did not survive the restart, and a
         stale in-flight status would block has_running() forever.
+
+        The SQLite reads/writes are synchronous (see busy_timeout in db.py); run
+        them in a worker thread via asyncio.to_thread so a lock-contended load
+        can't block the event loop and delay unrelated asyncio.wait_for timeouts
+        (#277).
         """
+        self._db_path = db_path
+        jobs = await asyncio.to_thread(self._load_and_reconcile_jobs, db_path)
+        with self._lock:
+            for job in jobs:
+                self._jobs[job.id] = job
+
+    def _load_and_reconcile_jobs(self, db_path: str) -> list[Job]:
+        """Synchronous helper for init(): read jobs and reconcile stale in-flight rows."""
         from academic_paper.db import db_connection, load_all_jobs, upsert_job
 
-        self._db_path = db_path
+        jobs: list[Job] = []
         with db_connection(db_path) as conn:
             for row in load_all_jobs(conn):
                 status = row["status"]
@@ -72,22 +86,23 @@ class JobStore:
                         row["finished_at"],
                         kind=row.get("kind", ""),
                     )
-                job = Job(
-                    id=row["id"],
-                    status=status,
-                    kind=row.get("kind", ""),
-                    total=row["total"],
-                    processed=row["processed"],
-                    failed=row["failed"],
-                    errors=errors,
-                    started_at=row["started_at"],
-                    finished_at=row["finished_at"],
+                jobs.append(
+                    Job(
+                        id=row["id"],
+                        status=status,
+                        kind=row.get("kind", ""),
+                        total=row["total"],
+                        processed=row["processed"],
+                        failed=row["failed"],
+                        errors=errors,
+                        started_at=row["started_at"],
+                        finished_at=row["finished_at"],
+                    )
                 )
-                with self._lock:
-                    self._jobs[job.id] = job
+        return jobs
 
     def _persist(self, job: Job) -> None:
-        """Write current job state to SQLite."""
+        """Write current job state to SQLite (synchronous; call via asyncio.to_thread)."""
         if not self._db_path:
             return
         from academic_paper.db import db_connection, upsert_job
@@ -106,11 +121,11 @@ class JobStore:
                 kind=job.kind,
             )
 
-    def create(self, kind: str = "") -> Job:
+    async def create(self, kind: str = "") -> Job:
         job = Job(id=str(uuid.uuid4()), status="pending", kind=kind)
         with self._lock:
             self._jobs[job.id] = job
-        self._persist(job)
+        await asyncio.to_thread(self._persist, job)
         return job
 
     def get(self, job_id: str) -> Job | None:
@@ -134,7 +149,7 @@ class JobStore:
                 j.status in ("pending", "running") and (kind is None or j.kind == kind) for j in self._jobs.values()
             )
 
-    def create_if_not_running(self, kind: str = "") -> Job | None:
+    async def create_if_not_running(self, kind: str = "") -> Job | None:
         """Atomically check for a running/pending job of `kind` and create one if none exists.
 
         has_running() and create() each take self._lock independently, so a caller doing
@@ -148,12 +163,17 @@ class JobStore:
                 return None
             job = Job(id=str(uuid.uuid4()), status="pending", kind=kind)
             self._jobs[job.id] = job
-        self._persist(job)
+        await asyncio.to_thread(self._persist, job)
         return job
 
-    def persist(self, job: Job) -> None:
-        """Persist job state to SQLite (call on status transitions)."""
-        self._persist(job)
+    async def persist(self, job: Job) -> None:
+        """Persist job state to SQLite (call on status transitions).
+
+        Runs the synchronous sqlite3 write in a worker thread (asyncio.to_thread) so
+        that lock contention (busy_timeout up to 5s, see db.py) can't block the event
+        loop and delay unrelated asyncio.wait_for timeouts elsewhere in the process (#277).
+        """
+        await asyncio.to_thread(self._persist, job)
 
 
 job_store = JobStore()
