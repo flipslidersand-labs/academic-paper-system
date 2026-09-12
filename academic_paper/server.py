@@ -507,21 +507,33 @@ def list_papers_endpoint(
     sort: Literal["ingested_at", "score"] = Query("ingested_at", description="Sort order"),
 ):
     """List papers with pagination, optional filters, and sort."""
-    with db_connection(settings.academic_db) as conn:
-        total, papers = list_papers_filtered(
-            conn, limit=limit, offset=offset, author=author, category=category, sort=sort
-        )
-    return {"total": total, "papers": papers}
+    try:
+        with db_connection(settings.academic_db) as conn:
+            total, papers = list_papers_filtered(
+                conn, limit=limit, offset=offset, author=author, category=category, sort=sort
+            )
+        return {"total": total, "papers": papers}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to list papers")
+        raise _http_exc_for(e, "Failed to list papers")
 
 
 @app.get("/papers/{paper_id}", dependencies=[Depends(verify_api_key)])
 def get_paper_endpoint(paper_id: int):
     """Get paper details by ID."""
-    with db_connection(settings.academic_db) as conn:
-        paper = get_paper(conn, paper_id)
-    if paper is None:
-        raise HTTPException(status_code=404, detail="Paper not found")
-    return paper
+    try:
+        with db_connection(settings.academic_db) as conn:
+            paper = get_paper(conn, paper_id)
+        if paper is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        return paper
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to get paper_id=%s", paper_id)
+        raise _http_exc_for(e, "Failed to get paper")
 
 
 @app.get("/papers/{paper_id}/summary", dependencies=[Depends(verify_api_key)])
@@ -627,31 +639,61 @@ def score_all_papers():
     Score = freshness (30-day half-life, 0–0.5) + category match (0–0.5).
     Preferred categories are configured via PREFERRED_CATEGORIES env var.
 
+    A per-paper failure (e.g. compute_score/update_paper_score raising) does not
+    abort the whole run — it is counted in `failed`/`errors` and the loop moves
+    on to the next paper, mirroring the job.failed/job.errors pattern used by
+    _run_summarize_all (#276).
+
     Returns:
-        JSON with total and scored counts.
+        JSON with total, scored, failed counts and per-paper errors.
     """
     preferred = settings.preferred_categories_list
-    with db_connection(settings.academic_db) as conn:
-        papers = get_all_papers_for_scoring(conn)
-        scored = 0
-        for paper in papers:
-            score = compute_score(paper, preferred)
-            update_paper_score(conn, paper["id"], score)
-            scored += 1
-    return {"total": len(papers), "scored": scored, "preferred_categories": preferred}
+    try:
+        with db_connection(settings.academic_db) as conn:
+            papers = get_all_papers_for_scoring(conn)
+            scored = 0
+            failed = 0
+            errors: list[str] = []
+            for paper in papers:
+                try:
+                    score = compute_score(paper, preferred)
+                    update_paper_score(conn, paper["id"], score)
+                    scored += 1
+                except Exception as e:
+                    logger.exception("Scoring failed for paper_id=%s", paper.get("id"))
+                    failed += 1
+                    errors.append(f"paper_id={paper.get('id')}: {str(e) or type(e).__name__}")
+        return {
+            "total": len(papers),
+            "scored": scored,
+            "failed": failed,
+            "errors": errors,
+            "preferred_categories": preferred,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("score_all_papers failed unexpectedly")
+        raise _http_exc_for(e, "Scoring failed unexpectedly")
 
 
 @app.post("/papers/{paper_id}/score", dependencies=[Depends(verify_api_key)])
 def score_paper(paper_id: int):
     """Compute and store relevance score for a single paper."""
-    with db_connection(settings.academic_db) as conn:
-        paper = get_paper(conn, paper_id)
-        if paper is None:
-            raise HTTPException(status_code=404, detail="Paper not found")
-        preferred = settings.preferred_categories_list
-        score = compute_score(paper, preferred)
-        update_paper_score(conn, paper_id, score)
-    return {"paper_id": paper_id, "score": score}
+    try:
+        with db_connection(settings.academic_db) as conn:
+            paper = get_paper(conn, paper_id)
+            if paper is None:
+                raise HTTPException(status_code=404, detail="Paper not found")
+            preferred = settings.preferred_categories_list
+            score = compute_score(paper, preferred)
+            update_paper_score(conn, paper_id, score)
+        return {"paper_id": paper_id, "score": score}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to score paper_id=%s", paper_id)
+        raise _http_exc_for(e, "Scoring failed")
 
 
 @app.get("/summaries")
@@ -660,9 +702,15 @@ def list_summaries_endpoint(
     offset: int = Query(0, ge=0),
 ):
     """List all paper summaries with associated paper metadata."""
-    with db_connection(settings.academic_db) as conn:
-        total, summaries = list_summaries(conn, limit=limit, offset=offset)
-    return {"total": total, "summaries": summaries}
+    try:
+        with db_connection(settings.academic_db) as conn:
+            total, summaries = list_summaries(conn, limit=limit, offset=offset)
+        return {"total": total, "summaries": summaries}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to list summaries")
+        raise _http_exc_for(e, "Failed to list summaries")
 
 
 async def _run_summarize_all(job_id: str) -> None:

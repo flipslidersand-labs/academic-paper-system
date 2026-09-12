@@ -752,6 +752,90 @@ def test_score_paper_not_found(client):
     assert "not found" in response.json()["detail"].lower()
 
 
+def test_score_all_partial_failure_continues(client, temp_db):
+    """POST /papers/score-all: one paper's compute_score failing must not abort
+    the whole run (#276) — the other papers are still scored, and the failure
+    is reported via failed/errors instead of a raw 500.
+    """
+    conn = get_connection(temp_db)
+    ok_id = save_paper(conn, "paper1.pdf", "hash_partial1")
+    bad_id = save_paper(conn, "paper2.pdf", "hash_partial2")
+    conn.close()
+
+    real_compute_score = __import__("academic_paper.scorer", fromlist=["compute_score"]).compute_score
+
+    def flaky_compute_score(paper, preferred):
+        if paper["id"] == bad_id:
+            raise RuntimeError("boom")
+        return real_compute_score(paper, preferred)
+
+    with patch("academic_paper.server.compute_score", side_effect=flaky_compute_score):
+        response = client.post("/papers/score-all")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 2
+    assert data["scored"] == 1
+    assert data["failed"] == 1
+    assert any(f"paper_id={bad_id}" in err for err in data["errors"])
+
+    # The failed paper's score is untouched; the ok one is written.
+    detail_ok = client.get(f"/papers/{ok_id}").json()
+    assert detail_ok["score"] is not None
+
+
+def test_score_all_unexpected_db_error_returns_500(client):
+    """POST /papers/score-all: a failure reading the paper list (not per-paper
+    scoring) is an unclassified error and must be wrapped by _http_exc_for
+    with an opaque error-id, not surfaced as a raw framework 500 (#276).
+    """
+    with patch("academic_paper.server.get_all_papers_for_scoring", side_effect=RuntimeError("db down")):
+        response = client.post("/papers/score-all")
+    assert response.status_code == 500
+    assert "db down" not in response.json()["detail"]
+    assert "Internal error" in response.json()["detail"]
+
+
+def test_list_papers_unexpected_error_returns_500(client):
+    """GET /papers: unclassified errors must map through _http_exc_for (#276)."""
+    with patch("academic_paper.server.list_papers_filtered", side_effect=RuntimeError("disk error")):
+        response = client.get("/papers")
+    assert response.status_code == 500
+    assert "disk error" not in response.json()["detail"]
+    assert "Internal error" in response.json()["detail"]
+
+
+def test_get_paper_unexpected_error_returns_500(client):
+    """GET /papers/{paper_id}: unclassified errors must map through _http_exc_for (#276)."""
+    with patch("academic_paper.server.get_paper", side_effect=RuntimeError("disk error")):
+        response = client.get("/papers/1")
+    assert response.status_code == 500
+    assert "disk error" not in response.json()["detail"]
+    assert "Internal error" in response.json()["detail"]
+
+
+def test_score_paper_unexpected_error_returns_500(client, temp_db):
+    """POST /papers/{paper_id}/score: unclassified errors must map through _http_exc_for (#276)."""
+    conn = get_connection(temp_db)
+    paper_id = save_paper(conn, "paper.pdf", "hash_sc_err")
+    conn.close()
+
+    with patch("academic_paper.server.compute_score", side_effect=RuntimeError("boom")):
+        response = client.post(f"/papers/{paper_id}/score")
+    assert response.status_code == 500
+    assert "boom" not in response.json()["detail"]
+    assert "Internal error" in response.json()["detail"]
+
+
+def test_list_summaries_unexpected_error_returns_500(client):
+    """GET /summaries: unclassified errors must map through _http_exc_for (#276)."""
+    with patch("academic_paper.server.list_summaries", side_effect=RuntimeError("disk error")):
+        response = client.get("/summaries")
+    assert response.status_code == 500
+    assert "disk error" not in response.json()["detail"]
+    assert "Internal error" in response.json()["detail"]
+
+
 def test_ingest_unexpected_exception(client):
     """POST /papers/ingest: unexpected error returns 500 with opaque message (#148)."""
     pdf_content = create_minimal_pdf()
