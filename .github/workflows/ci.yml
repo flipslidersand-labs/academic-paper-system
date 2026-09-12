@@ -25,6 +25,46 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build Docker image
         run: docker build -t academic-paper-system:test .
+      - name: Smoke test image (#263)
+        run: |
+          set -euo pipefail
+          # EMBEDDING_SVC_URL/QDRANT_URL default to a "<internal-host>" placeholder
+          # that Settings' reject_placeholder validator rejects at startup, so real
+          # (if unreachable) values are required just to let the process come up.
+          # ACADEMIC_DB defaults to /data/academic.db, which only exists when a
+          # volume is mounted (docker-compose); point it at a writable path here.
+          docker run -d --name smoke -p 8020:8020 \
+            -e EMBEDDING_SVC_URL=http://localhost:9092 \
+            -e QDRANT_URL=http://localhost:6333 \
+            -e ACADEMIC_DB=/tmp/academic.db \
+            academic-paper-system:test
+
+          ready=""
+          for _ in $(seq 1 15); do
+            if [ "$(docker inspect -f '{{.State.Running}}' smoke)" != "true" ]; then
+              echo "Container exited during startup" >&2
+              break
+            fi
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8020/health || echo 000)
+            # 200 (healthy) or 503 (Qdrant/embedding-svc unreachable, expected in CI)
+            # both prove the process started and is serving; only a non-response
+            # (startup crash, wrong CMD args, etc.) should fail the job.
+            if [ "$code" = "200" ] || [ "$code" = "503" ]; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [ -z "$ready" ]; then
+            echo "Container did not become ready; logs:" >&2
+            docker logs smoke || true
+            exit 1
+          fi
+          echo "Smoke test OK (/health responded)"
+      - name: Clean up smoke container
+        if: always()
+        run: docker rm -f smoke || true
 
   gitleaks:
     permissions:
