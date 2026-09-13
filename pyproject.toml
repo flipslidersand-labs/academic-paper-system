@@ -73,7 +73,8 @@ ignore = ["E501"]  # line-too-long is handled by formatter
 
 # CI passes --cov=. (source is then overridden), so omit is what actually
 # keeps tests/ (inflating) out of the denominator. scripts/ is included in
-# source so its daily-run collectors are covered by the 88% gate (#240).
+# source so its daily-run collectors are covered by the coverage-threshold
+# gate in ci.yml (#240); keep that threshold >=3-5pt below actual (#268).
 [tool.coverage.run]
 branch = true
 source = ["academic_paper", "scripts"]

@@ -13,9 +13,10 @@ jobs:
     uses: flipslidersand-labs/qa-workflows/.github/workflows/python-test.yml@fcccf3f5895340faa5c6ef2469068b7b32a6c60e
     with:
       # scripts/ は academic_paper と合算計測される (pyproject.toml
-      # [tool.coverage.run] source, #240)。合算実測は約76%のため、日次収集
-      # スクリプトが0%まで退行すれば確実に割り込む75に設定。
-      coverage-threshold: 75
+      # [tool.coverage.run] source, #240)。合算実測は約76%。実測との差が
+      # 最低3〜5pt空くように71に設定 (#268)。次にscripts/が増えて実測が
+      # 動く際も、この差を割らないよう閾値を追随させること。
+      coverage-threshold: 71
       # Pin ruff so an upstream ruff release can't break lint mid-PR.
       ruff-version: "0.16.2"
 
