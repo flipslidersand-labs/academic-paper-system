@@ -33,3 +33,31 @@ def test_verify_arxiv_id_match_and_mismatch(monkeypatch):
     assert arxiv_collect.verify_arxiv_id(b"%PDF-", "2410.10071v1") is True
     assert arxiv_collect.verify_arxiv_id(b"%PDF-", "2410.10071v2") is True  # version ignored
     assert arxiv_collect.verify_arxiv_id(b"%PDF-", "2005.11401v4") is False
+
+
+def test_extract_first_page_text_hang_times_out(monkeypatch):
+    """A pdfplumber extraction that hangs (e.g. malicious PDF) must not block
+    the caller forever — the call returns None once the deadline passes (#307)."""
+    import time
+
+    class _HangingPdf:
+        def __enter__(self):
+            time.sleep(5)
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class _FakePdfplumber:
+        @staticmethod
+        def open(_source):
+            return _HangingPdf()
+
+    monkeypatch.setitem(sys.modules, "pdfplumber", _FakePdfplumber())
+
+    start = time.monotonic()
+    result = arxiv_collect._extract_first_page_text(b"%PDF-", timeout=0.2)
+    elapsed = time.monotonic() - start
+
+    assert result is None
+    assert elapsed < 2  # bounded by the timeout, not the 5s hang
