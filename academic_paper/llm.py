@@ -7,7 +7,7 @@ from google.genai import errors as genai_errors
 from academic_paper.config import settings
 from academic_paper.retry import async_with_retry
 
-_GEMINI_RETRYABLE = (genai_errors.ServerError,)
+_GEMINI_RETRYABLE = (genai_errors.ServerError, httpx.NetworkError, httpx.TimeoutException)
 _OLLAMA_RETRYABLE = (httpx.NetworkError, httpx.TimeoutException)
 
 
@@ -59,7 +59,8 @@ class GeminiClient(BaseLLMClient):
 
         # generate_content is a sync blocking call; run in thread pool so the
         # event loop remains responsive during multi-second LLM generation (#149).
-        # Retries only transient server-side errors (#234); ClientError (4xx) is not retried.
+        # Retries transient server-side errors and timeout/network errors (#234, #264);
+        # ClientError (4xx) is not retried.
         response = await async_with_retry(
             asyncio.to_thread,
             self.client.models.generate_content,

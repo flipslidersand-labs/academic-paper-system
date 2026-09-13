@@ -54,6 +54,29 @@ async def test_gemini_client_retries_on_server_error(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_gemini_client_retries_on_timeout(monkeypatch):
+    """A transient httpx.TimeoutException from generate_content is retried and succeeds (#264)."""
+    monkeypatch.setattr("academic_paper.retry.asyncio.sleep", AsyncMock())
+
+    with patch("google.genai.Client") as mock_genai_client:
+        mock_client_instance = MagicMock()
+        mock_genai_client.return_value = mock_client_instance
+
+        mock_response = MagicMock()
+        mock_response.text = "Test response from Gemini"
+        mock_client_instance.models.generate_content.side_effect = [
+            httpx.ReadTimeout("timed out"),
+            mock_response,
+        ]
+
+        client = GeminiClient(api_key="test-key")
+        result = await client.generate("Test prompt", system="System message")
+
+        assert result == "Test response from Gemini"
+        assert mock_client_instance.models.generate_content.call_count == 2
+
+
+@pytest.mark.anyio
 async def test_gemini_client_does_not_retry_on_client_error():
     """A ClientError (4xx) from generate_content is not retried (#234)."""
     with patch("google.genai.Client") as mock_genai_client:
