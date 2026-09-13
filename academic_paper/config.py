@@ -28,7 +28,16 @@ class Settings(BaseSettings):
     gemini_timeout_ms: int = Field(default=60000, gt=0, description="Gemini API HTTP timeout in milliseconds")
     ollama_url: str = Field(default="http://localhost:11434", description="Ollama service URL")
     ollama_model: str = Field(default="mistral", description="Ollama model to use")
-    ollama_timeout: int = Field(default=300, gt=0, description="Ollama HTTP timeout in seconds")
+    ollama_timeout: int = Field(
+        default=300,
+        gt=0,
+        description=(
+            "Per-attempt Ollama HTTP timeout in seconds. OllamaClient.generate() retries up "
+            "to 3x (#311), so llm_generate_timeout must cover ollama_timeout*3+backoff, not "
+            "just a single attempt — raising this value requires raising llm_generate_timeout "
+            "(and summarize_total_timeout) to match"
+        ),
+    )
     otel_endpoint: str = Field(default="", description="OpenTelemetry endpoint")
     log_level: str = Field(default="INFO", description="Root log level (DEBUG/INFO/WARNING/ERROR)")
     log_format: str = Field(default="json", description="Log format: 'json' or 'text'")
@@ -45,15 +54,19 @@ class Settings(BaseSettings):
         ),
     )
     llm_generate_timeout: int = Field(
-        default=300,
+        default=903,
         description=(
-            "Ceiling in seconds for RAGSummarizer's llm.generate() call (#237); "
-            "must stay >= the slowest configured LLM client timeout (ollama_timeout) "
-            "so it never truncates a legitimate in-flight generation"
+            "Ceiling in seconds for RAGSummarizer's llm.generate() call (#237). "
+            "OllamaClient.generate() retries up to 3x on transient errors (#311), each "
+            "attempt bounded by ollama_timeout, so the worst case is "
+            "ollama_timeout * 3 + backoff(1s + 2s). This must stay >= that worst case "
+            "(currently 300*3+3=903 with the defaults below) so the outer wait_for never "
+            "fires before the retries have a chance to run — a tighter value silently "
+            "defeats the retry by cancelling after the first attempt's timeout."
         ),
     )
     summarize_total_timeout: int = Field(
-        default=460,
+        default=1063,
         gt=0,
         description=(
             "Overall ceiling in seconds for RAGSummarizer.summarize() (#269); the embedding, "
