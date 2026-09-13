@@ -1,9 +1,11 @@
 """Tests for FastAPI server endpoints."""
 
 import tempfile
+import time
 from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import anyio.from_thread
 import httpx
 import pytest
 from fastapi import HTTPException
@@ -12,6 +14,21 @@ from fastapi.testclient import TestClient
 from academic_paper.config import settings
 from academic_paper.db import get_chunks, get_connection, save_chunks, save_paper
 from academic_paper.server import _cleanup_orphaned_ingests, app
+
+
+def _wait_for_job(client, job_id, timeout=2.0):
+    """Poll GET /jobs/{job_id} until it leaves pending/running.
+
+    The background ingest job now persists via asyncio.to_thread (#277), so
+    it hands off to a real worker thread instead of running synchronously to
+    completion inline on the event loop before the request handler returns.
+    """
+    deadline = time.monotonic() + timeout
+    job = client.get(f"/jobs/{job_id}").json()
+    while job["status"] in ("pending", "running") and time.monotonic() < deadline:
+        time.sleep(0.01)
+        job = client.get(f"/jobs/{job_id}").json()
+    return job
 
 
 @pytest.fixture
@@ -33,8 +50,16 @@ def client(temp_db):
         with (
             patch("academic_paper.server.EmbedderClient", return_value=mock_embedder),
             patch("academic_paper.server.QdrantStore", return_value=mock_qdrant),
+            # A persistent portal (rather than TestClient's default: a fresh portal
+            # per request) matches the real ASGI server's long-lived event loop.
+            # /papers/ingest's background job now hops to a worker thread for its
+            # SQLite writes (#277); without this, TestClient tears down the event
+            # loop right after each response, leaving that hand-off's completion
+            # callback stranded and the job stuck "running" forever.
+            anyio.from_thread.start_blocking_portal() as portal,
         ):
             client = TestClient(app)
+            client.portal = portal
             # Manually set the mocked services since lifespan is patched
             client.app.state.embedder = mock_embedder
             client.app.state.vector_store = mock_qdrant
@@ -563,6 +588,10 @@ def test_ingest_async_returns_202_and_completes_job(client):
     """Default ingest is async: returns 202 + job_id, job completes to done."""
     pdf_content = create_minimal_pdf()
 
+    # extract_text() now runs on the background job's worker thread (#277) rather
+    # than inline before the response is returned, so the mock must stay active
+    # through _wait_for_job() too — not just through the POST — or the real
+    # extract_text() can run once this patch is torn down.
     with patch("academic_paper.server.extract_text") as mock_extract:
         mock_extract.return_value = [{"page": 1, "text": "Async ingest content"}]
 
@@ -570,15 +599,14 @@ def test_ingest_async_returns_202_and_completes_job(client):
             "/papers/ingest",
             files={"file": ("async.pdf", BytesIO(pdf_content), "application/pdf")},
         )
+        assert response.status_code == 202
+        body = response.json()
+        assert body["status"] == "pending"
+        assert "job_id" in body
+        paper_id = body["paper_id"]
 
-    assert response.status_code == 202
-    body = response.json()
-    assert body["status"] == "pending"
-    assert "job_id" in body
-    paper_id = body["paper_id"]
+        job = _wait_for_job(client, body["job_id"])
 
-    # TestClient runs BackgroundTasks synchronously, so the job is already done.
-    job = client.get(f"/jobs/{body['job_id']}").json()
     assert job["status"] == "done"
     assert job["result"]["paper_id"] == paper_id
     assert job["result"]["chunks"] > 0
@@ -598,6 +626,11 @@ def test_ingest_async_duplicate_returns_409(client):
             files={"file": ("dup.pdf", BytesIO(pdf_content), "application/pdf")},
         )
         assert first.status_code == 202
+        # The 409 check only fires once the paper's status is "indexed", which the
+        # background job now sets via a worker-thread SQLite write (#277) — wait
+        # for that first job to finish before re-uploading the same file.
+        first_job = _wait_for_job(client, first.json()["job_id"])
+        assert first_job["status"] == "done"
 
         second = client.post(
             "/papers/ingest",
@@ -611,16 +644,18 @@ def test_ingest_async_job_failed_on_no_text(client):
     """When extraction yields no text, the async job ends 'failed' and paper is 'failed'."""
     pdf_content = create_minimal_pdf()
 
+    # Keep the mock active through _wait_for_job(), same reasoning as
+    # test_ingest_async_returns_202_and_completes_job above (#277).
     with patch("academic_paper.server.extract_text") as mock_extract:
         mock_extract.return_value = []
         response = client.post(
             "/papers/ingest",
             files={"file": ("notext.pdf", BytesIO(pdf_content), "application/pdf")},
         )
+        assert response.status_code == 202
+        body = response.json()
+        job = _wait_for_job(client, body["job_id"])
 
-    assert response.status_code == 202
-    body = response.json()
-    job = client.get(f"/jobs/{body['job_id']}").json()
     assert job["status"] == "failed"
     assert job["errors"]
 
