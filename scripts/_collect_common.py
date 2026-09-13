@@ -23,6 +23,8 @@ from academic_paper.config import settings
 
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 _ALLOWED_SCHEMES = {"http", "https"}
+_ALLOWED_PDF_CONTENT_TYPES = {"application/pdf", "application/x-pdf"}
+_PDF_MAGIC = b"%PDF-"
 
 
 def assert_safe_url(url: str) -> None:
@@ -56,11 +58,15 @@ def download_pdf(client: httpx.Client, url: str, timeout: int = 60, max_mb: int 
 
     Yields the temp-file path.  The file is deleted on exit.
     Raises ValueError when the URL fails the SSRF safety check (see
-    ``assert_safe_url``), when the response content-type does not contain
-    "pdf", or when the cumulative downloaded size exceeds *max_mb*
-    (defaults to ``settings.max_upload_mb``, the same limit the server
-    enforces on ``/papers/ingest``), aborting the stream immediately to
-    avoid exhausting disk on an oversized or unbounded response.
+    ``assert_safe_url``), when the response content-type is not exactly
+    "application/pdf" or "application/x-pdf" (falling back to the URL
+    ending in ".pdf" only when the content-type doesn't match), when the
+    downloaded body doesn't start with the "%PDF-" magic number (guards
+    against a server that spoofs the content-type header), or when the
+    cumulative downloaded size exceeds *max_mb* (defaults to
+    ``settings.max_upload_mb``, the same limit the server enforces on
+    ``/papers/ingest``), aborting the stream immediately to avoid
+    exhausting disk on an oversized or unbounded response.
     """
     assert_safe_url(url)
     max_bytes = (max_mb if max_mb is not None else settings.max_upload_mb) * 1024 * 1024
@@ -71,11 +77,17 @@ def download_pdf(client: httpx.Client, url: str, timeout: int = 60, max_mb: int 
         with client.stream("GET", url, timeout=timeout, follow_redirects=True) as resp:
             resp.raise_for_status()
             ct = resp.headers.get("content-type", "").lower()
-            if "pdf" not in ct and not url.lower().endswith(".pdf"):
+            ct_base = ct.split(";")[0].strip()
+            if ct_base not in _ALLOWED_PDF_CONTENT_TYPES and not url.lower().endswith(".pdf"):
                 raise ValueError(f"Not a PDF (content-type: {ct})")
             written = 0
+            checked_magic = False
             with open(tmp_path, "wb") as fh:
                 for chunk in resp.iter_bytes(chunk_size=65536):
+                    if not checked_magic:
+                        checked_magic = True
+                        if not chunk.startswith(_PDF_MAGIC):
+                            raise ValueError(f"Not a PDF (missing %PDF- magic number): {url}")
                     written += len(chunk)
                     if written > max_bytes:
                         raise ValueError(f"PDF exceeds max size ({max_bytes // (1024 * 1024)} MB): {url}")
