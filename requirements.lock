@@ -32,6 +32,8 @@ cryptography==50.0.0
     # via
     #   google-auth
     #   pdfminer-six
+defusedxml==0.7.1
+    # via academic-paper-system (pyproject.toml)
 distro==1.9.0
     # via google-genai
 fastapi==0.141.1
