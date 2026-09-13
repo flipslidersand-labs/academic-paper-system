@@ -1,5 +1,6 @@
 """Tests for author/category filter, metadata ingest, and GET /summaries."""
 
+import sqlite3
 from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -98,6 +99,46 @@ def test_list_papers_filtered_by_category(temp_db):
 
     assert total == 1
     assert papers[0]["file_name"] == "a.pdf"
+
+
+def test_list_papers_filtered_consistent_snapshot_under_concurrent_write(temp_db):
+    """Regression (#270): COUNT and the paginated SELECT must read the same
+    snapshot even if another connection commits an insert in between."""
+    writer = get_connection(temp_db)
+    count_calls = []
+
+    class SpyCursor(sqlite3.Cursor):
+        def execute(self, sql, *args, **kwargs):
+            result = super().execute(sql, *args, **kwargs)
+            if sql.strip().startswith("SELECT COUNT(*) FROM papers"):
+                count_calls.append(sql)
+                # Simulate a concurrent ingest/delete job committing a write
+                # between the COUNT and the paginated SELECT below.
+                save_paper(writer, "c.pdf", "hc1")
+            return result
+
+    class SpyConnection(sqlite3.Connection):
+        def cursor(self, factory=None):
+            return super().cursor(factory or SpyCursor)
+
+    real_connect = sqlite3.connect
+
+    def connect_with_spy(db_path, *args, **kwargs):
+        return real_connect(db_path, *args, factory=SpyConnection, **kwargs)
+
+    with patch("academic_paper.db.sqlite3.connect", side_effect=connect_with_spy):
+        conn = get_connection(temp_db)
+        save_paper(conn, "a.pdf", "ha1")
+        save_paper(conn, "b.pdf", "hb1")
+
+        total, papers = list_papers_filtered(conn)
+
+    writer.close()
+    conn.close()
+
+    assert len(count_calls) == 1
+    assert total == 2
+    assert total == len(papers)
 
 
 def test_list_summaries_returns_paper_info(temp_db):
