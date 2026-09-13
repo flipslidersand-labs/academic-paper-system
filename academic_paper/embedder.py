@@ -7,9 +7,9 @@ from academic_paper.retry import async_with_retry
 
 
 class _RetryableStatusError(httpx.HTTPStatusError):
-    """Raised for 5xx responses so retries target transient server errors only.
+    """Raised for 5xx responses and 429 so retries target transient server errors only.
 
-    4xx responses still raise the plain httpx.HTTPStatusError and are never retried.
+    Other 4xx responses still raise the plain httpx.HTTPStatusError and are never retried.
     """
 
 
@@ -86,7 +86,7 @@ class EmbedderClient:
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            if response.status_code >= 500:
+            if response.status_code >= 500 or response.status_code == 429:
                 raise _RetryableStatusError(str(exc), request=exc.request, response=exc.response) from exc
             raise
         return response.json()["vectors"]
