@@ -199,6 +199,22 @@ def test_gemini_client_close_and_aclose():
         mock_client_instance.aio.aclose.assert_awaited_once()
 
 
+def test_gemini_client_aclose_also_closes_sync_client():
+    """aclose() must also close the sync client since generate() only uses it via to_thread (#304)."""
+    with patch("google.genai.Client") as mock_genai_client:
+        mock_client_instance = MagicMock()
+        mock_client_instance.aio.aclose = AsyncMock()
+        mock_genai_client.return_value = mock_client_instance
+
+        client = GeminiClient(api_key="test-key")
+
+        import asyncio
+
+        asyncio.run(client.aclose())
+        mock_client_instance.close.assert_called_once()
+        mock_client_instance.aio.aclose.assert_awaited_once()
+
+
 def test_ollama_client_close_and_aclose_are_noop():
     """BaseLLMClient's default close()/aclose() are no-ops for clients without HTTP resources to release (#262)."""
     client = OllamaClient(base_url="http://localhost:11434", model="mistral")
