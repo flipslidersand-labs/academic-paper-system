@@ -41,7 +41,7 @@ dependencies = [
 dev = [
     "pytest>=8.4",
     "pytest-cov>=4.1",
-    "pytest-anyio>=0.0.0",
+    "anyio>=4.0",
     # Pinned to match .github/workflows/ci.yml's ruff-version (#265).
     # Bump both together.
     "ruff==0.16.2",
