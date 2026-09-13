@@ -1097,6 +1097,22 @@ def test_read_endpoints_require_api_key_when_configured(client, temp_db):
         assert client.get("/search?q=alpha", headers={"X-API-Key": "secret-key"}).status_code != 401
 
 
+def test_metrics_requires_api_key_when_configured(client):
+    """Regression (#299): /metrics is added by Instrumentator.expose() rather than a
+    hand-written route, so it previously fell outside the "API_KEY set → all endpoints
+    require auth" boundary and leaked per-path request counters/latency histograms."""
+    with patch.object(settings, "api_key", "secret-key"):
+        assert client.get("/metrics").status_code == 401
+        assert client.get("/metrics", headers={"X-API-Key": "wrong"}).status_code == 401
+        assert client.get("/metrics", headers={"X-API-Key": "secret-key"}).status_code == 200
+
+
+def test_metrics_pass_without_api_key_when_unconfigured(client):
+    """When API_KEY is empty (default), /metrics remains publicly reachable."""
+    with patch.object(settings, "api_key", ""):
+        assert client.get("/metrics").status_code == 200
+
+
 def test_read_endpoints_pass_without_api_key_when_unconfigured(client):
     """When API_KEY is empty (default), read endpoints accept requests without key."""
     with patch.object(settings, "api_key", ""):
