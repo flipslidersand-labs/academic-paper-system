@@ -459,3 +459,31 @@ async def test_summarize_llm_timeout_propagates(monkeypatch):
     summarizer = RAGSummarizer(mock_llm, mock_qdrant)
     with pytest.raises(TimeoutError):
         await summarizer.summarize(paper_id=1, file_hash="abc")
+
+
+@pytest.mark.anyio
+async def test_summarize_overall_timeout_bounds_stacked_individual_timeouts(monkeypatch):
+    """The 3 inner wait_for calls (embedding/qdrant/llm) stack sequentially in the
+
+    worst case, so summarize()'s real worst-case latency is their sum, not any one
+    of them. summarize_total_timeout must cut the whole call short even when each
+    individual timeout is generous enough to not fire on its own (#269).
+    """
+    monkeypatch.setattr(settings, "embedding_timeout", 10)
+    monkeypatch.setattr(settings, "qdrant_timeout", 10)
+    monkeypatch.setattr(settings, "llm_generate_timeout", 10)
+    monkeypatch.setattr(settings, "summarize_total_timeout", 0.05)
+
+    mock_embedder = AsyncMock()
+    mock_embedder.embed_single = AsyncMock(return_value=[0.1] * 768)
+    mock_qdrant = MagicMock()
+
+    async def _slow_search(*args, **kwargs):
+        await asyncio.sleep(10)
+
+    mock_qdrant.asearch = AsyncMock(side_effect=_slow_search)
+    mock_llm = AsyncMock()
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
+    with pytest.raises(TimeoutError):
+        await summarizer.summarize(paper_id=1, file_hash="abc", title="paper")

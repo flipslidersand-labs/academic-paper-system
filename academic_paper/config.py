@@ -52,6 +52,17 @@ class Settings(BaseSettings):
             "so it never truncates a legitimate in-flight generation"
         ),
     )
+    summarize_total_timeout: int = Field(
+        default=460,
+        gt=0,
+        description=(
+            "Overall ceiling in seconds for RAGSummarizer.summarize() (#269); the embedding, "
+            "Qdrant and LLM wait_for calls inside it are awaited sequentially, so their timeouts "
+            "stack in the worst case instead of applying independently. This bounds the whole "
+            "call regardless of that stacking — default is embedding_timeout + qdrant_timeout + "
+            "llm_generate_timeout with a small margin for the DB fallback path."
+        ),
+    )
 
     @field_validator(
         "embedding_svc_url", "qdrant_url", "api_key", "embedding_api_key", "qdrant_api_key", "google_api_key"
