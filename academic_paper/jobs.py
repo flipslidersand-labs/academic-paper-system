@@ -49,6 +49,7 @@ class JobStore:
         # Jobs whose _persist() ran before init() set _db_path (#302) — flushed
         # to SQLite once init() completes, so they aren't lost on restart.
         self._pending_writes: list[Job] = []
+        self._persist_locks: dict[str, asyncio.Lock] = {}
 
     async def init(self, db_path: str) -> None:
         """Load existing jobs from SQLite into memory on startup.
@@ -149,7 +150,7 @@ class JobStore:
         job = Job(id=str(uuid.uuid4()), status="pending", kind=kind)
         with self._lock:
             self._jobs[job.id] = job
-        await asyncio.to_thread(self._persist, job)
+        await self.persist(job)
         return job
 
     def get(self, job_id: str) -> Job | None:
@@ -187,7 +188,7 @@ class JobStore:
                 return None
             job = Job(id=str(uuid.uuid4()), status="pending", kind=kind)
             self._jobs[job.id] = job
-        await asyncio.to_thread(self._persist, job)
+        await self.persist(job)
         return job
 
     async def persist(self, job: Job) -> None:
@@ -196,8 +197,16 @@ class JobStore:
         Runs the synchronous sqlite3 write in a worker thread (asyncio.to_thread) so
         that lock contention (busy_timeout up to 5s, see db.py) can't block the event
         loop and delay unrelated asyncio.wait_for timeouts elsewhere in the process (#277).
+
+        Concurrent calls for the *same* job id race in the thread pool: completion
+        order isn't guaranteed to match call order, so a persist() for an older state
+        can finish after (and overwrite) one for a newer state (#298). Serialize
+        persist() per job id with an asyncio.Lock so writes for a given job land in
+        the order they were awaited; different jobs still persist concurrently.
         """
-        await asyncio.to_thread(self._persist, job)
+        lock = self._persist_locks.setdefault(job.id, asyncio.Lock())
+        async with lock:
+            await asyncio.to_thread(self._persist, job)
 
 
 job_store = JobStore()

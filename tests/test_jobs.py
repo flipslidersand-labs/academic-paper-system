@@ -343,6 +343,62 @@ def test_create_if_not_running_is_atomic_under_concurrency(temp_db):
     assert len(store._jobs) == 1
 
 
+# --- persist() ordering under out-of-order thread completion (#298) ---
+
+
+@pytest.mark.anyio
+async def test_persist_serializes_out_of_order_thread_completion(temp_db):
+    """A slow-to-complete older persist() must not overwrite a faster newer one.
+
+    Regression for #298: persist() ran each write via a fresh asyncio.to_thread()
+    call with no ordering guarantee, so if the *first* persist() call (older state)
+    happened to finish its SQLite write *after* a *second* persist() call (newer
+    state), the older state clobbered the newer one. Here the first call is made
+    to block until the second call's write has already completed, proving that
+    without per-job serialization the write order would invert; with the fix the
+    second call must wait for the first lock holder, so the final row reflects the
+    call order (newer state) instead of the completion order.
+    """
+    import asyncio
+
+    store = JobStore()
+    store._db_path = temp_db
+    job = Job(id="race-job", status="pending", kind="ingest")
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    real_persist = store._persist
+
+    def slow_first_persist(j):
+        started.set()
+        # Block the first call's worker thread until the second persist() call
+        # (issued after this one, for the newer state) would have already
+        # written to SQLite absent serialization.
+        import time as _time
+
+        deadline = _time.time() + 2
+        while not release.is_set() and _time.time() < deadline:
+            _time.sleep(0.01)
+        return real_persist(j)
+
+    with patch.object(store, "_persist", side_effect=slow_first_persist):
+        job.status = "running"
+        first = asyncio.create_task(store.persist(job))
+        await started.wait()
+
+        newer_job = Job(id="race-job", status="done", kind="ingest", processed=1, total=1)
+        second = store.persist(newer_job)
+
+        release.set()
+        await first
+        await second
+
+    conn = get_connection(temp_db)
+    rows = {r["id"]: r for r in load_all_jobs(conn)}
+    conn.close()
+    assert rows["race-job"]["status"] == "done"
+
+
 @pytest.mark.anyio
 async def test_job_store_init_loads_existing_jobs(temp_db):
     """JobStore.init() loads previously persisted jobs from SQLite."""
