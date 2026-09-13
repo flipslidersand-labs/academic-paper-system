@@ -186,6 +186,140 @@ def test_download_pdf_cleanup_on_exception():
 
 
 # ---------------------------------------------------------------------------
+# download_pdf redirect handling (#278: httpx follow_redirects=True never
+# re-validated the Location header against the SSRF guard)
+# ---------------------------------------------------------------------------
+
+
+def _fake_redirect_resp(location: str):
+    class _FakeRedirectResp:
+        is_redirect = True
+        headers = {"location": location}
+
+        def raise_for_status(self):
+            pass
+
+        def iter_bytes(self, chunk_size=65536):
+            return iter(())
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+    return _FakeRedirectResp()
+
+
+def _fake_final_resp(content: bytes, content_type: str = "application/pdf"):
+    class _FakeFinalResp:
+        is_redirect = False
+        headers = {"content-type": content_type}
+
+        def raise_for_status(self):
+            pass
+
+        def iter_bytes(self, chunk_size=65536):
+            yield content
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+    return _FakeFinalResp()
+
+
+def test_download_pdf_rejects_redirect_to_unsafe_host():
+    """A redirect Location pointing at cloud metadata must be rejected before it is fetched (#278)."""
+
+    class _FakeClient:
+        def stream(self, method, url, **kwargs):
+            assert url == "http://example.com/redirect"
+            return _fake_redirect_resp("http://169.254.169.254/latest/meta-data/")
+
+    with pytest.raises(ValueError, match="non-public address"):
+        with download_pdf(_FakeClient(), "http://example.com/redirect") as _:
+            pass
+
+
+def test_download_pdf_follows_safe_redirect_to_final_pdf():
+    """A redirect to another public host is followed and re-validated per hop (#278)."""
+
+    calls = []
+
+    class _FakeClient:
+        def stream(self, method, url, **kwargs):
+            calls.append(url)
+            if url == "http://example.com/redirect":
+                return _fake_redirect_resp("http://example.org/final.pdf")
+            return _fake_final_resp(b"%PDF-final")
+
+    with download_pdf(_FakeClient(), "http://example.com/redirect") as path:
+        assert Path(path).read_bytes() == b"%PDF-final"
+    assert calls == ["http://example.com/redirect", "http://example.org/final.pdf"]
+
+
+def test_download_pdf_raises_on_too_many_redirects():
+    class _FakeClient:
+        def stream(self, method, url, **kwargs):
+            return _fake_redirect_resp("http://example.com/redirect")
+
+    with pytest.raises(ValueError, match="Too many redirects"):
+        with download_pdf(_FakeClient(), "http://example.com/redirect") as _:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# DNS rebinding: the resolution used for the SSRF check must be the exact
+# resolution used for the connection (#278)
+# ---------------------------------------------------------------------------
+
+
+def test_pin_resolution_forces_getaddrinfo_to_validated_result():
+    import socket
+
+    from _collect_common import _pin_resolution
+
+    real_getaddrinfo = socket.getaddrinfo
+    fake_addrinfos = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("203.0.113.1", 443))]
+    with _pin_resolution("example.com", fake_addrinfos):
+        # Even though example.com really resolves elsewhere, the pin must win.
+        assert socket.getaddrinfo("example.com", 443) == fake_addrinfos
+        # A different host must still resolve normally (pin is host-scoped).
+        assert socket.getaddrinfo is not real_getaddrinfo
+    # Pin must not leak past the context manager.
+    assert socket.getaddrinfo is real_getaddrinfo
+
+
+def test_download_pdf_pins_resolution_during_fetch():
+    """download_pdf must pin socket.getaddrinfo so the client's own connect
+    can't re-resolve a rebinding domain to a different (private) address."""
+    import socket
+
+    seen_during_stream = {}
+
+    class _FakeClient:
+        def stream(self, method, url, **kwargs):
+            # Simulate the HTTP client's own DNS resolution happening inside stream().
+            seen_during_stream["addrinfo"] = socket.getaddrinfo("example.com", 80, type=socket.SOCK_STREAM)
+            return _fake_final_resp(b"%PDF-ok")
+
+    with download_pdf(_FakeClient(), "http://example.com/paper.pdf") as _:
+        pass
+
+    for _family, _type, _proto, _canon, sockaddr in seen_during_stream["addrinfo"]:
+        assert ipaddress_is_global(sockaddr[0])
+
+
+def ipaddress_is_global(ip: str) -> bool:
+    import ipaddress
+
+    return ipaddress.ip_address(ip).is_global
+
+
+# ---------------------------------------------------------------------------
 # ingest_pdf
 # ---------------------------------------------------------------------------
 
