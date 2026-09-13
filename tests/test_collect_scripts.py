@@ -5,18 +5,14 @@ ingest API: search-API response parsing, filtering, and pure formatting
 helpers. HTTP calls are mocked with respx.
 """
 
-import sys
 import xml.etree.ElementTree as ET
-from pathlib import Path
 
-import httpx
-import respx
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-
+# scripts/ is added to sys.path in tests/conftest.py (#272).
 import generate_portfolio  # noqa: E402
+import httpx
 import openalex_collect  # noqa: E402
 import pubmed_collect  # noqa: E402
+import respx
 import semantic_scholar_collect  # noqa: E402
 from arxiv_collect import fetch_papers as arxiv_fetch_papers  # noqa: E402
 
