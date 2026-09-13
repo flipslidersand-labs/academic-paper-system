@@ -44,7 +44,7 @@ dev = [
     "anyio>=4.0",
     # Pinned to match .github/workflows/ci.yml's ruff-version (#265).
     # Bump both together.
-    "ruff==0.16.2",
+    "ruff==0.16.6",
     "respx>=0.21",
     "fpdf2>=2.7",
 ]
