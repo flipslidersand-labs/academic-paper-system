@@ -895,6 +895,34 @@ def test_list_summaries_unexpected_error_returns_500(client):
     assert "Internal error" in response.json()["detail"]
 
 
+def test_get_summary_endpoint_unexpected_error_returns_500(client):
+    """GET /papers/{paper_id}/summary: unclassified errors must map through _http_exc_for (#303)."""
+    with patch("academic_paper.server.get_paper", side_effect=RuntimeError("disk error")):
+        response = client.get("/papers/1/summary")
+    assert response.status_code == 500
+    assert "disk error" not in response.json()["detail"]
+    assert "Internal error" in response.json()["detail"]
+
+
+def test_generate_summary_endpoint_unexpected_error_returns_500(client):
+    """POST /papers/{paper_id}/summary: unclassified errors in the cache-check step must map
+    through _http_exc_for, not surface as a raw framework 500 (#303)."""
+    with patch("academic_paper.server.get_paper", side_effect=RuntimeError("disk error")):
+        response = client.post("/papers/1/summary")
+    assert response.status_code == 500
+    assert "disk error" not in response.json()["detail"]
+    assert "Internal error" in response.json()["detail"]
+
+
+def test_stats_unexpected_error_returns_500(client):
+    """GET /stats: unclassified errors must map through _http_exc_for, not a raw 500 (#303)."""
+    with patch("academic_paper.server.db_connection", side_effect=RuntimeError("disk error")):
+        response = client.get("/stats")
+    assert response.status_code == 500
+    assert "disk error" not in response.json()["detail"]
+    assert "Internal error" in response.json()["detail"]
+
+
 def test_ingest_unexpected_exception(client):
     """POST /papers/ingest: unexpected error returns 500 with opaque message (#148)."""
     pdf_content = create_minimal_pdf()
