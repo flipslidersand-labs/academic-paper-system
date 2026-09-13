@@ -29,6 +29,10 @@ def extract_text(pdf_path: str) -> list[dict]:
             text = " ".join(w["text"] for w in words)
             if text.strip():
                 pages.append({"page": page_num, "text": text})
+            # Release pdfplumber's per-page objects/chars cache immediately; without
+            # this, memory usage grows with the whole PDF even though only one
+            # page's data is needed at a time (issue #273).
+            page.flush_cache()
     return pages
 
 
