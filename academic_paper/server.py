@@ -824,7 +824,7 @@ def list_jobs_endpoint():
 
 @app.get("/search", dependencies=[Depends(verify_api_key)])
 async def search(
-    q: str = Query(..., min_length=1),
+    q: str = Query(..., min_length=1, max_length=1000),
     mode: str = Query("hybrid", pattern="^(vector|keyword|hybrid|nugget)$"),
     limit: int = Query(10, ge=1, le=100),
     paper_id: int | None = Query(None),
