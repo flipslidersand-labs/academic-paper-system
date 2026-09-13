@@ -5,13 +5,17 @@ ingest API: search-API response parsing, filtering, and pure formatting
 helpers. HTTP calls are mocked with respx.
 """
 
+import json
 import xml.etree.ElementTree as ET
+from urllib.error import URLError
+from urllib.parse import parse_qs, urlparse
 
 # scripts/ is added to sys.path in tests/conftest.py (#272).
 import generate_portfolio  # noqa: E402
 import httpx
 import openalex_collect  # noqa: E402
 import pubmed_collect  # noqa: E402
+import pytest
 import respx
 import semantic_scholar_collect  # noqa: E402
 from arxiv_collect import fetch_papers as arxiv_fetch_papers  # noqa: E402
@@ -179,3 +183,98 @@ def test_portfolio_build_html_smoke():
     html_out = generate_portfolio.build_html(papers, {1: {"objective": "obj"}}, "2026-08-31")
     assert "1 papers" in html_out
     assert "obj" in html_out
+
+
+def _fake_urlopen(pages, key="papers"):
+    """Build a urlopen stand-in that pages through `pages` by the offset query param."""
+
+    def _urlopen(url, timeout=15):
+        offset = int(parse_qs(urlparse(url).query).get("offset", ["0"])[0])
+        page = pages[offset // 100] if offset // 100 < len(pages) else []
+
+        class _Resp:
+            def read(self):
+                return json.dumps({key: page}).encode()
+
+        return _Resp()
+
+    return _urlopen
+
+
+def test_portfolio_fetch_all_stops_on_partial_batch(monkeypatch):
+    pages = [[{"id": i} for i in range(100)], [{"id": i} for i in range(100, 130)]]
+    monkeypatch.setattr(generate_portfolio, "urlopen", _fake_urlopen(pages))
+
+    items = generate_portfolio.fetch_all("http://api.example/papers?sort=score")
+
+    assert len(items) == 130
+    assert items[0]["id"] == 0
+    assert items[-1]["id"] == 129
+
+
+def test_portfolio_fetch_all_stops_on_empty_batch(monkeypatch):
+    monkeypatch.setattr(generate_portfolio, "urlopen", _fake_urlopen([[]]))
+
+    assert generate_portfolio.fetch_all("http://api.example/summaries?") == []
+
+
+def test_portfolio_fetch_all_returns_partial_results_on_url_error(monkeypatch, capsys):
+    def _raise(url, timeout=15):
+        raise URLError("connection refused")
+
+    monkeypatch.setattr(generate_portfolio, "urlopen", _raise)
+
+    items = generate_portfolio.fetch_all("http://api.example/papers?sort=score")
+
+    assert items == []
+    assert "[warn] fetch failed" in capsys.readouterr().err
+
+
+def test_portfolio_category_badges_escapes_and_limits_to_five():
+    cats = ["<script>", "b", "c", "d", "e", "f"]
+    out = generate_portfolio.category_badges(cats)
+
+    assert "&lt;script&gt;" in out
+    for c in ["b", "c", "d", "e"]:
+        assert f">{c}<" in out
+    assert ">f<" not in out
+
+
+def test_portfolio_category_badges_empty_input():
+    assert generate_portfolio.category_badges([]) == ""
+    assert generate_portfolio.category_badges(None) == ""
+
+
+def test_portfolio_main_writes_index_and_json(monkeypatch, tmp_path):
+    papers = [{"id": 1, "title": "T", "authors": ["A"], "score": 0.8, "source": "arxiv", "file_name": "x.pdf"}]
+    summaries = [{"paper_id": 1, "objective": "obj"}]
+
+    def _fake_fetch_all(url):
+        return summaries if "summaries" in url else papers
+
+    monkeypatch.setattr(generate_portfolio, "fetch_all", _fake_fetch_all)
+    out_dir = tmp_path / "docs"
+    monkeypatch.setattr(
+        "sys.argv", ["generate_portfolio.py", "--api-url", "http://api.example", "--output-dir", str(out_dir)]
+    )
+
+    generate_portfolio.main()
+
+    index_html = (out_dir / "index.html").read_text(encoding="utf-8")
+    assert "1 papers" in index_html
+    assert "obj" in index_html
+    papers_json = json.loads((out_dir / "papers.json").read_text(encoding="utf-8"))
+    assert papers_json["count"] == 1
+    assert papers_json["papers"] == papers
+
+
+def test_portfolio_main_aborts_when_no_papers_fetched(monkeypatch, tmp_path):
+    monkeypatch.setattr(generate_portfolio, "fetch_all", lambda url: [])
+    out_dir = tmp_path / "docs"
+    monkeypatch.setattr("sys.argv", ["generate_portfolio.py", "--output-dir", str(out_dir)])
+
+    with pytest.raises(SystemExit) as exc_info:
+        generate_portfolio.main()
+
+    assert exc_info.value.code == 1
+    assert not (out_dir / "index.html").exists()
