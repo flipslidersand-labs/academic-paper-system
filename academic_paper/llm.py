@@ -83,7 +83,13 @@ class GeminiClient(BaseLLMClient):
         self.client.close()
 
     async def aclose(self) -> None:
-        """Close the underlying genai.Client's async HTTP session (#262)."""
+        """Close both the sync and async genai.Client HTTP sessions.
+
+        generate() only ever uses the sync client (via asyncio.to_thread), so
+        aclose() must also close it or its connection pool leaks until process
+        exit (#304).
+        """
+        await asyncio.to_thread(self.client.close)
         await self.client.aio.aclose()
 
 
