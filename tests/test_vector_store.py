@@ -1,6 +1,8 @@
 import asyncio
 from unittest.mock import MagicMock, patch
 
+from qdrant_client.http.exceptions import UnexpectedResponse
+
 from academic_paper.vector_store import _QDRANT_RETRYABLE, QdrantStore, make_qdrant_id
 
 
@@ -207,6 +209,57 @@ def test_delete_by_paper_id_retries_on_network_error():
         mock_retry.assert_called_once()
         _, kw = mock_retry.call_args
         assert kw["attempts"] == 3
+
+
+def test_search_does_not_retry_on_4xx():
+    """A 400 UnexpectedResponse (e.g. bad filter) is not retried — fails on the first attempt (#306)."""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+        call_count = [0]
+
+        def _raise(*args, **kwargs):
+            call_count[0] += 1
+            raise UnexpectedResponse(status_code=400, reason_phrase="Bad Request", content=b"", headers={})
+
+        mock_client.query_points.side_effect = _raise
+
+        store = QdrantStore(url="http://test", collection="test-collection")
+        try:
+            store.search([0.1] * 768, limit=10)
+        except UnexpectedResponse:
+            pass
+        else:
+            raise AssertionError("expected UnexpectedResponse to propagate")
+
+        assert call_count[0] == 1
+
+
+def test_search_retries_on_5xx():
+    """A 500 UnexpectedResponse is retried up to `attempts` times (#306)."""
+    from academic_paper.vector_store import _RetryableQdrantError
+
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+        call_count = [0]
+
+        def _raise(*args, **kwargs):
+            call_count[0] += 1
+            raise UnexpectedResponse(status_code=500, reason_phrase="Server Error", content=b"", headers={})
+
+        mock_client.query_points.side_effect = _raise
+
+        with patch("academic_paper.retry.time.sleep"):
+            store = QdrantStore(url="http://test", collection="test-collection")
+            try:
+                store.search([0.1] * 768, limit=10)
+            except _RetryableQdrantError:
+                pass
+            else:
+                raise AssertionError("expected _RetryableQdrantError to propagate after retries")
+
+        assert call_count[0] == 3
 
 
 def test_close_closes_underlying_qdrant_client():

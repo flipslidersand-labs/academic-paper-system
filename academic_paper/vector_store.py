@@ -11,7 +11,23 @@ from academic_paper.retry import with_retry
 
 PAPER_NS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
-_QDRANT_RETRYABLE = (UnexpectedResponse, httpx.NetworkError, httpx.TimeoutException)
+
+class _RetryableQdrantError(Exception):
+    """Raised for 5xx/unknown-status Qdrant responses so retries target transient errors only.
+
+    A 4xx UnexpectedResponse (bad filter, missing collection, vector size mismatch, etc.) is
+    re-raised as-is and never retried (#306).
+    """
+
+
+def _reraise_qdrant_response(exc: UnexpectedResponse) -> None:
+    """Translate UnexpectedResponse into a retryable error, or re-raise 4xx as non-retryable."""
+    if exc.status_code is not None and 400 <= exc.status_code < 500:
+        raise exc
+    raise _RetryableQdrantError(str(exc)) from exc
+
+
+_QDRANT_RETRYABLE = (_RetryableQdrantError, httpx.NetworkError, httpx.TimeoutException)
 _UPSERT_BATCH_MAX = 200  # keep single requests well under qdrant_timeout (#236)
 
 
@@ -33,13 +49,16 @@ class QdrantStore:
         """
 
         def _do():
-            collections = self.client.get_collections().collections
-            names = [c.name for c in collections]
-            if self.collection not in names:
-                self.client.create_collection(
-                    collection_name=self.collection,
-                    vectors_config=VectorParams(size=768, distance=Distance.COSINE),
-                )
+            try:
+                collections = self.client.get_collections().collections
+                names = [c.name for c in collections]
+                if self.collection not in names:
+                    self.client.create_collection(
+                        collection_name=self.collection,
+                        vectors_config=VectorParams(size=768, distance=Distance.COSINE),
+                    )
+            except UnexpectedResponse as exc:
+                _reraise_qdrant_response(exc)
 
         with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
 
@@ -57,7 +76,10 @@ class QdrantStore:
             structs = [PointStruct(id=p["id"], vector=p["vector"], payload=p["payload"]) for p in batch]
 
             def _do(structs=structs):
-                self.client.upsert(collection_name=self.collection, points=structs)
+                try:
+                    self.client.upsert(collection_name=self.collection, points=structs)
+                except UnexpectedResponse as exc:
+                    _reraise_qdrant_response(exc)
 
             with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
 
@@ -66,10 +88,13 @@ class QdrantStore:
         flt = Filter(must=[FieldCondition(key="paper_id", match=MatchValue(value=paper_id))])
 
         def _do():
-            self.client.delete(
-                collection_name=self.collection,
-                points_selector=FilterSelector(filter=flt),
-            )
+            try:
+                self.client.delete(
+                    collection_name=self.collection,
+                    points_selector=FilterSelector(filter=flt),
+                )
+            except UnexpectedResponse as exc:
+                _reraise_qdrant_response(exc)
 
         with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
 
@@ -83,12 +108,15 @@ class QdrantStore:
             query_filter = Filter(must=[FieldCondition(key="paper_id", match=MatchValue(value=paper_id_filter))])
 
         def _do():
-            return self.client.query_points(
-                collection_name=self.collection,
-                query=query_vector,
-                limit=limit,
-                query_filter=query_filter,
-            )
+            try:
+                return self.client.query_points(
+                    collection_name=self.collection,
+                    query=query_vector,
+                    limit=limit,
+                    query_filter=query_filter,
+                )
+            except UnexpectedResponse as exc:
+                _reraise_qdrant_response(exc)
 
         results = with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
         return [{"id": str(r.id), "score": r.score, "payload": r.payload} for r in results.points]
