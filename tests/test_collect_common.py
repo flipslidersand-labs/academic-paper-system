@@ -1,17 +1,13 @@
 """Tests for scripts/_collect_common.py helpers."""
 
 import json
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 
-# scripts/ is not a package; add it to sys.path so _collect_common imports work.
-SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
-sys.path.insert(0, str(SCRIPTS_DIR))
-
+# scripts/ is added to sys.path in tests/conftest.py (#272).
 from _collect_common import _paper_label, assert_safe_url, download_pdf, ingest_pdf, run_collect  # noqa: E402
 
 # ---------------------------------------------------------------------------
