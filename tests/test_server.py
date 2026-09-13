@@ -1212,3 +1212,15 @@ async def test_cleanup_orphaned_ingests_handles_db_error_non_fatal():
 
     with patch("academic_paper.server.db_connection", side_effect=Exception("db down")):
         await _cleanup_orphaned_ingests(mock_app)  # must not raise
+
+
+def test_search_q_rejects_over_max_length(client):
+    """Regression (#301): q beyond max_length=1000 is rejected with 422 before reaching search logic."""
+    resp = client.get("/search", params={"q": "a" * 1001})
+    assert resp.status_code == 422
+
+
+def test_search_q_accepts_max_length(client, temp_db):
+    """q at the max_length boundary (1000 chars) is still accepted."""
+    resp = client.get("/search", params={"q": "a" * 1000, "mode": "keyword"})
+    assert resp.status_code == 200
