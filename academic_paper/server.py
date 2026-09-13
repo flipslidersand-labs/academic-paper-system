@@ -266,7 +266,6 @@ def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
 
 
 app = FastAPI(title="Academic Paper System", lifespan=lifespan)
-Instrumentator().instrument(app).expose(app)
 
 
 async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
@@ -284,6 +283,13 @@ async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-A
         return  # auth disabled
     if not hmac.compare_digest(x_api_key or "", configured):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+# /metrics is added by Instrumentator.expose() rather than manually registered, so it
+# must be gated the same way as every other route: pass verify_api_key through as a
+# dependency (#299 — request-path counters and latency histograms are otherwise
+# readable without auth whenever API_KEY is set).
+Instrumentator().instrument(app).expose(app, dependencies=[Depends(verify_api_key)])
 
 
 async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_name: str) -> int:
