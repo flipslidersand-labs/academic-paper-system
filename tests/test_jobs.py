@@ -384,3 +384,31 @@ async def test_running_job_converted_to_failed_on_init(temp_db):
     rows = load_all_jobs(conn)
     conn.close()
     assert rows[0]["status"] == "failed"
+
+
+@pytest.mark.anyio
+async def test_create_before_init_is_flushed_not_dropped(temp_db):
+    """Jobs created before init() sets _db_path (#302) must survive, not vanish.
+
+    create()/create_if_not_running() can race init() at startup: a job created
+    while _db_path is still None used to be silently dropped by _persist()'s
+    `if not self._db_path: return` guard, with no log and no error. init()
+    completing later must flush that buffered job to SQLite instead of losing it.
+    """
+    store = JobStore()
+    # _db_path is still None here — simulates create() winning the startup race.
+    job = await store.create(kind="ingest")
+
+    # The job is in memory but not yet in SQLite.
+    conn = get_connection(temp_db)
+    assert load_all_jobs(conn) == []
+    conn.close()
+
+    await store.init(temp_db)
+
+    # init() flushed the buffered job to SQLite.
+    conn = get_connection(temp_db)
+    rows = load_all_jobs(conn)
+    conn.close()
+    assert [r["id"] for r in rows] == [job.id]
+    assert not store._pending_writes

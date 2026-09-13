@@ -1,11 +1,14 @@
 """Background job tracking for bulk operations."""
 
 import asyncio
+import logging
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 JobStatus = Literal["pending", "running", "done", "failed"]
 
@@ -43,6 +46,9 @@ class JobStore:
         self._jobs: dict[str, Job] = {}
         self._db_path: str | None = None
         self._lock = threading.Lock()
+        # Jobs whose _persist() ran before init() set _db_path (#302) — flushed
+        # to SQLite once init() completes, so they aren't lost on restart.
+        self._pending_writes: list[Job] = []
 
     async def init(self, db_path: str) -> None:
         """Load existing jobs from SQLite into memory on startup.
@@ -57,10 +63,20 @@ class JobStore:
         (#277).
         """
         self._db_path = db_path
+        with self._lock:
+            pending = self._pending_writes
+            self._pending_writes = []
+        if pending:
+            await asyncio.to_thread(self._flush_pending, pending)
         jobs = await asyncio.to_thread(self._load_and_reconcile_jobs, db_path)
         with self._lock:
             for job in jobs:
                 self._jobs[job.id] = job
+
+    def _flush_pending(self, jobs: list[Job]) -> None:
+        """Synchronous helper for init(): write jobs buffered before init() completed."""
+        for job in jobs:
+            self._persist(job)
 
     def _load_and_reconcile_jobs(self, db_path: str) -> list[Job]:
         """Synchronous helper for init(): read jobs and reconcile stale in-flight rows."""
@@ -102,8 +118,16 @@ class JobStore:
         return jobs
 
     def _persist(self, job: Job) -> None:
-        """Write current job state to SQLite (synchronous; call via asyncio.to_thread)."""
+        """Write current job state to SQLite (synchronous; call via asyncio.to_thread).
+
+        If init() hasn't set _db_path yet (job created before startup finished
+        loading the DB, see #302), buffer the job instead of silently dropping
+        it — init() flushes the buffer once _db_path is set.
+        """
         if not self._db_path:
+            logger.warning("JobStore._persist called before init() completed; buffering job %s", job.id)
+            with self._lock:
+                self._pending_writes.append(job)
             return
         from academic_paper.db import db_connection, upsert_job
 
