@@ -329,6 +329,84 @@ async def test_summarize_falls_back_to_db_on_embed_http_failure():
 
 
 @pytest.mark.anyio
+async def test_summarize_embed_401_propagates_instead_of_falling_back():
+    """A 401 from embedding-svc (e.g. a stale/rotated API key) is a standing
+
+    misconfiguration, not a transient outage — it must propagate instead of
+    silently falling back to DB chunk order forever (#305).
+    """
+    import httpx
+
+    mock_llm = AsyncMock()
+    mock_qdrant = MagicMock()
+    mock_embedder = AsyncMock()
+    request = httpx.Request("POST", "http://embedding-svc/embed")
+    response = httpx.Response(401, request=request)
+    mock_embedder.embed_single.side_effect = httpx.HTTPStatusError(
+        "401 Unauthorized", request=request, response=response
+    )
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
+    with pytest.raises(httpx.HTTPStatusError):
+        await summarizer.summarize(paper_id=1, file_hash="abc", title="Test")
+
+
+@pytest.mark.anyio
+async def test_summarize_qdrant_404_propagates_instead_of_falling_back():
+    """A 404 from Qdrant (e.g. the collection was never created) is a standing
+
+    misconfiguration, not a transient outage — it must propagate instead of
+    silently falling back to DB chunk order forever (#305).
+    """
+    from qdrant_client.http.exceptions import UnexpectedResponse
+
+    mock_llm = AsyncMock()
+    mock_qdrant = MagicMock()
+    mock_qdrant.asearch = AsyncMock(
+        side_effect=UnexpectedResponse(status_code=404, reason_phrase="Not Found", content=b"{}", headers={})
+    )
+    mock_embedder = AsyncMock()
+    mock_embedder.embed_single.return_value = [0.1] * 768
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
+    with pytest.raises(UnexpectedResponse):
+        await summarizer.summarize(paper_id=1, file_hash="abc", title="Test")
+
+
+@pytest.mark.anyio
+async def test_summarize_qdrant_500_still_falls_back_to_db():
+    """A 500 from Qdrant is a transient server-side error, not a config mistake —
+
+    the DB chunk order fallback still applies (#305).
+    """
+    from unittest.mock import patch
+
+    from qdrant_client.http.exceptions import UnexpectedResponse
+
+    mock_llm = AsyncMock()
+    mock_llm.generate.return_value = json.dumps(
+        {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
+    )
+    mock_qdrant = MagicMock()
+    mock_qdrant.asearch = AsyncMock(
+        side_effect=UnexpectedResponse(
+            status_code=500, reason_phrase="Internal Server Error", content=b"{}", headers={}
+        )
+    )
+    mock_embedder = AsyncMock()
+    mock_embedder.embed_single.return_value = [0.1] * 768
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
+    with patch.object(
+        summarizer, "_chunks_from_db", return_value=[{"payload": {"page_start": 1, "text": "db text"}}]
+    ) as mock_db:
+        result = await summarizer.summarize(paper_id=1, file_hash="abc", title="Test")
+
+    assert "objective" in result
+    mock_db.assert_called_once_with(1, 5)
+
+
+@pytest.mark.anyio
 async def test_summarize_embed_runtime_error_propagates():
     """Non-httpx exceptions from embed_single (e.g. RuntimeError) must propagate (#187).
 
