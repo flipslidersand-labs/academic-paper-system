@@ -28,16 +28,20 @@ class QdrantStore:
         self.client = QdrantClient(url=self.url, api_key=self.api_key, timeout=settings.qdrant_timeout)
 
     def ensure_collection(self) -> None:
-        """コレクションが存在しなければ作成（冪等）
+        """コレクションが存在しなければ作成（冪等、失敗時3回リトライ #266）
         size=768, distance=Cosine
         """
-        collections = self.client.get_collections().collections
-        names = [c.name for c in collections]
-        if self.collection not in names:
-            self.client.create_collection(
-                collection_name=self.collection,
-                vectors_config=VectorParams(size=768, distance=Distance.COSINE),
-            )
+
+        def _do():
+            collections = self.client.get_collections().collections
+            names = [c.name for c in collections]
+            if self.collection not in names:
+                self.client.create_collection(
+                    collection_name=self.collection,
+                    vectors_config=VectorParams(size=768, distance=Distance.COSINE),
+                )
+
+        with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
 
     def upsert(self, points: list[dict]) -> None:
         """チャンクをQdrantにupsertする（失敗時3回リトライ、200件ずつバッチ分割 #236）
