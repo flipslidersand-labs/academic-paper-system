@@ -410,6 +410,33 @@ async def test_summarize_falls_back_to_db_on_qdrant_timeout(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_summarize_no_embedder_falls_back_to_db_on_qdrant_error():
+    """Without an embedder, Qdrant failures must also fall back to DB chunk order (#267).
+
+    Previously only the embedder-present path wrapped asearch in
+    QDRANT_UNAVAILABLE_ERRORS/_chunks_from_db; the no-embedder (test
+    convenience) path let the exception propagate unhandled.
+    """
+    from unittest.mock import patch
+
+    mock_llm = AsyncMock()
+    mock_llm.generate.return_value = json.dumps(
+        {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
+    )
+    mock_qdrant = MagicMock()
+    mock_qdrant.asearch = AsyncMock(side_effect=ConnectionError("qdrant down"))
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant)
+    with patch.object(
+        summarizer, "_chunks_from_db", return_value=[{"payload": {"page_start": 1, "text": "db text"}}]
+    ) as mock_db:
+        result = await summarizer.summarize(paper_id=1, file_hash="abc", title="Test")
+
+    assert "objective" in result
+    mock_db.assert_called_once_with(1, 5)
+
+
+@pytest.mark.anyio
 async def test_summarize_llm_timeout_propagates(monkeypatch):
     """A hung LLM backend must not block forever; TimeoutError propagates so the
 
