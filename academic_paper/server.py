@@ -557,27 +557,33 @@ async def get_summary_endpoint(paper_id: int):
     crawler or monitoring access must never trigger LLM generation or DB
     writes. Generation lives in POST /papers/{paper_id}/summary.
     """
-    with db_connection(settings.academic_db) as conn:
-        paper = get_paper(conn, paper_id)
-        if paper is None:
-            raise HTTPException(status_code=404, detail="Paper not found")
+    try:
+        with db_connection(settings.academic_db) as conn:
+            paper = get_paper(conn, paper_id)
+            if paper is None:
+                raise HTTPException(status_code=404, detail="Paper not found")
 
-        cached_summary = get_summary(conn, paper_id)
-        if cached_summary is None:
-            raise HTTPException(
-                status_code=404,
-                detail="Summary not generated yet — POST /papers/{paper_id}/summary to generate",
-            )
-        return {
-            "paper_id": paper_id,
-            "model": cached_summary["model"],
-            "objective": cached_summary["objective"],
-            "method": cached_summary["method"],
-            "results": cached_summary["results"],
-            "limitations": cached_summary["limitations"],
-            "keywords": cached_summary["keywords"],
-            "cached": True,
-        }
+            cached_summary = get_summary(conn, paper_id)
+            if cached_summary is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Summary not generated yet — POST /papers/{paper_id}/summary to generate",
+                )
+            return {
+                "paper_id": paper_id,
+                "model": cached_summary["model"],
+                "objective": cached_summary["objective"],
+                "method": cached_summary["method"],
+                "results": cached_summary["results"],
+                "limitations": cached_summary["limitations"],
+                "keywords": cached_summary["keywords"],
+                "cached": True,
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to get summary for paper_id=%s", paper_id)
+        raise _http_exc_for(e, "Failed to get summary")
 
 
 @app.post("/papers/{paper_id}/summary", dependencies=[Depends(verify_api_key)])
@@ -585,25 +591,31 @@ async def generate_summary_endpoint(paper_id: int, force: bool = Query(False)):
     """Generate the summary (cached result is returned unless force=true)."""
     # Read paper and cache in a short-lived connection — close before LLM await
     # to avoid holding a WAL write-lock for the full LLM timeout (#191).
-    with db_connection(settings.academic_db) as conn:
-        paper = get_paper(conn, paper_id)
+    try:
+        with db_connection(settings.academic_db) as conn:
+            paper = get_paper(conn, paper_id)
 
-        if paper is None:
-            raise HTTPException(status_code=404, detail="Paper not found")
+            if paper is None:
+                raise HTTPException(status_code=404, detail="Paper not found")
 
-        if not force:
-            cached_summary = get_summary(conn, paper_id)
-            if cached_summary is not None:
-                return {
-                    "paper_id": paper_id,
-                    "model": cached_summary["model"],
-                    "objective": cached_summary["objective"],
-                    "method": cached_summary["method"],
-                    "results": cached_summary["results"],
-                    "limitations": cached_summary["limitations"],
-                    "keywords": cached_summary["keywords"],
-                    "cached": True,
-                }
+            if not force:
+                cached_summary = get_summary(conn, paper_id)
+                if cached_summary is not None:
+                    return {
+                        "paper_id": paper_id,
+                        "model": cached_summary["model"],
+                        "objective": cached_summary["objective"],
+                        "method": cached_summary["method"],
+                        "results": cached_summary["results"],
+                        "limitations": cached_summary["limitations"],
+                        "keywords": cached_summary["keywords"],
+                        "cached": True,
+                    }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to check cached summary for paper_id=%s", paper_id)
+        raise _http_exc_for(e, "Failed to check cached summary")
 
     # Connection closed — safe to await LLM for up to 300 s without blocking writers.
     if app.state.llm is None:
@@ -1030,15 +1042,21 @@ async def health():
 @app.get("/stats", dependencies=[Depends(verify_api_key)])
 def stats():
     """DB統計情報"""
-    with db_connection(settings.academic_db) as conn:
-        papers = conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
-        chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
-        try:
-            info = app.state.vector_store.client.get_collection(settings.qdrant_collection)
-            qdrant_points = info.points_count
-        except Exception:
-            qdrant_points = -1
-    return {"papers": papers, "chunks": chunks, "qdrant_points": qdrant_points}
+    try:
+        with db_connection(settings.academic_db) as conn:
+            papers = conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
+            chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+            try:
+                info = app.state.vector_store.client.get_collection(settings.qdrant_collection)
+                qdrant_points = info.points_count
+            except Exception:
+                qdrant_points = -1
+        return {"papers": papers, "chunks": chunks, "qdrant_points": qdrant_points}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to get stats")
+        raise _http_exc_for(e, "Failed to get stats")
 
 
 # Serve frontend at /ui — must be mounted after all API routes
