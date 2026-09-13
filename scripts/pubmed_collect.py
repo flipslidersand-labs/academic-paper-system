@@ -18,8 +18,8 @@ import argparse
 import json
 import sys
 import time
-import xml.etree.ElementTree as ET
 
+import defusedxml.ElementTree as ET  # noqa: N817 (matches stdlib ET convention)
 import httpx
 from _collect_common import download_pdf, ingest_pdf, run_collect
 from cli_utils import check_date_order, iso_date, positive_int

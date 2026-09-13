@@ -30,9 +30,9 @@ import json
 import re
 import sys
 import threading
-import xml.etree.ElementTree as ET
 from urllib.parse import quote
 
+import defusedxml.ElementTree as ET  # noqa: N817 (matches stdlib ET convention)
 import httpx
 from _collect_common import download_pdf, ingest_pdf, run_collect
 from cli_utils import check_date_order, iso_date, positive_int

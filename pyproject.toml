@@ -35,6 +35,7 @@ dependencies = [
     "opentelemetry-instrumentation-httpx>=0.45b0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.24",
     "prometheus-fastapi-instrumentator>=0.22",
+    "defusedxml>=0.7",
 ]
 
 [project.optional-dependencies]
