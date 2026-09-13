@@ -1,7 +1,7 @@
 import asyncio
 from unittest.mock import MagicMock, patch
 
-from academic_paper.vector_store import QdrantStore, make_qdrant_id
+from academic_paper.vector_store import _QDRANT_RETRYABLE, QdrantStore, make_qdrant_id
 
 
 def test_make_qdrant_id_is_deterministic():
@@ -44,6 +44,24 @@ def test_ensure_collection_skips_when_exists():
         store.ensure_collection()
 
         mock_client.create_collection.assert_not_called()
+
+
+def test_ensure_collection_passes_retry_params():
+    """ensure_collection が with_retry に attempts=3 と retryable exceptions を渡すことを確認 (#266)"""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+
+        with patch("academic_paper.vector_store.with_retry") as mock_retry:
+            mock_retry.return_value = None
+
+            store = QdrantStore(url="http://test", collection="test-collection")
+            store.ensure_collection()
+
+        mock_retry.assert_called_once()
+        _, kw = mock_retry.call_args
+        assert kw["attempts"] == 3
+        assert kw["exceptions"] == _QDRANT_RETRYABLE
 
 
 def test_search_with_paper_id_filter():
