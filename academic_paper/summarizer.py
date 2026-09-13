@@ -119,15 +119,21 @@ class RAGSummarizer:
                     logger.warning("Qdrant unavailable for paper_id=%s — falling back to DB chunk order", paper_id)
                     chunks = await asyncio.to_thread(self._chunks_from_db, paper_id, top_k)
         else:
-            # No embedder configured (test convenience): degraded zero-vector search
-            chunks = await asyncio.wait_for(
-                self.qdrant.asearch(
-                    query_vector=[0.0] * 768,
-                    limit=top_k,
-                    paper_id_filter=paper_id,
-                ),
-                timeout=settings.qdrant_timeout,
-            )
+            # No embedder configured (test convenience): degraded zero-vector search.
+            # Same QDRANT_UNAVAILABLE_ERRORS fallback as the embedder-present path
+            # above, so this branch degrades gracefully instead of propagating (#267).
+            try:
+                chunks = await asyncio.wait_for(
+                    self.qdrant.asearch(
+                        query_vector=[0.0] * 768,
+                        limit=top_k,
+                        paper_id_filter=paper_id,
+                    ),
+                    timeout=settings.qdrant_timeout,
+                )
+            except QDRANT_UNAVAILABLE_ERRORS:
+                logger.warning("Qdrant unavailable for paper_id=%s — falling back to DB chunk order", paper_id)
+                chunks = await asyncio.to_thread(self._chunks_from_db, paper_id, top_k)
 
         if not chunks:
             raise ValueError(f"No chunks found for paper {paper_id}")
