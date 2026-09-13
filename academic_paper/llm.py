@@ -26,6 +26,12 @@ class BaseLLMClient(ABC):
             Generated text response
         """
 
+    def close(self) -> None:
+        """Release any underlying HTTP resources. Default: no-op (#262)."""
+
+    async def aclose(self) -> None:
+        """Async variant of close(). Default: no-op (#262)."""
+
 
 class GeminiClient(BaseLLMClient):
     """Client for Google Gemini API."""
@@ -71,6 +77,14 @@ class GeminiClient(BaseLLMClient):
             exceptions=_GEMINI_RETRYABLE,
         )
         return response.text
+
+    def close(self) -> None:
+        """Close the underlying genai.Client HTTP session (#262)."""
+        self.client.close()
+
+    async def aclose(self) -> None:
+        """Close the underlying genai.Client's async HTTP session (#262)."""
+        await self.client.aio.aclose()
 
 
 class OllamaClient(BaseLLMClient):
