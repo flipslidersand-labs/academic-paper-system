@@ -29,6 +29,7 @@ import io
 import json
 import re
 import sys
+import threading
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
 
@@ -167,21 +168,40 @@ def find_arxiv_id_in_text(text: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _extract_first_page_text(pdf_content: bytes | str) -> str | None:
+PDF_EXTRACT_TIMEOUT = 20  # seconds; guards against pdfminer hangs on malicious PDFs (#307)
+
+
+def _extract_first_page_text(pdf_content: bytes | str, timeout: float = PDF_EXTRACT_TIMEOUT) -> str | None:
     """Extract page-1 text from PDF bytes or a file path.
 
-    Returns None when pdfplumber is unavailable or extraction fails.
+    Returns None when pdfplumber is unavailable, extraction fails, or takes
+    longer than *timeout* seconds. pdfminer.six (used internally by
+    pdfplumber) is known to hang or balloon memory on malformed/malicious
+    PDFs, so the actual extraction runs in a daemon thread with a deadline —
+    a stuck extraction is abandoned instead of blocking the whole collect
+    job (#307).
     """
     try:
         import pdfplumber
     except ImportError:
         return None
-    try:
-        source = io.BytesIO(pdf_content) if isinstance(pdf_content, bytes) else pdf_content
-        with pdfplumber.open(source) as pdf:
-            return pdf.pages[0].extract_text() or ""
-    except Exception:
+
+    result: dict[str, str] = {}
+
+    def _run() -> None:
+        try:
+            source = io.BytesIO(pdf_content) if isinstance(pdf_content, bytes) else pdf_content
+            with pdfplumber.open(source) as pdf:
+                result["text"] = pdf.pages[0].extract_text() or ""
+        except Exception:
+            pass
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
         return None
+    return result.get("text")
 
 
 def verify_arxiv_id(pdf_content: bytes | str, expected_arxiv_id: str) -> bool | None:
