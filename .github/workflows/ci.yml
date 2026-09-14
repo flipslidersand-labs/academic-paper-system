@@ -21,6 +21,8 @@ jobs:
       ruff-version: "0.16.2"
 
   docker-build:
+    # linux-general (ARC self-hosted) には docker socket が無く `docker build` が
+    # 失敗するため、ubuntu-latest 固定のままにする（forgeの release.yml と同じ制約）。
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
