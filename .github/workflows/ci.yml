@@ -25,7 +25,7 @@ jobs:
     # 失敗するため、ubuntu-latest 固定のままにする（forgeの release.yml と同じ制約）。
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build Docker image
         run: docker build -t academic-paper-system:test .
       - name: Smoke test image (#263)
