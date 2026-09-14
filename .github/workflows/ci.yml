@@ -21,7 +21,7 @@ jobs:
       ruff-version: "0.16.2"
 
   docker-build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.GATE_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - name: Build Docker image
