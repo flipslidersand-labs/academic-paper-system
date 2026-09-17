@@ -13,6 +13,14 @@ class _RetryableStatusError(httpx.HTTPStatusError):
     """
 
 
+class EmbeddingCountMismatchError(ValueError):
+    """Raised when embedding-svc returns a vector count that does not match the input.
+
+    A subclass of ValueError (not a plain one) so callers can distinguish an
+    upstream/protocol failure from ordinary client-input validation errors (#336).
+    """
+
+
 _EMBED_RETRYABLE = (httpx.NetworkError, httpx.TimeoutException, _RetryableStatusError)
 _BATCH_MAX = 256  # embedding-svc /embed/batch hard limit
 
@@ -89,7 +97,12 @@ class EmbedderClient:
             if response.status_code >= 500 or response.status_code == 429:
                 raise _RetryableStatusError(str(exc), request=exc.request, response=exc.response) from exc
             raise
-        return response.json()["vectors"]
+        vectors = response.json()["vectors"]
+        if len(vectors) != len(texts):
+            raise EmbeddingCountMismatchError(
+                f"embedding-svc returned {len(vectors)} vectors for {len(texts)} input texts"
+            )
+        return vectors
 
     async def embed_single(self, text: str, mode: str = "search", collection: str = "facts") -> list[float]:
         """Embed single text using embedding service."""

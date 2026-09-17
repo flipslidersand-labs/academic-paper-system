@@ -6,7 +6,7 @@ import httpx
 import pytest
 import respx
 
-from academic_paper.embedder import _BATCH_MAX, EmbedderClient
+from academic_paper.embedder import _BATCH_MAX, EmbedderClient, EmbeddingCountMismatchError
 
 
 @pytest.mark.anyio
@@ -250,6 +250,46 @@ async def test_embed_does_not_retry_on_4xx():
             await persistent.aclose()
 
     assert call_count[0] == 1
+
+
+@pytest.mark.anyio
+async def test_embed_raises_on_vector_count_mismatch():
+    """embed() raises EmbeddingCountMismatchError when vectors != texts (#336)."""
+    client = EmbedderClient(base_url="http://localhost:9092", api_key="test-key")
+
+    with respx.mock:
+        respx.post("http://localhost:9092/embed/batch").mock(
+            return_value=httpx.Response(200, json={"vectors": [[0.1, 0.2, 0.3]]})
+        )
+
+        with pytest.raises(EmbeddingCountMismatchError):
+            await client.embed(["hello", "world"])
+
+
+@pytest.mark.anyio
+async def test_embed_single_raises_on_empty_response():
+    """embed_single() raises EmbeddingCountMismatchError instead of IndexError on a 0-vector response (#336)."""
+    client = EmbedderClient(base_url="http://localhost:9092", api_key="test-key")
+
+    with respx.mock:
+        respx.post("http://localhost:9092/embed/batch").mock(return_value=httpx.Response(200, json={"vectors": []}))
+
+        with pytest.raises(EmbeddingCountMismatchError):
+            await client.embed_single("hello")
+
+
+@pytest.mark.anyio
+async def test_embed_raises_on_partial_batch_mismatch():
+    """A per-request count mismatch is detected even within a single chunk of a larger batch (#336)."""
+    client = EmbedderClient(base_url="http://localhost:9092", api_key="test-key")
+
+    with respx.mock:
+        respx.post("http://localhost:9092/embed/batch").mock(
+            return_value=httpx.Response(200, json={"vectors": [[0.1], [0.2], [0.3]]})
+        )
+
+        with pytest.raises(EmbeddingCountMismatchError):
+            await client.embed(["a", "b", "c", "d"])
 
 
 def test_embedding_timeout_default():
