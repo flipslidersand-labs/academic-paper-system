@@ -103,7 +103,7 @@ def fetch_papers(
     for entry in root.findall("atom:entry", ns):
         id_elem = entry.find("atom:id", ns)
         title_elem = entry.find("atom:title", ns)
-        if id_elem is None or title_elem is None:
+        if id_elem is None or title_elem is None or not id_elem.text or not title_elem.text:
             continue
 
         arxiv_id = id_elem.text.strip().split("/abs/")[-1]
