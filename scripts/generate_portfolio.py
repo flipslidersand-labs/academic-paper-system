@@ -8,6 +8,10 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from academic_paper.db import arxiv_id_from_file_name  # noqa: E402
+
 
 def fetch_all(url: str) -> list:
     """Fetch all items from a paginated list endpoint."""
@@ -47,7 +51,7 @@ def source_link(paper: dict) -> str:
     title = html.escape(paper.get("title") or paper.get("file_name", "Untitled"))
     if source == "arxiv":
         fname = paper.get("file_name", "")
-        arxiv_id = fname.replace(".pdf", "").replace("_", "/") if fname else ""
+        arxiv_id = arxiv_id_from_file_name(fname) if fname else None
         if arxiv_id:
             return f'<a href="https://arxiv.org/abs/{arxiv_id}" target="_blank" rel="noopener" class="hover:underline text-blue-700">{title}</a>'
     return f"<span>{title}</span>"
