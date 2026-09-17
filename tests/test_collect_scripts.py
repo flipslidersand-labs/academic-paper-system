@@ -59,6 +59,44 @@ def test_arxiv_fetch_papers_parses_atom():
     assert p["pdf_url"].endswith("2410.10071v1.pdf")
 
 
+ARXIV_ATOM_EMPTY_ELEMENTS = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id></id>
+    <title>Has empty id</title>
+    <author><name>Someone</name></author>
+    <category term="cs.AI"/>
+    <published>2024-10-14T00:00:00Z</published>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2410.10071v1</id>
+    <title></title>
+    <author><name>Someone Else</name></author>
+    <category term="cs.AI"/>
+    <published>2024-10-14T00:00:00Z</published>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2301.00001v2</id>
+    <title>Valid Paper</title>
+    <author><name>Third Person</name></author>
+    <category term="cs.AI"/>
+    <published>2023-01-01T00:00:00Z</published>
+  </entry>
+</feed>
+"""
+
+
+@respx.mock
+def test_arxiv_fetch_papers_skips_empty_id_or_title_elements():
+    """Entries with empty (but present) <id>/<title> text must not raise (#337)."""
+    respx.get(url__startswith="https://export.arxiv.org/api/query").mock(
+        return_value=httpx.Response(200, text=ARXIV_ATOM_EMPTY_ELEMENTS)
+    )
+    papers = arxiv_fetch_papers(["cs.AI"], max_results=10)
+
+    assert [p["arxiv_id"] for p in papers] == ["2301.00001v2"]
+
+
 @respx.mock
 def test_arxiv_fetch_papers_date_post_filter():
     respx.get(url__startswith="https://export.arxiv.org/api/query").mock(
