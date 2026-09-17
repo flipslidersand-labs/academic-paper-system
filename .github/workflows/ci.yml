@@ -19,6 +19,11 @@ jobs:
       coverage-threshold: 71
       # Pin ruff so an upstream ruff release can't break lint mid-PR.
       ruff-version: "0.16.2"
+      # requirements.lock (Dockerイメージが実際に使うピン留め版) を先に
+      # インストールしてから -e ".[dev]" することで、pyproject.toml の
+      # 緩い範囲指定でランタイム依存が最新にドリフトするのを防ぐ (#338)。
+      # dev extras (pytest等) はlock対象外のため範囲指定のまま解決される。
+      install-command: pip install -r requirements.lock -e ".[dev]" --quiet
 
   docker-build:
     # linux-general (ARC self-hosted) には docker socket が無く `docker build` が
