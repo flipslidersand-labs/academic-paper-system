@@ -48,6 +48,8 @@ def chunk_pages(
         - "chunk_index": 0-based chunk index
         - "token_count": word count in chunk
     """
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
     if overlap < 0:
         raise ValueError("overlap must be non-negative")
     if overlap >= chunk_size:
@@ -135,22 +137,11 @@ def chunk_pages(
     # Flush remaining buffer
     flush()
 
-    # If no chunks were created but we have data, create a single chunk
-    if not chunks and paragraphs_with_pages:
-        all_words = []
-        page_nums = []
-        for words, page_num in paragraphs_with_pages:
-            all_words.extend(words)
-            page_nums.extend([page_num] * len(words))
-        text = " ".join(all_words)
-        chunks.append(
-            {
-                "text": text,
-                "page_start": min(page_nums),
-                "page_end": max(page_nums),
-                "chunk_index": 0,
-                "token_count": len(all_words),
-            }
-        )
+    # Unreachable: with chunk_size > 0 validated above, every paragraph's words
+    # are guaranteed to land in `chunks` either via the sliding window branch or
+    # via the final flush(), so paragraphs_with_pages non-empty implies chunks
+    # non-empty. Kept as an explicit safety net (see #344) instead of silently
+    # returning an incomplete result if that invariant is ever broken.
+    assert chunks, "unreachable: paragraphs present but no chunks created"
 
     return chunks

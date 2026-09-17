@@ -106,6 +106,22 @@ def test_chunk_pages_sliding_window_covers_every_word() -> None:
     assert seen == set(words)
 
 
+def test_chunk_pages_chunk_size_validation() -> None:
+    """Test that a non-positive chunk_size raises ValueError.
+
+    Without this guard, chunk_size <= 0 combined with a negative overlap could
+    reach the (now-removed) dead fallback branch at the end of chunk_pages:
+    every sliding-window slice becomes empty, so no chunks are ever appended.
+    """
+    pages = [{"page": 1, "text": "Test text"}]
+
+    with pytest.raises(ValueError, match="chunk_size must be positive"):
+        chunk_pages(pages, chunk_size=0, overlap=-1)
+
+    with pytest.raises(ValueError, match="chunk_size must be positive"):
+        chunk_pages(pages, chunk_size=-10, overlap=-20)
+
+
 def test_chunk_pages_multipage_boundary() -> None:
     """Test chunking across page boundaries with small chunk size."""
     # Create pages with many small paragraphs to force splitting
