@@ -125,6 +125,45 @@ def test_search_vector_mode(client):
         assert data["mode"] == "vector"
 
 
+def test_search_vector_mode_skips_orphan_payload_instead_of_500(client):
+    """Points with incomplete payloads (partial ingest) must be skipped, not raise KeyError -> 500."""
+    mock_search_results = [
+        {"id": "orphan-no-payload", "score": 0.99, "payload": None},
+        {"id": "orphan-no-paper-id", "score": 0.97, "payload": {"text": "dangling"}},
+        {"id": "ok-missing-optional", "score": 0.95, "payload": {"paper_id": 1}},
+        {
+            "id": "ok-full",
+            "score": 0.90,
+            "payload": {"paper_id": 1, "chunk_index": 3, "text": "complete point"},
+        },
+    ]
+    client.app.state.vector_store.asearch = AsyncMock(return_value=mock_search_results)
+
+    with patch("academic_paper.server.db_connection") as mock_get_conn:
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value = mock_cursor
+        mock_get_conn.return_value = mock_conn
+        mock_cursor.execute.return_value.fetchall.return_value = []
+
+        response = client.get("/search?q=test&mode=vector")
+
+        assert response.status_code == 200
+        results = response.json()["results"]
+        assert [r["rank"] for r in results] == [1, 2]
+        assert results[0] == {
+            "rank": 1,
+            "score": 0.95,
+            "paper_id": 1,
+            "chunk_index": 0,
+            "page_start": None,
+            "snippet": "",
+        }
+        assert results[1]["chunk_index"] == 3
+        assert results[1]["snippet"] == "complete point"
+
+
 def test_search_with_paper_id_filter(client):
     """Test GET /search with paper_id filter."""
     # Mock search results from Qdrant

@@ -910,17 +910,24 @@ async def search(
                 else:
                     _vec_page_map = {}
                 results = []
-                for rank, result in enumerate(search_results, start=1):
+                for result in search_results:
                     qdrant_id = result["id"]
-                    payload = result["payload"]
-                    full_text = payload["text"]
+                    payload = result.get("payload") or {}
+                    # Orphan points (partial ingest) lack paper_id; skip them like rrf_merge does
+                    # instead of surfacing a KeyError as a 500.
+                    if payload.get("paper_id") is None:
+                        logger.warning(
+                            "search mode=vector: skipping orphan point %s (payload missing paper_id)", qdrant_id
+                        )
+                        continue
+                    full_text = payload.get("text", "")
                     snippet = full_text[:snippet_length] if snippet_length > 0 else full_text
                     results.append(
                         {
-                            "rank": rank,
+                            "rank": len(results) + 1,
                             "score": result["score"],
                             "paper_id": payload["paper_id"],
-                            "chunk_index": payload["chunk_index"],
+                            "chunk_index": payload.get("chunk_index", 0),
                             "page_start": _vec_page_map.get(qdrant_id),
                             "snippet": snippet,
                         }
