@@ -63,6 +63,8 @@ packages = ["academic_paper"]
 # Local coverage: pytest --cov=academic_paper --cov-report=html
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# pytest-asyncio は未宣言(anyio 使用)。常駐 self-hosted runner の共有 tool-cache に残留した旧版が pytest 9 と衝突し収集が落ちるため明示無効化 (#408)
+addopts = "-p no:asyncio"
 
 [tool.ruff]
 line-length = 120
