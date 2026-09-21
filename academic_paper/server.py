@@ -637,13 +637,7 @@ async def generate_summary_endpoint(paper_id: int, force: bool = Query(False)):
                 paper_id, paper["file_hash"], title=paper.get("title"), file_name=paper.get("file_name")
             )
 
-        llm_class_name = app.state.llm.__class__.__name__
-        if llm_class_name == "GeminiClient":
-            model = "gemini-2.0-flash"
-        elif llm_class_name == "OllamaClient":
-            model = f"ollama/{app.state.llm.model}"
-        else:
-            model = llm_class_name
+        model = app.state.llm.display_name
 
         # Open a fresh short-lived connection just for the write.
         with db_connection(settings.academic_db) as conn:
@@ -771,13 +765,7 @@ async def _run_summarize_all(job_id: str) -> None:
 
         job.total = len(rows)
 
-        llm_class_name = app.state.llm.__class__.__name__
-        if llm_class_name == "GeminiClient":
-            model = "gemini-2.0-flash"
-        elif llm_class_name == "OllamaClient":
-            model = f"ollama/{app.state.llm.model}"
-        else:
-            model = llm_class_name
+        model = app.state.llm.display_name
 
         for row in rows:
             paper_id = row[0]
