@@ -18,6 +18,7 @@ def _auth_headers() -> dict:
     api_key = os.environ.get("PAPER_API_KEY", "")
     return {"X-API-Key": api_key} if api_key else {}
 
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from academic_paper.db import arxiv_id_from_file_name  # noqa: E402
