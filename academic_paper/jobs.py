@@ -102,6 +102,7 @@ class JobStore:
                         row["started_at"],
                         row["finished_at"],
                         kind=row.get("kind", ""),
+                        result=row.get("result"),
                     )
                 jobs.append(
                     Job(
@@ -114,6 +115,7 @@ class JobStore:
                         errors=errors,
                         started_at=row["started_at"],
                         finished_at=row["finished_at"],
+                        result=row.get("result"),
                     )
                 )
         return jobs
@@ -144,6 +146,7 @@ class JobStore:
                 job.started_at,
                 job.finished_at,
                 kind=job.kind,
+                result=job.result,
             )
 
     async def create(self, kind: str = "") -> Job:

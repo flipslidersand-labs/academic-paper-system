@@ -443,6 +443,43 @@ async def test_running_job_converted_to_failed_on_init(temp_db):
 
 
 @pytest.mark.anyio
+async def test_job_result_survives_restart(temp_db):
+    """Job.result (#416) must round-trip through persist() and a fresh init(), not go null.
+
+    Regression: upsert_job()/load_all_jobs() didn't carry the `result` column at all, so a
+    done job's paper_id/chunks were silently lost the moment the process restarted.
+    """
+    store = JobStore()
+    await store.init(temp_db)
+    job = await store.create(kind="ingest")
+    job.status = "done"
+    job.result = {"paper_id": 42, "file_name": "a.pdf", "chunks": 7, "status": "indexed"}
+    await store.persist(job)
+
+    restarted = JobStore()
+    await restarted.init(temp_db)
+
+    reloaded = restarted.get(job.id)
+    assert reloaded is not None
+    assert reloaded.result == job.result
+    assert reloaded.to_dict()["result"] == job.result
+
+
+@pytest.mark.anyio
+async def test_job_with_no_result_reloads_as_none(temp_db):
+    store = JobStore()
+    await store.init(temp_db)
+    job = await store.create(kind="ingest")
+    assert job.result is None
+    await store.persist(job)
+
+    restarted = JobStore()
+    await restarted.init(temp_db)
+
+    assert restarted.get(job.id).result is None
+
+
+@pytest.mark.anyio
 async def test_create_before_init_is_flushed_not_dropped(temp_db):
     """Jobs created before init() sets _db_path (#302) must survive, not vanish.
 
