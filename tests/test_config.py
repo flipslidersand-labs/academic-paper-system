@@ -58,6 +58,23 @@ def test_placeholder_google_api_key_rejected():
         )
 
 
+def test_legitimate_secret_containing_angle_bracket_accepted():
+    # Regression test for #331: a randomly generated API key that happens to contain
+    # "<" as one character among many must not be rejected as a placeholder.
+    s = Settings(
+        embedding_svc_url="http://localhost:9092",
+        qdrant_url="http://localhost:6333",
+        api_key="a1b2<c3d4e5f6",
+        embedding_api_key="foo<bar-baz",
+        qdrant_api_key="x<y",
+        google_api_key="key123<456",
+    )
+    assert s.api_key == "a1b2<c3d4e5f6"
+    assert s.embedding_api_key == "foo<bar-baz"
+    assert s.qdrant_api_key == "x<y"
+    assert s.google_api_key == "key123<456"
+
+
 def test_empty_api_keys_accepted():
     s = Settings(embedding_svc_url="http://localhost:9092", qdrant_url="http://localhost:6333")
     assert s.api_key == ""

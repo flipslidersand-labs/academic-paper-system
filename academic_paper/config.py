@@ -1,5 +1,12 @@
+import re
+
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Matches a whole-value placeholder like "<your-api-key>" or "<placeholder>" (#331):
+# anchored to the full string so a legitimate secret that merely happens to contain
+# a "<" somewhere in the middle (e.g. a random base64/hex string) is not rejected.
+_PLACEHOLDER_RE = re.compile(r"^<.+>$")
 
 
 class Settings(BaseSettings):
@@ -77,12 +84,25 @@ class Settings(BaseSettings):
         ),
     )
 
-    @field_validator(
-        "embedding_svc_url", "qdrant_url", "api_key", "embedding_api_key", "qdrant_api_key", "google_api_key"
-    )
+    @field_validator("embedding_svc_url", "qdrant_url")
     @classmethod
-    def reject_placeholder(cls, v: str) -> str:
+    def reject_placeholder_url(cls, v: str) -> str:
         if "<" in v:
+            raise ValueError(
+                f"Invalid value {v!r}: contains placeholder. "
+                "Set the corresponding environment variable before starting."
+            )
+        return v
+
+    @field_validator("api_key", "embedding_api_key", "qdrant_api_key", "google_api_key")
+    @classmethod
+    def reject_placeholder_secret(cls, v: str) -> str:
+        # Secrets have no fixed placeholder default (unlike the URL fields above, they
+        # default to "") and can be arbitrary random strings, so only reject values that
+        # are themselves a whole "<...>" placeholder (e.g. "<your-api-key>") rather than
+        # any value that merely contains "<" — a real secret may happen to include that
+        # character (#331).
+        if _PLACEHOLDER_RE.match(v):
             raise ValueError(
                 f"Invalid value {v!r}: contains placeholder. "
                 "Set the corresponding environment variable before starting."
