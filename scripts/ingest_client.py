@@ -4,12 +4,8 @@
 `submit_and_wait` posts the PDF and polls `GET /jobs/{job_id}` until the job
 reaches `done` or `failed`, so collectors count ingested/failed accurately
 without hitting a client-side timeout mid-processing.
-
-A backward-compatible path is kept: if the server returns 200 with the final
-result (e.g. `wait=true`), the result is returned directly without polling.
 """
 
-import io
 import os
 import time
 from typing import BinaryIO
@@ -27,7 +23,7 @@ def submit_and_wait(
     client: httpx.Client,
     api_url: str,
     file_name: str,
-    pdf_data: bytes | BinaryIO,
+    pdf_data: BinaryIO,
     metadata: dict,
     *,
     submit_timeout: int = 30,
@@ -40,9 +36,9 @@ def submit_and_wait(
         client: A reusable httpx.Client.
         api_url: academic-paper-system base URL.
         file_name: Upload filename.
-        pdf_data: Raw PDF bytes or an open binary file handle.  Passing a file
-            handle avoids the extra in-memory copy that ``bytes`` requires when
-            the content was already streamed to a temp file (#194).
+        pdf_data: An open binary file handle (avoids the extra in-memory copy
+            that ``bytes`` would require when content was already streamed to
+            a temp file, #194).
         metadata: Form fields (title/authors/categories/published_date/source).
         submit_timeout: Timeout (s) for the POST and each poll request.
         poll_timeout: Max seconds to wait for the job to finish.
@@ -57,10 +53,9 @@ def submit_and_wait(
         RuntimeError: The ingest job reported status "failed".
         TimeoutError: The job did not finish within poll_timeout.
     """
-    file_obj: BinaryIO = pdf_data if hasattr(pdf_data, "read") else io.BytesIO(pdf_data)
     resp = client.post(
         f"{api_url}/papers/ingest",
-        files={"file": (file_name, file_obj, "application/pdf")},
+        files={"file": (file_name, pdf_data, "application/pdf")},
         data=metadata,
         headers=_auth_headers(),
         timeout=submit_timeout,
@@ -69,10 +64,6 @@ def submit_and_wait(
         return {"status": "duplicate"}
     resp.raise_for_status()
     body = resp.json()
-
-    # Synchronous server response (wait=true / legacy): final result, no job to poll.
-    if "job_id" not in body:
-        return {**body, "status": "ingested"}
 
     job_id = body["job_id"]
     paper_id = body.get("paper_id")
