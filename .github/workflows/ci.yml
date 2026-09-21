@@ -10,7 +10,10 @@ jobs:
   test:
     # Pinned to a SHA (not @main) so upstream workflow changes can't silently
     # alter this repo's gate; bump deliberately (#147).
-    uses: flipslidersand-labs/qa-workflows/.github/workflows/python-test.yml@fcccf3f5895340faa5c6ef2469068b7b32a6c60e
+    # Bumped 2026-09-17 (#341): fcccf3f5 -> 7669aed3 (adds PR coverage-diff
+    # comment to python-test.yml, then removes job-level permissions that
+    # caused org-wide startup_failure). CI green confirmed before merge.
+    uses: flipslidersand-labs/qa-workflows/.github/workflows/python-test.yml@7669aed39abdc5fcd01bbc1456e7fc7954dcd52c
     with:
       # scripts/ は academic_paper と合算計測される (pyproject.toml
       # [tool.coverage.run] source, #240)。合算実測は約76%。実測との差が
@@ -72,4 +75,7 @@ jobs:
   gitleaks:
     permissions:
       contents: read
-    uses: flipslidersand-labs/qa-workflows/.github/workflows/gitleaks.yml@main
+    # Pinned to a SHA (not @main) so upstream workflow changes can't silently
+    # alter this repo's gate; bump deliberately (#341).
+    # Pinned 2026-09-17 (#341): initial gitleaks.yml add commit.
+    uses: flipslidersand-labs/qa-workflows/.github/workflows/gitleaks.yml@d039ea2ade5f0faef5be443e0d07be2b8456c480
