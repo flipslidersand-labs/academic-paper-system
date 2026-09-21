@@ -343,6 +343,69 @@ def test_create_if_not_running_is_atomic_under_concurrency(temp_db):
     assert len(store._jobs) == 1
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("existing_status", ["pending", "running"])
+async def test_create_if_not_running_returns_none_when_same_kind_active(temp_db, existing_status):
+    """The None branch (#376): an active job of the same kind must block a second one."""
+    store = JobStore()
+    store._db_path = temp_db
+    existing = Job(id="existing", status=existing_status, kind="ingest")
+    store._jobs[existing.id] = existing
+
+    result = await store.create_if_not_running(kind="ingest")
+
+    assert result is None
+    assert list(store._jobs) == ["existing"]
+    conn = get_connection(temp_db)
+    persisted = load_all_jobs(conn)
+    conn.close()
+    assert persisted == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("existing_status", ["done", "failed"])
+async def test_create_if_not_running_ignores_finished_jobs_of_same_kind(temp_db, existing_status):
+    store = JobStore()
+    store._db_path = temp_db
+    store._jobs["old"] = Job(id="old", status=existing_status, kind="ingest")
+
+    job = await store.create_if_not_running(kind="ingest")
+
+    assert job is not None
+    assert job.status == "pending"
+    assert set(store._jobs) == {"old", job.id}
+
+
+@pytest.mark.anyio
+async def test_create_if_not_running_is_scoped_by_kind(temp_db):
+    store = JobStore()
+    store._db_path = temp_db
+    store._jobs["s"] = Job(id="s", status="running", kind="summarize")
+
+    job = await store.create_if_not_running(kind="ingest")
+
+    assert job is not None
+    assert job.kind == "ingest"
+
+
+def test_has_running_counts_pending_and_running_and_filters_by_kind(temp_db):
+    store = JobStore()
+    store._db_path = temp_db
+    assert store.has_running() is False
+
+    store._jobs["p"] = Job(id="p", status="pending", kind="ingest")
+    assert store.has_running() is True
+    assert store.has_running(kind="ingest") is True
+    assert store.has_running(kind="summarize") is False
+
+    store._jobs["p"].status = "done"
+    assert store.has_running() is False
+
+    store._jobs["r"] = Job(id="r", status="running", kind="summarize")
+    assert store.has_running(kind="summarize") is True
+    assert store.has_running(kind="ingest") is False
+
+
 # --- persist() ordering under out-of-order thread completion (#298) ---
 
 
