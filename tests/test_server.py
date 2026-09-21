@@ -923,6 +923,25 @@ def test_stats_unexpected_error_returns_500(client):
     assert "Internal error" in response.json()["detail"]
 
 
+def test_http_exc_for_maps_embedding_count_mismatch_to_502():
+    """_http_exc_for maps EmbeddingCountMismatchError to 502, not the generic
+    ValueError 400 branch — it is an upstream protocol failure, not bad client
+    input (#336)."""
+    from academic_paper.embedder import EmbeddingCountMismatchError
+    from academic_paper.server import _http_exc_for
+
+    exc = _http_exc_for(EmbeddingCountMismatchError("3 vectors for 4 texts"), "fallback")
+    assert exc.status_code == 502
+
+
+def test_http_exc_for_still_maps_plain_value_error_to_400():
+    """_http_exc_for keeps ordinary ValueError (input validation) at 400 (#148)."""
+    from academic_paper.server import _http_exc_for
+
+    exc = _http_exc_for(ValueError("no text"), "fallback")
+    assert exc.status_code == 400
+
+
 def test_ingest_unexpected_exception(client):
     """POST /papers/ingest: unexpected error returns 500 with opaque message (#148)."""
     pdf_content = create_minimal_pdf()
