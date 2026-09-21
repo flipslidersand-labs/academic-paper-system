@@ -111,7 +111,8 @@ def test_pubmed_fetch_pmc_ids():
     respx.get(url__startswith=pubmed_collect.ESEARCH_URL).mock(
         return_value=httpx.Response(200, json={"esearchresult": {"idlist": ["111", "222"]}})
     )
-    assert pubmed_collect.fetch_pmc_ids(["ai"], max_results=5) == ["111", "222"]
+    with httpx.Client() as client:
+        assert pubmed_collect.fetch_pmc_ids(["ai"], max_results=5, client=client) == ["111", "222"]
 
 
 def test_pubmed_parse_article():
