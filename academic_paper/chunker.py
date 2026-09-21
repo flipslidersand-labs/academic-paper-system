@@ -7,19 +7,8 @@ to track page boundaries across chunk boundaries.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 DEFAULT_SIZE = 512
 DEFAULT_OVERLAP = 64
-
-
-@dataclass
-class Chunk:
-    text: str
-    page_start: int
-    page_end: int
-    chunk_index: int
-    token_count: int
 
 
 def _split_paragraphs(text: str) -> list[str]:
