@@ -36,6 +36,41 @@ def client(temp_db):
             yield client
 
 
+def test_fetch_chunk_meta_empty_ids_skips_query_without_erroring(temp_db):
+    """SQLite rejects `IN ()`; the helper must short-circuit before building that SQL."""
+    from academic_paper.db import get_connection
+    from academic_paper.server import _fetch_chunk_meta
+
+    conn = get_connection(temp_db)
+    try:
+        assert _fetch_chunk_meta(conn.cursor(), [], "id", "id, page_start") == {}
+    finally:
+        conn.close()
+
+
+def test_fetch_chunk_meta_keys_rows_by_id_column(temp_db):
+    from academic_paper.db import get_connection, save_chunks, save_paper
+    from academic_paper.server import _fetch_chunk_meta
+
+    conn = get_connection(temp_db)
+    try:
+        paper_id = save_paper(conn, "p.pdf", "h1")
+        save_chunks(
+            conn,
+            paper_id,
+            [{"text": "a", "page_start": 1, "page_end": 1, "chunk_index": 0, "qdrant_id": "q-0", "token_count": 1}],
+        )
+        row = conn.execute("SELECT id FROM chunks").fetchone()
+        chunk_id = row["id"]
+
+        meta = _fetch_chunk_meta(conn.cursor(), [chunk_id], "id", "id, page_start")
+
+        assert set(meta) == {chunk_id}
+        assert meta[chunk_id]["page_start"] == 1
+    finally:
+        conn.close()
+
+
 def test_search_returns_results(client):
     """Test GET /search returns results list."""
     # Mock search results from Qdrant
