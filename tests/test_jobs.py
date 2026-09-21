@@ -309,9 +309,10 @@ async def test_create_runs_off_event_loop_thread(temp_db):
 def test_create_if_not_running_is_atomic_under_concurrency(temp_db):
     """Concurrent create_if_not_running(kind) calls must yield exactly one created Job.
 
-    Regression for #235: has_running() + create() as two separate lock acquisitions let
-    two concurrent callers both observe "not running" and both create a job. This drives
-    many threads at create_if_not_running() at once and asserts only one succeeds.
+    Regression for #235: checking "not running" and creating as two separate lock
+    acquisitions let two concurrent callers both observe "not running" and both create
+    a job. This drives many threads at create_if_not_running() at once and asserts only
+    one succeeds.
 
     create_if_not_running() is async (#277: its SQLite persist runs via
     asyncio.to_thread so it doesn't block the event loop), so each worker thread
@@ -386,24 +387,6 @@ async def test_create_if_not_running_is_scoped_by_kind(temp_db):
 
     assert job is not None
     assert job.kind == "ingest"
-
-
-def test_has_running_counts_pending_and_running_and_filters_by_kind(temp_db):
-    store = JobStore()
-    store._db_path = temp_db
-    assert store.has_running() is False
-
-    store._jobs["p"] = Job(id="p", status="pending", kind="ingest")
-    assert store.has_running() is True
-    assert store.has_running(kind="ingest") is True
-    assert store.has_running(kind="summarize") is False
-
-    store._jobs["p"].status = "done"
-    assert store.has_running() is False
-
-    store._jobs["r"] = Job(id="r", status="running", kind="summarize")
-    assert store.has_running(kind="summarize") is True
-    assert store.has_running(kind="ingest") is False
 
 
 # --- persist() ordering under out-of-order thread completion (#298) ---
