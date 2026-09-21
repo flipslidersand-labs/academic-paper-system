@@ -224,6 +224,21 @@ pytest tests/ --cov=academic_paper --cov-report=html
 - `test_llm.py` — LLM クライアント (Gemini / Ollama)
 - `test_summary_endpoint.py` — `/papers/{id}/summary` エンドポイント
 - `test_server.py` — FastAPI エンドポイント統合テスト
+- `test_nugget.py` — nugget 抽出 (クエリ関連文の選別)
+- `test_retry.py` — リトライユーティリティ
+- `test_jobs.py` — `/jobs/summarize-all`・`/jobs`・`/jobs/{job_id}` とジョブ永続化
+- `test_logging_config.py` — 構造化 JSON ロギング設定
+- `test_telemetry.py` — OpenTelemetry テレメトリ設定
+- `test_scorer.py` — 論文スコアリング (鮮度・カテゴリ関連度)
+- `test_metrics.py` — Prometheus `/metrics` エンドポイント
+- `test_startup_probe.py` — 起動時ヘルスチェック (`_probe_startup_health`)
+- `test_metadata_filter.py` — author/category フィルタ・メタデータ ingest・`/summaries`
+- `test_collect_common.py` — `scripts/_collect_common.py` の共通ヘルパー
+- `test_collect_scripts.py` — 各コレクタースクリプトの fetch/parse ロジック
+- `test_arxiv_collect.py` — `scripts/arxiv_collect.py` のウォーターマーク検証
+- `test_ingest_client.py` — `scripts/ingest_client.py` の認証ヘッダー
+- `test_config.py` — 設定値のプレースホルダー URL 拒否
+- `test_hybrid.py` — ハイブリッド検索 RRF マージ
 
 ## 開発
 
@@ -257,7 +272,23 @@ academic-paper-system/
 │   ├── db.py                # SQLite (FTS5 含む)
 │   ├── hybrid.py            # RRF マージ
 │   ├── llm.py               # LLM クライアント (Gemini / Ollama)
-│   └── summarizer.py        # RAG 要約
+│   ├── summarizer.py        # RAG 要約
+│   ├── nugget.py            # nugget 抽出 (クエリ関連文の選別)
+│   ├── jobs.py               # バックグラウンドジョブ管理 (bulk 操作)
+│   ├── retry.py              # 一時的な通信失敗のリトライ
+│   ├── scorer.py             # 論文スコアリング (鮮度・カテゴリ関連度)
+│   ├── logging_config.py     # 構造化 JSON ロギング設定
+│   └── telemetry.py          # OpenTelemetry 計装
+├── scripts/                  # 論文収集・運用スクリプト
+│   ├── _collect_common.py    # 収集スクリプト共通ヘルパー
+│   ├── cli_utils.py          # 収集スクリプト共通 argparse バリデータ
+│   ├── ingest_client.py      # `/papers/ingest` 非同期送信クライアント
+│   ├── arxiv_collect.py      # arXiv 論文収集
+│   ├── openalex_collect.py   # OpenAlex 論文収集
+│   ├── pubmed_collect.py     # PubMed Central 論文収集
+│   ├── semantic_scholar_collect.py # Semantic Scholar 論文収集
+│   ├── fix_file_names.py     # 既存論文の file_name 不整合修正
+│   └── generate_portfolio.py # ポートフォリオ静的ページ生成
 ├── tests/                   # テストスイート
 │   ├── test_*.py
 │   └── __init__.py
@@ -265,7 +296,10 @@ academic-paper-system/
 ├── pyproject.toml           # プロジェクト設定・依存関係
 ├── docker-compose.yml       # コンテナオーケストレーション
 ├── Dockerfile               # コンテナイメージ
-├── .github/workflows/ci.yml # GitHub Actions CI
+├── .github/workflows/
+│   ├── ci.yml                # GitHub Actions CI
+│   ├── arxiv-daily.yml       # arXiv 論文の日次自動収集
+│   └── portfolio-publish.yml # ポートフォリオページの自動公開
 ├── README.md                # プロジェクト説明
 ├── .env.example             # 環境変数テンプレート
 └── CLAUDE.md               # このファイル
