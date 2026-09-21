@@ -56,7 +56,7 @@ class JobStore:
 
         Jobs that were 'pending' or 'running' at last shutdown are converted to
         'failed' — their BackgroundTasks did not survive the restart, and a
-        stale in-flight status would block has_running() forever.
+        stale in-flight status would block create_if_not_running() forever.
 
         The SQLite reads/writes are synchronous (see busy_timeout in db.py); run
         them in a worker thread via asyncio.to_thread so a lock-contended load
@@ -164,27 +164,14 @@ class JobStore:
         with self._lock:
             return list(self._jobs.values())
 
-    def has_running(self, kind: str | None = None) -> bool:
-        """True if any job (optionally filtered by kind) is pending or running.
-
-        Counting "pending" closes the TOCTOU window between create() and the
-        background task flipping the status to "running"; filtering by kind
-        keeps unrelated job types (e.g. per-paper ingest) from blocking each
-        other.
-        """
-        with self._lock:
-            return any(
-                j.status in ("pending", "running") and (kind is None or j.kind == kind) for j in self._jobs.values()
-            )
-
     async def create_if_not_running(self, kind: str = "") -> Job | None:
         """Atomically check for a running/pending job of `kind` and create one if none exists.
 
-        has_running() and create() each take self._lock independently, so a caller doing
-        "check then create" (e.g. the summarize-all endpoint) still races: two callers can
-        both see has_running() == False before either has created a job (see #235). This
-        method performs the check and the create under a single lock acquisition, closing
-        that window. Returns None if a job of this kind is already pending/running.
+        A caller doing "check then create" as two separate lock acquisitions (e.g. the
+        summarize-all endpoint) would race: two callers can both see "not running" before
+        either has created a job (see #235). This method performs the check and the create
+        under a single lock acquisition, closing that window. Returns None if a job of this
+        kind is already pending/running.
         """
         with self._lock:
             if any(j.status in ("pending", "running") and j.kind == kind for j in self._jobs.values()):

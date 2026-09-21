@@ -280,13 +280,6 @@ def _deserialize_paper(row) -> dict:
     return paper
 
 
-def list_papers(conn: sqlite3.Connection) -> list[dict]:
-    """Get list of all papers."""
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM papers ORDER BY ingested_at DESC")
-    return [_deserialize_paper(row) for row in cursor.fetchall()]
-
-
 def list_papers_filtered(
     conn: sqlite3.Connection,
     limit: int = 20,
