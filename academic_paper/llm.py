@@ -5,6 +5,7 @@ import httpx
 from google.genai import errors as genai_errors
 
 from academic_paper.config import settings
+from academic_paper.http_client import client_or_temporary
 from academic_paper.retry import async_with_retry
 
 _GEMINI_RETRYABLE = (genai_errors.ServerError, httpx.NetworkError, httpx.TimeoutException)
@@ -139,18 +140,7 @@ class OllamaClient(BaseLLMClient):
         Returns:
             Generated text response
         """
-        if self._client is not None:
-            return await async_with_retry(
-                self._post,
-                self._client,
-                prompt,
-                system,
-                attempts=3,
-                base_delay=1.0,
-                exceptions=_OLLAMA_RETRYABLE,
-            )
-        # Fallback: per-call client (tests / direct instantiation without lifespan).
-        async with httpx.AsyncClient(timeout=settings.ollama_timeout) as client:
+        async with client_or_temporary(self._client, timeout=settings.ollama_timeout) as client:
             return await async_with_retry(
                 self._post,
                 client,
