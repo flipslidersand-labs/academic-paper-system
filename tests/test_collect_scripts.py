@@ -179,6 +179,18 @@ def test_portfolio_source_link_escapes_and_links():
     assert "arxiv.org/abs/" in link
 
 
+def test_portfolio_source_link_builds_correct_arxiv_url():
+    paper = {"source": "arxiv", "file_name": "arxiv_2410.01234.pdf", "title": "T"}
+    link = generate_portfolio.source_link(paper)
+    assert 'href="https://arxiv.org/abs/2410.01234"' in link
+
+
+def test_portfolio_source_link_unknown_file_name_falls_back_to_span():
+    paper = {"source": "arxiv", "file_name": "not-an-arxiv-name.pdf", "title": "T"}
+    link = generate_portfolio.source_link(paper)
+    assert link == "<span>T</span>"
+
+
 def test_portfolio_build_html_smoke():
     papers = [{"id": 1, "title": "T", "authors": ["A"], "score": 0.8, "source": "arxiv", "file_name": "x.pdf"}]
     html_out = generate_portfolio.build_html(papers, {1: {"objective": "obj"}}, "2026-08-31")
