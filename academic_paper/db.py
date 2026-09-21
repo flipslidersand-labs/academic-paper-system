@@ -125,6 +125,10 @@ def init_db(db_path: str) -> None:
         if "kind" not in [row[1] for row in cursor.fetchall()]:
             cursor.execute("ALTER TABLE jobs ADD COLUMN kind TEXT NOT NULL DEFAULT ''")
 
+        # Migration: persist Job.result (paper_id/chunks/status for completed
+        # ingest jobs) so a restart doesn't null it out (#416).
+        _migrate_add_columns(cursor, "jobs", [("result", "TEXT")])
+
         cursor.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
                 text,
@@ -554,12 +558,13 @@ def upsert_job(
     started_at: float,
     finished_at: float | None,
     kind: str = "",
+    result: dict | None = None,
 ) -> None:
     """Insert or update a job row."""
     conn.execute(
         """
-        INSERT INTO jobs (id, status, kind, total, processed, failed, errors, started_at, finished_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO jobs (id, status, kind, total, processed, failed, errors, started_at, finished_at, result)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             status = excluded.status,
             kind = excluded.kind,
@@ -567,9 +572,21 @@ def upsert_job(
             processed = excluded.processed,
             failed = excluded.failed,
             errors = excluded.errors,
-            finished_at = excluded.finished_at
+            finished_at = excluded.finished_at,
+            result = excluded.result
     """,
-        (job_id, status, kind, total, processed, failed, json.dumps(errors), started_at, finished_at),
+        (
+            job_id,
+            status,
+            kind,
+            total,
+            processed,
+            failed,
+            json.dumps(errors),
+            started_at,
+            finished_at,
+            json.dumps(result) if result is not None else None,
+        ),
     )
     conn.commit()
 
@@ -582,5 +599,6 @@ def load_all_jobs(conn: sqlite3.Connection) -> list[dict]:
     for row in cursor.fetchall():
         d = dict(row)
         d["errors"] = json.loads(d["errors"])
+        d["result"] = json.loads(d["result"]) if d.get("result") else None
         rows.append(d)
     return rows
