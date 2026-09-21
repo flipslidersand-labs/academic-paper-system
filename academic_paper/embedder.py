@@ -3,6 +3,7 @@
 import httpx
 
 from academic_paper.config import settings
+from academic_paper.http_client import client_or_temporary
 from academic_paper.retry import async_with_retry
 
 
@@ -43,12 +44,12 @@ class EmbedderClient:
         if not texts:
             return []
         results: list[list[float]] = []
-        if self._client is not None:
+        async with client_or_temporary(self._client, timeout=settings.embedding_timeout) as client:
             for i in range(0, len(texts), _BATCH_MAX):
                 chunk = texts[i : i + _BATCH_MAX]
                 vectors = await async_with_retry(
                     self._embed_batch,
-                    self._client,
+                    client,
                     chunk,
                     mode,
                     collection,
@@ -57,22 +58,6 @@ class EmbedderClient:
                     exceptions=_EMBED_RETRYABLE,
                 )
                 results.extend(vectors)
-        else:
-            # Fallback: per-call client (tests / direct instantiation without lifespan).
-            async with httpx.AsyncClient(timeout=settings.embedding_timeout) as client:
-                for i in range(0, len(texts), _BATCH_MAX):
-                    chunk = texts[i : i + _BATCH_MAX]
-                    vectors = await async_with_retry(
-                        self._embed_batch,
-                        client,
-                        chunk,
-                        mode,
-                        collection,
-                        attempts=3,
-                        base_delay=1.0,
-                        exceptions=_EMBED_RETRYABLE,
-                    )
-                    results.extend(vectors)
         return results
 
     async def _embed_batch(
