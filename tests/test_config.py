@@ -76,6 +76,16 @@ def test_chunk_overlap_greater_equal_chunk_size_rejected():
         )
 
 
+def test_chunk_overlap_negative_rejected():
+    with pytest.raises(ValidationError, match="chunk_overlap"):
+        Settings(
+            embedding_svc_url="http://localhost:9092",
+            qdrant_url="http://localhost:6333",
+            chunk_size=100,
+            chunk_overlap=-10,
+        )
+
+
 def test_chunk_overlap_smaller_than_chunk_size_accepted():
     s = Settings(
         embedding_svc_url="http://localhost:9092",

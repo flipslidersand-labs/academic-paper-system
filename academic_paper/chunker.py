@@ -48,6 +48,8 @@ def chunk_pages(
         - "chunk_index": 0-based chunk index
         - "token_count": word count in chunk
     """
+    if overlap < 0:
+        raise ValueError("overlap must be non-negative")
     if overlap >= chunk_size:
         raise ValueError("overlap must be smaller than chunk_size")
 
