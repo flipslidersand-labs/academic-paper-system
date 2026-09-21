@@ -35,18 +35,16 @@ from academic_paper.db import (
     save_chunks,
     save_paper,
     save_summary,
-    search_fts,
     update_paper_score,
     update_paper_status,
 )
 from academic_paper.embedder import EmbedderClient, EmbeddingCountMismatchError
 from academic_paper.extractor import extract_text, hash_file
-from academic_paper.hybrid import rrf_merge
 from academic_paper.jobs import job_store
 from academic_paper.llm import OllamaClient, get_llm_client
 from academic_paper.logging_config import configure_logging
-from academic_paper.nugget import extract_nuggets, split_sentences
 from academic_paper.scorer import compute_score
+from academic_paper.services.search_service import run_search
 from academic_paper.summarizer import RAGSummarizer
 from academic_paper.telemetry import get_tracer, setup_telemetry
 from academic_paper.vector_store import QdrantStore, make_qdrant_id
@@ -56,25 +54,6 @@ tracer = get_tracer()
 
 
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
-
-
-def _fetch_chunk_meta(
-    cursor: sqlite3.Cursor, ids: list, id_column: str, select_columns: str
-) -> dict[object, sqlite3.Row]:
-    """Fetch `chunks` rows for the given ids, keyed by `id_column`'s value.
-
-    Builds the `IN (?,?,...)` placeholder SQL shared by every /search mode
-    (#346) and guards the empty-ids case, where SQLite would reject
-    `IN ()` — returns `{}` without querying.
-    """
-    if not ids:
-        return {}
-    placeholders = ",".join("?" * len(ids))
-    rows = cursor.execute(
-        f"SELECT {select_columns} FROM chunks WHERE {id_column} IN ({placeholders})",
-        ids,  # noqa: S608
-    ).fetchall()
-    return {row[id_column]: row for row in rows}
 
 
 def _sanitize_text(value: str | None) -> str | None:
@@ -872,149 +851,18 @@ async def search(
     """
     try:
         with db_connection(settings.academic_db) as conn:
-            cursor = conn.cursor()
-
-            if mode == "keyword":
-                fts_results = search_fts(conn, query=q, limit=limit, paper_id=paper_id)
-                _kw_ids = [r["chunk_id"] for r in fts_results]
-                _kw_meta_map = _fetch_chunk_meta(cursor, _kw_ids, "id", "id, page_start, chunk_index")
-                results = []
-                for rank, result in enumerate(fts_results, start=1):
-                    chunk_id = result["chunk_id"]
-                    paper_id_res = result["paper_id"]
-                    meta = _kw_meta_map.get(chunk_id)
-                    page_start = meta["page_start"] if meta else None
-                    chunk_index = meta["chunk_index"] if meta else 0
-                    full_text = result["text"]
-                    snippet = full_text[:snippet_length] if snippet_length > 0 else full_text
-                    results.append(
-                        {
-                            "rank": rank,
-                            "score": result["rank"],
-                            "paper_id": paper_id_res,
-                            "chunk_index": chunk_index,
-                            "page_start": page_start,
-                            "snippet": snippet,
-                        }
-                    )
-                return {"mode": mode, "query": q, "results": results}
-
-            elif mode == "vector":
-                with tracer.start_as_current_span("embed.query"):
-                    query_vector = await app.state.embedder.embed_single(q, mode="search")
-                search_results = await app.state.vector_store.asearch(
-                    query_vector=query_vector, limit=limit, paper_id_filter=paper_id
-                )
-                _vec_qids = [r["id"] for r in search_results]
-                _vec_meta = _fetch_chunk_meta(cursor, _vec_qids, "qdrant_id", "qdrant_id, page_start")
-                _vec_page_map = {k: v["page_start"] for k, v in _vec_meta.items()}
-                results = []
-                for result in search_results:
-                    qdrant_id = result["id"]
-                    payload = result.get("payload") or {}
-                    # Orphan points (partial ingest) lack paper_id; skip them like rrf_merge does
-                    # instead of surfacing a KeyError as a 500.
-                    if payload.get("paper_id") is None:
-                        logger.warning(
-                            "search mode=vector: skipping orphan point %s (payload missing paper_id)", qdrant_id
-                        )
-                        continue
-                    full_text = payload.get("text", "")
-                    snippet = full_text[:snippet_length] if snippet_length > 0 else full_text
-                    results.append(
-                        {
-                            "rank": len(results) + 1,
-                            "score": result["score"],
-                            "paper_id": payload["paper_id"],
-                            "chunk_index": payload.get("chunk_index", 0),
-                            "page_start": _vec_page_map.get(qdrant_id),
-                            "snippet": snippet,
-                        }
-                    )
-                return {"mode": mode, "query": q, "results": results}
-
-            else:  # hybrid or nugget (same retrieval, different snippet)
-                fts_results = search_fts(conn, query=q, limit=limit, paper_id=paper_id)
-                _fts_ids = [r["chunk_id"] for r in fts_results]
-                _ci_map = {
-                    k: v["chunk_index"] for k, v in _fetch_chunk_meta(cursor, _fts_ids, "id", "id, chunk_index").items()
-                }
-                if _ci_map:
-                    for fts_result in fts_results:
-                        if fts_result["chunk_id"] in _ci_map:
-                            fts_result["chunk_index"] = _ci_map[fts_result["chunk_id"]]
-
-                with tracer.start_as_current_span("embed.query"):
-                    query_vector = await app.state.embedder.embed_single(q, mode="search")
-                vector_results = await app.state.vector_store.asearch(
-                    query_vector=query_vector, limit=limit, paper_id_filter=paper_id
-                )
-
-                _missing_qids = [v["id"] for v in vector_results if "chunk_id" not in v["payload"]]
-                _qid_to_cid = {
-                    k: v["id"]
-                    for k, v in _fetch_chunk_meta(cursor, _missing_qids, "qdrant_id", "id, qdrant_id").items()
-                }
-                if _qid_to_cid:
-                    for vec_result in vector_results:
-                        if "chunk_id" not in vec_result["payload"] and vec_result["id"] in _qid_to_cid:
-                            vec_result["payload"]["chunk_id"] = _qid_to_cid[vec_result["id"]]
-
-                merged = rrf_merge(fts_results, vector_results)
-                # Drop orphaned Qdrant results that have no chunk_id — these can arise
-                # from a partial ingest failure before compensation runs (#145).
-                _merged_slice = [r for r in merged[:limit] if "chunk_id" in r]
-                _merged_ids = [r["chunk_id"] for r in _merged_slice]
-                _merged_meta = _fetch_chunk_meta(cursor, _merged_ids, "id", "id, page_start")
-                _merged_page_map = {k: v["page_start"] for k, v in _merged_meta.items()}
-                # nugget mode: batch-embed all sentences across all chunks in a single
-                # HTTP call instead of one call per chunk (#143).
-                if mode == "nugget" and nugget_embed_weight > 0.0:
-                    _chunk_sentences = [split_sentences(r["text"]) for r in _merged_slice]
-                    _flat_sentences = [s for sents in _chunk_sentences for s in sents]
-                    if _flat_sentences:
-                        with tracer.start_as_current_span("embed.nuggets"):
-                            _flat_vecs = await app.state.embedder.embed(_flat_sentences, mode="search")
-                    else:
-                        _flat_vecs = []
-                    # Slice flat vectors back to per-chunk lists.
-                    _nugget_vecs: list[list[list[float]] | None] = []
-                    _offset = 0
-                    for sents in _chunk_sentences:
-                        if sents:
-                            _nugget_vecs.append(_flat_vecs[_offset : _offset + len(sents)])
-                            _offset += len(sents)
-                        else:
-                            _nugget_vecs.append(None)
-                else:
-                    _nugget_vecs = [None] * len(_merged_slice)
-
-                results = []
-                for rank, (result, chunk_sentence_vecs) in enumerate(zip(_merged_slice, _nugget_vecs), start=1):
-                    full_text = result["text"]
-                    if mode == "nugget":
-                        snippet = extract_nuggets(
-                            q,
-                            full_text,
-                            top_k=nuggets_per_chunk,
-                            embed_weight=nugget_embed_weight,
-                            query_vec=query_vector,
-                            sentence_vecs=chunk_sentence_vecs,
-                        )
-                    else:
-                        snippet = full_text[:snippet_length] if snippet_length > 0 else full_text
-                    results.append(
-                        {
-                            "rank": rank,
-                            "score": result["rrf_score"],
-                            "paper_id": result["paper_id"],
-                            "chunk_index": result["chunk_index"],
-                            "page_start": _merged_page_map.get(result["chunk_id"]),
-                            "snippet": snippet,
-                        }
-                    )
-                return {"mode": mode, "query": q, "results": results}
-
+            return await run_search(
+                conn,
+                app.state.embedder,
+                app.state.vector_store,
+                q=q,
+                mode=mode,
+                limit=limit,
+                paper_id=paper_id,
+                snippet_length=snippet_length,
+                nuggets_per_chunk=nuggets_per_chunk,
+                nugget_embed_weight=nugget_embed_weight,
+            )
     except Exception as e:
         logger.exception("Search error for query=%r mode=%s", q, mode)
         raise _http_exc_for(e, "Search failed: check query and try again")
