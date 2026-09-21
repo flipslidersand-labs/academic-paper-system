@@ -5,6 +5,17 @@ return only the top-N sentences most relevant to the query (nuggets).
 This reduces context length while maintaining or improving Recall@k.
 
 No external dependencies — uses BM25 and sentence splitting only.
+
+Note on the duplicate-looking BM25 logic (see issue #340): db.py's
+search_fts() uses SQLite FTS5's built-in bm25(), which scores rows already
+committed to a persistent FTS index. This module instead ranks the
+*sentences of a single chunk* against the query, and that sentence set is
+different for every extract_nuggets() call — there is no stable corpus to
+index, so the FTS5 path is not reusable here. bm25_scores() below is a
+plain from-scratch BM25 (Robertson/Sparck-Jones formula, k1/b tunable)
+kept intentionally minimal for this one-off scoring; do not add a third
+implementation elsewhere — reuse this one for any other ad-hoc,
+non-indexed sentence/passage ranking.
 """
 
 from __future__ import annotations
@@ -25,7 +36,13 @@ def _tokenize(text: str) -> list[str]:
 
 
 def bm25_scores(query: str, sentences: list[str], k1: float = 1.5, b: float = 0.75) -> list[float]:
-    """Return BM25 score for each sentence relative to query."""
+    """Return BM25 score for each sentence relative to query.
+
+    Deliberately not SQLite FTS5's bm25() (see db.search_fts): this ranks an
+    ephemeral, per-call sentence list rather than a persisted index, so there
+    is nothing to hand to FTS5. See the module docstring / issue #340 before
+    adding another BM25 implementation.
+    """
     if not sentences:
         return []
     tokenized = [_tokenize(s) for s in sentences]
