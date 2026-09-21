@@ -32,18 +32,14 @@ PMC_PDF_URL = "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{pmc_id}/pdf/"
 def fetch_pmc_ids(
     terms: list[str],
     max_results: int,
+    *,
+    client: httpx.Client,
     api_key: str = "",
     timeout: int = 30,
-    client: httpx.Client | None = None,
     from_date: str = "",
     until_date: str = "",
 ) -> list[str]:
-    """Search PMC for open-access paper IDs.
-
-    Args:
-        client: Optional shared httpx.Client. If None, a bare httpx.get() call
-                is made (backwards-compatible fallback).
-    """
+    """Search PMC for open-access paper IDs."""
     query = " OR ".join(f'"{t}"' for t in terms) + " AND open access[filter]"
     params: dict = {
         "db": "pmc",
@@ -61,26 +57,19 @@ def fetch_pmc_ids(
         if until_date:
             params["maxdate"] = until_date
 
-    if client is not None:
-        resp = client.get(ESEARCH_URL, params=params, timeout=timeout)
-    else:
-        resp = httpx.get(ESEARCH_URL, params=params, timeout=timeout)
+    resp = client.get(ESEARCH_URL, params=params, timeout=timeout)
     resp.raise_for_status()
     return resp.json().get("esearchresult", {}).get("idlist", [])
 
 
 def fetch_paper_metadata(
     pmc_ids: list[str],
+    *,
+    client: httpx.Client,
     api_key: str = "",
     timeout: int = 60,
-    client: httpx.Client | None = None,
 ) -> list[dict]:
-    """Fetch XML metadata for a batch of PMC IDs.
-
-    Args:
-        client: Optional shared httpx.Client. If None, a bare httpx.get() call
-                is made (backwards-compatible fallback).
-    """
+    """Fetch XML metadata for a batch of PMC IDs."""
     if not pmc_ids:
         return []
     params: dict = {
@@ -92,10 +81,7 @@ def fetch_paper_metadata(
     if api_key:
         params["api_key"] = api_key
 
-    if client is not None:
-        resp = client.get(EFETCH_URL, params=params, timeout=timeout)
-    else:
-        resp = httpx.get(EFETCH_URL, params=params, timeout=timeout)
+    resp = client.get(EFETCH_URL, params=params, timeout=timeout)
     resp.raise_for_status()
 
     papers: list[dict] = []
@@ -257,8 +243,8 @@ def main() -> None:
             pmc_ids = fetch_pmc_ids(
                 args.terms,
                 args.max_results,
-                args.api_key,
                 client=shared_client,
+                api_key=args.api_key,
                 from_date=args.from_date,
                 until_date=args.until_date,
             )
@@ -275,7 +261,7 @@ def main() -> None:
 
         time.sleep(0.34)  # respect 3 req/sec default rate limit
         try:
-            papers = fetch_paper_metadata(pmc_ids, args.api_key, client=shared_client)
+            papers = fetch_paper_metadata(pmc_ids, client=shared_client, api_key=args.api_key)
         except Exception as exc:
             print(f"[pubmed] ERROR fetching metadata: {exc}", file=sys.stderr)
             sys.exit(1)
