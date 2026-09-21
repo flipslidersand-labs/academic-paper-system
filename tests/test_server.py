@@ -211,7 +211,12 @@ def test_ingest_extract_timeout_fails_job_and_cleans_tmpfile(client):
         return ctx
 
     def slow_extract(_path):
-        time.sleep(0.3)
+        # Sleep far longer than pdf_extract_timeout so scheduling jitter on a
+        # loaded self-hosted runner can't let this finish before the timeout
+        # fires (#343). asyncio.wait_for still returns as soon as the timeout
+        # elapses, so this doesn't slow the test down — only the (leaked)
+        # background thread keeps sleeping.
+        time.sleep(2.0)
         return [{"page": 1, "text": "should never get here"}]
 
     with (
