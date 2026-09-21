@@ -11,6 +11,11 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+    env:
+      # Read-endpoint auth (#241/#418). generate_portfolio.py's fetch_all()
+      # reads this and sends it as X-API-Key; empty when the secret is unset,
+      # matching arxiv-daily.yml's PAPER_API_KEY convention.
+      PAPER_API_KEY: ${{ secrets.PAPER_API_KEY }}
 
     steps:
       - uses: actions/checkout@v4

@@ -3,10 +3,20 @@
 import argparse
 import html
 import json
+import os
 import sys
 from pathlib import Path
-from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+
+def _auth_headers() -> dict:
+    """X-API-Key header from PAPER_API_KEY, or {} when auth is not configured (#418).
+
+    Matches scripts/ingest_client.py's _auth_headers() convention.
+    """
+    api_key = os.environ.get("PAPER_API_KEY", "")
+    return {"X-API-Key": api_key} if api_key else {}
 
 
 def fetch_all(url: str) -> list:
@@ -15,9 +25,19 @@ def fetch_all(url: str) -> list:
     limit = 100
     offset = 0
     while True:
+        req = Request(f"{url}&limit={limit}&offset={offset}", headers=_auth_headers())
         try:
-            resp = urlopen(f"{url}&limit={limit}&offset={offset}", timeout=15)
+            resp = urlopen(req, timeout=15)
             data = json.loads(resp.read())
+        except HTTPError as e:
+            if e.code in (401, 403):
+                print(
+                    f"ERROR: authentication failed ({e.code}) — set the PAPER_API_KEY env var",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            print(f"[warn] fetch failed: {e}", file=sys.stderr)
+            break
         except URLError as e:
             print(f"[warn] fetch failed: {e}", file=sys.stderr)
             break
