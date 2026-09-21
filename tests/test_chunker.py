@@ -88,6 +88,24 @@ def test_chunk_pages_overlap_validation() -> None:
         chunk_pages(pages, chunk_size=100, overlap=150)
 
 
+def test_chunk_pages_negative_overlap_rejected() -> None:
+    """A negative overlap would make the window step exceed chunk_size and silently drop words."""
+    pages = [{"page": 1, "text": "hello world"}]
+    with pytest.raises(ValueError, match="overlap must be non-negative"):
+        chunk_pages(pages, chunk_size=100, overlap=-1)
+
+
+def test_chunk_pages_sliding_window_covers_every_word() -> None:
+    """Every word of a long paragraph must appear in at least one chunk (no silent gaps)."""
+    words = [f"w{i}" for i in range(50)]
+    pages = [{"page": 1, "text": " ".join(words)}]
+    chunks = chunk_pages(pages, chunk_size=10, overlap=3)
+    seen = set()
+    for c in chunks:
+        seen.update(c["text"].split())
+    assert seen == set(words)
+
+
 def test_chunk_pages_multipage_boundary() -> None:
     """Test chunking across page boundaries with small chunk size."""
     # Create pages with many small paragraphs to force splitting

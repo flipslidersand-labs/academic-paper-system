@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     )
     academic_db: str = Field(default="/data/academic.db", description="Path to academic database")
     chunk_size: int = Field(default=512, gt=0, description="Size of text chunks for processing")
-    chunk_overlap: int = Field(default=64, description="Overlap between consecutive chunks")
+    chunk_overlap: int = Field(default=64, ge=0, description="Overlap between consecutive chunks")
     qdrant_collection: str = Field(default="academic-papers", description="Qdrant collection name")
     port: int = Field(default=8020, gt=0, description="Port for API server")
     google_api_key: str = Field(default="", description="Google API key for generative AI")
