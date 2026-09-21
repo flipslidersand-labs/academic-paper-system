@@ -10,6 +10,8 @@ from academic_paper.retry import async_with_retry
 _GEMINI_RETRYABLE = (genai_errors.ServerError, httpx.NetworkError, httpx.TimeoutException)
 _OLLAMA_RETRYABLE = (httpx.NetworkError, httpx.TimeoutException)
 
+GEMINI_MODEL = "gemini-2.0-flash"
+
 
 class BaseLLMClient(ABC):
     """Abstract base class for LLM clients."""
@@ -31,6 +33,15 @@ class BaseLLMClient(ABC):
 
     async def aclose(self) -> None:
         """Async variant of close(). Default: no-op (#262)."""
+
+    @property
+    def display_name(self) -> str:
+        """Model name to record alongside generated summaries (#347).
+
+        Default falls back to the class name; concrete clients override this
+        to report their actual configured model.
+        """
+        return self.__class__.__name__
 
 
 class GeminiClient(BaseLLMClient):
@@ -70,13 +81,18 @@ class GeminiClient(BaseLLMClient):
         response = await async_with_retry(
             asyncio.to_thread,
             self.client.models.generate_content,
-            model="gemini-2.0-flash",
+            model=GEMINI_MODEL,
             contents=full_prompt,
             attempts=3,
             base_delay=1.0,
             exceptions=_GEMINI_RETRYABLE,
         )
         return response.text
+
+    @property
+    def display_name(self) -> str:
+        """Model name recorded alongside generated summaries (#347)."""
+        return GEMINI_MODEL
 
     def close(self) -> None:
         """Close the underlying genai.Client HTTP session (#262)."""
@@ -115,6 +131,11 @@ class OllamaClient(BaseLLMClient):
         self.model = model or settings.ollama_model
         # Persistent client injected from lifespan; None → per-call fallback.
         self._client = client
+
+    @property
+    def display_name(self) -> str:
+        """Model name recorded alongside generated summaries (#347)."""
+        return f"ollama/{self.model}"
 
     async def _post(self, client: httpx.AsyncClient, prompt: str, system: str) -> str:
         response = await client.post(

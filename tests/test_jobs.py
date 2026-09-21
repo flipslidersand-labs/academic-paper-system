@@ -47,7 +47,7 @@ def client(temp_db, mock_summarizer):
         mock_embedder = MagicMock()
         mock_qdrant = MagicMock()
         mock_llm = MagicMock()
-        mock_llm.__class__ = type("GeminiClient", (), {})
+        mock_llm.display_name = "gemini-2.0-flash"
         with (
             patch("academic_paper.server.EmbedderClient", return_value=mock_embedder),
             patch("academic_paper.server.QdrantStore", return_value=mock_qdrant),
