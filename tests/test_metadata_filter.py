@@ -87,7 +87,7 @@ def test_list_papers_filtered_by_author(temp_db):
 
 
 def test_list_papers_filtered_by_category(temp_db):
-    """Test list_papers_filtered filters by category substring."""
+    """Test list_papers_filtered filters by exact category code."""
     conn = get_connection(temp_db)
     save_paper(conn, "a.pdf", "h1", categories=["cs.AI", "cs.LG"])
     save_paper(conn, "b.pdf", "h2", categories=["stat.ML"])
@@ -99,6 +99,26 @@ def test_list_papers_filtered_by_category(temp_db):
 
     assert total == 1
     assert papers[0]["file_name"] == "a.pdf"
+
+
+def test_list_papers_filtered_by_category_rejects_substring_matches(temp_db):
+    """cs.AI must not match cs.AIS / stat.AI (JSON-string LIKE false positives) or NULL categories."""
+    conn = get_connection(temp_db)
+    save_paper(conn, "exact.pdf", "h1", categories=["cs.LG", "cs.AI"])
+    save_paper(conn, "superstring.pdf", "h2", categories=["cs.AIS"])
+    save_paper(conn, "suffix.pdf", "h3", categories=["stat.AI"])
+    save_paper(conn, "none.pdf", "h4")
+    conn.close()
+
+    conn = get_connection(temp_db)
+    total, papers = list_papers_filtered(conn, category="cs.AI")
+    total_missing, papers_missing = list_papers_filtered(conn, category="cs.A")
+    conn.close()
+
+    assert total == 1
+    assert [p["file_name"] for p in papers] == ["exact.pdf"]
+    assert total_missing == 0
+    assert papers_missing == []
 
 
 def test_list_papers_filtered_consistent_snapshot_under_concurrent_write(temp_db):

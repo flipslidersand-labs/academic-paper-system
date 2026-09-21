@@ -298,7 +298,7 @@ def list_papers_filtered(
         limit: Maximum rows to return.
         offset: Rows to skip.
         author: Substring to match against the authors JSON column.
-        category: Substring to match against the categories JSON column.
+        category: Exact category code that must appear in the categories JSON array.
         sort: Sort field — 'ingested_at' (default) or 'score' (highest first,
               unscored papers last).
 
@@ -313,8 +313,9 @@ def list_papers_filtered(
         conditions.append("authors LIKE ?")
         params.append(f"%{author}%")
     if category:
-        conditions.append("categories LIKE ?")
-        params.append(f"%{category}%")
+        # categories is a JSON array; LIKE '%cs.AI%' would also match "cs.AIS" or "stat.AI".
+        conditions.append("EXISTS (SELECT 1 FROM json_each(papers.categories) WHERE value = ?)")
+        params.append(category)
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
