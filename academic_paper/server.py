@@ -39,7 +39,7 @@ from academic_paper.db import (
     update_paper_score,
     update_paper_status,
 )
-from academic_paper.embedder import EmbedderClient
+from academic_paper.embedder import EmbedderClient, EmbeddingCountMismatchError
 from academic_paper.extractor import extract_text, hash_file
 from academic_paper.hybrid import rrf_merge
 from academic_paper.jobs import job_store
@@ -259,6 +259,7 @@ def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
     """Map an exception to an appropriate HTTPException (#148).
 
     - Dependency-unavailable (httpx connect/timeout, Qdrant HTTP errors) → 502/503
+    - EmbeddingCountMismatchError (embedding-svc returned a mismatched vector count) → 502
     - sqlite3.IntegrityError (file_hash UNIQUE violation) → 409
     - ValueError from input validation (no text, no chunks) → 400
     - Everything else → 500 with opaque error-id (details go to logger only)
@@ -267,6 +268,10 @@ def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
         return HTTPException(status_code=503, detail="Upstream service unavailable")
     if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)):
         return HTTPException(status_code=503, detail="Upstream service timeout or network error")
+    if isinstance(exc, EmbeddingCountMismatchError):
+        # Checked before the generic ValueError branch below (#336): this is an
+        # upstream protocol failure, not bad client input, so it maps to 502.
+        return HTTPException(status_code=502, detail="Embedding service returned a mismatched vector count")
     try:
         from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
