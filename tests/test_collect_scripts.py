@@ -7,7 +7,7 @@ helpers. HTTP calls are mocked with respx.
 
 import json
 import xml.etree.ElementTree as ET
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 
 # scripts/ is added to sys.path in tests/conftest.py (#272).
@@ -186,10 +186,13 @@ def test_portfolio_build_html_smoke():
 
 
 def _fake_urlopen(pages, key="papers"):
-    """Build a urlopen stand-in that pages through `pages` by the offset query param."""
+    """Build a urlopen stand-in that pages through `pages` by the offset query param.
 
-    def _urlopen(url, timeout=15):
-        offset = int(parse_qs(urlparse(url).query).get("offset", ["0"])[0])
+    fetch_all() passes a urllib.request.Request (#418); use .full_url like urlopen would.
+    """
+
+    def _urlopen(req, timeout=15):
+        offset = int(parse_qs(urlparse(req.full_url).query).get("offset", ["0"])[0])
         page = pages[offset // 100] if offset // 100 < len(pages) else []
 
         class _Resp:
@@ -219,7 +222,7 @@ def test_portfolio_fetch_all_stops_on_empty_batch(monkeypatch):
 
 
 def test_portfolio_fetch_all_returns_partial_results_on_url_error(monkeypatch, capsys):
-    def _raise(url, timeout=15):
+    def _raise(req, timeout=15):
         raise URLError("connection refused")
 
     monkeypatch.setattr(generate_portfolio, "urlopen", _raise)
@@ -228,6 +231,61 @@ def test_portfolio_fetch_all_returns_partial_results_on_url_error(monkeypatch, c
 
     assert items == []
     assert "[warn] fetch failed" in capsys.readouterr().err
+
+
+def test_portfolio_fetch_all_sends_x_api_key_when_env_set(monkeypatch):
+    monkeypatch.setenv("PAPER_API_KEY", "secret-key")
+    captured = {}
+
+    def _urlopen(req, timeout=15):
+        captured["header"] = req.get_header("X-api-key")
+
+        class _Resp:
+            def read(self):
+                return b'{"papers": []}'
+
+        return _Resp()
+
+    monkeypatch.setattr(generate_portfolio, "urlopen", _urlopen)
+
+    generate_portfolio.fetch_all("http://api.example/papers?sort=score")
+
+    assert captured["header"] == "secret-key"
+
+
+def test_portfolio_fetch_all_no_key_sends_no_auth_header(monkeypatch):
+    monkeypatch.delenv("PAPER_API_KEY", raising=False)
+    captured = {}
+
+    def _urlopen(req, timeout=15):
+        captured["header"] = req.get_header("X-api-key")
+
+        class _Resp:
+            def read(self):
+                return b'{"papers": []}'
+
+        return _Resp()
+
+    monkeypatch.setattr(generate_portfolio, "urlopen", _urlopen)
+
+    generate_portfolio.fetch_all("http://api.example/papers?sort=score")
+
+    assert captured["header"] is None
+
+
+def test_portfolio_fetch_all_401_exits_with_auth_error_not_empty_warning(monkeypatch, capsys):
+    def _raise(req, timeout=15):
+        raise HTTPError("http://api.example/papers", 401, "Unauthorized", {}, None)
+
+    monkeypatch.setattr(generate_portfolio, "urlopen", _raise)
+
+    with pytest.raises(SystemExit) as exc:
+        generate_portfolio.fetch_all("http://api.example/papers?sort=score")
+
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "authentication failed" in err
+    assert "PAPER_API_KEY" in err
 
 
 def test_portfolio_category_badges_escapes_and_limits_to_five():
