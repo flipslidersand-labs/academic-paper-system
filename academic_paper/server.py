@@ -58,6 +58,25 @@ tracer = get_tracer()
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
+def _fetch_chunk_meta(
+    cursor: sqlite3.Cursor, ids: list, id_column: str, select_columns: str
+) -> dict[object, sqlite3.Row]:
+    """Fetch `chunks` rows for the given ids, keyed by `id_column`'s value.
+
+    Builds the `IN (?,?,...)` placeholder SQL shared by every /search mode
+    (#346) and guards the empty-ids case, where SQLite would reject
+    `IN ()` — returns `{}` without querying.
+    """
+    if not ids:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    rows = cursor.execute(
+        f"SELECT {select_columns} FROM chunks WHERE {id_column} IN ({placeholders})",
+        ids,  # noqa: S608
+    ).fetchall()
+    return {row[id_column]: row for row in rows}
+
+
 def _sanitize_text(value: str | None) -> str | None:
     """Strip control characters (incl. newlines) from externally-sourced metadata.
 
@@ -865,14 +884,7 @@ async def search(
             if mode == "keyword":
                 fts_results = search_fts(conn, query=q, limit=limit, paper_id=paper_id)
                 _kw_ids = [r["chunk_id"] for r in fts_results]
-                if _kw_ids:
-                    _ph = ",".join("?" * len(_kw_ids))
-                    _ps_rows = cursor.execute(
-                        f"SELECT id, page_start, chunk_index FROM chunks WHERE id IN ({_ph})", _kw_ids
-                    ).fetchall()
-                    _kw_meta_map = {r["id"]: r for r in _ps_rows}
-                else:
-                    _kw_meta_map = {}
+                _kw_meta_map = _fetch_chunk_meta(cursor, _kw_ids, "id", "id, page_start, chunk_index")
                 results = []
                 for rank, result in enumerate(fts_results, start=1):
                     chunk_id = result["chunk_id"]
@@ -901,14 +913,8 @@ async def search(
                     query_vector=query_vector, limit=limit, paper_id_filter=paper_id
                 )
                 _vec_qids = [r["id"] for r in search_results]
-                if _vec_qids:
-                    _ph = ",".join("?" * len(_vec_qids))
-                    _vec_ps_rows = cursor.execute(
-                        f"SELECT qdrant_id, page_start FROM chunks WHERE qdrant_id IN ({_ph})", _vec_qids
-                    ).fetchall()
-                    _vec_page_map = {r["qdrant_id"]: r["page_start"] for r in _vec_ps_rows}
-                else:
-                    _vec_page_map = {}
+                _vec_meta = _fetch_chunk_meta(cursor, _vec_qids, "qdrant_id", "qdrant_id, page_start")
+                _vec_page_map = {k: v["page_start"] for k, v in _vec_meta.items()}
                 results = []
                 for rank, result in enumerate(search_results, start=1):
                     qdrant_id = result["id"]
@@ -930,12 +936,10 @@ async def search(
             else:  # hybrid or nugget (same retrieval, different snippet)
                 fts_results = search_fts(conn, query=q, limit=limit, paper_id=paper_id)
                 _fts_ids = [r["chunk_id"] for r in fts_results]
-                if _fts_ids:
-                    _ph = ",".join("?" * len(_fts_ids))
-                    _ci_rows = cursor.execute(
-                        f"SELECT id, chunk_index FROM chunks WHERE id IN ({_ph})", _fts_ids
-                    ).fetchall()
-                    _ci_map = {r["id"]: r["chunk_index"] for r in _ci_rows}
+                _ci_map = {
+                    k: v["chunk_index"] for k, v in _fetch_chunk_meta(cursor, _fts_ids, "id", "id, chunk_index").items()
+                }
+                if _ci_map:
                     for fts_result in fts_results:
                         if fts_result["chunk_id"] in _ci_map:
                             fts_result["chunk_index"] = _ci_map[fts_result["chunk_id"]]
@@ -947,12 +951,11 @@ async def search(
                 )
 
                 _missing_qids = [v["id"] for v in vector_results if "chunk_id" not in v["payload"]]
-                if _missing_qids:
-                    _ph = ",".join("?" * len(_missing_qids))
-                    _cid_rows = cursor.execute(
-                        f"SELECT id, qdrant_id FROM chunks WHERE qdrant_id IN ({_ph})", _missing_qids
-                    ).fetchall()
-                    _qid_to_cid = {r["qdrant_id"]: r["id"] for r in _cid_rows}
+                _qid_to_cid = {
+                    k: v["id"]
+                    for k, v in _fetch_chunk_meta(cursor, _missing_qids, "qdrant_id", "id, qdrant_id").items()
+                }
+                if _qid_to_cid:
                     for vec_result in vector_results:
                         if "chunk_id" not in vec_result["payload"] and vec_result["id"] in _qid_to_cid:
                             vec_result["payload"]["chunk_id"] = _qid_to_cid[vec_result["id"]]
@@ -962,14 +965,8 @@ async def search(
                 # from a partial ingest failure before compensation runs (#145).
                 _merged_slice = [r for r in merged[:limit] if "chunk_id" in r]
                 _merged_ids = [r["chunk_id"] for r in _merged_slice]
-                if _merged_ids:
-                    _ph = ",".join("?" * len(_merged_ids))
-                    _mps_rows = cursor.execute(
-                        f"SELECT id, page_start FROM chunks WHERE id IN ({_ph})", _merged_ids
-                    ).fetchall()
-                    _merged_page_map = {r["id"]: r["page_start"] for r in _mps_rows}
-                else:
-                    _merged_page_map = {}
+                _merged_meta = _fetch_chunk_meta(cursor, _merged_ids, "id", "id, page_start")
+                _merged_page_map = {k: v["page_start"] for k, v in _merged_meta.items()}
                 # nugget mode: batch-embed all sentences across all chunks in a single
                 # HTTP call instead of one call per chunk (#143).
                 if mode == "nugget" and nugget_embed_weight > 0.0:
