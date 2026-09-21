@@ -79,7 +79,7 @@ def test_summary_returns_structured_response(client, temp_db):
     conn.close()
 
     mock_llm = MagicMock()
-    mock_llm.__class__.__name__ = "GeminiClient"
+    mock_llm.display_name = "gemini-2.0-flash"
     mock_summarizer = AsyncMock()
     mock_summarizer.summarize = AsyncMock(
         return_value={
@@ -114,7 +114,7 @@ def test_summary_cached_on_second_call(client, temp_db):
     conn.close()
 
     mock_llm = MagicMock()
-    mock_llm.__class__.__name__ = "GeminiClient"
+    mock_llm.display_name = "gemini-2.0-flash"
     mock_summarizer = AsyncMock()
     mock_summarizer.summarize = AsyncMock(
         return_value={
@@ -165,7 +165,7 @@ def test_summary_force_regenerate(client, temp_db):
     conn.close()
 
     mock_llm = MagicMock()
-    mock_llm.__class__.__name__ = "GeminiClient"
+    mock_llm.display_name = "gemini-2.0-flash"
     mock_summarizer = AsyncMock()
     mock_summarizer.summarize = AsyncMock(
         return_value={
@@ -212,8 +212,7 @@ def test_summary_ollama_model_naming(client, temp_db):
     conn.close()
 
     mock_llm = MagicMock()
-    mock_llm.__class__.__name__ = "OllamaClient"
-    mock_llm.model = "qwen2.5:7b"
+    mock_llm.display_name = "ollama/qwen2.5:7b"
     mock_summarizer = AsyncMock()
     mock_summarizer.summarize = AsyncMock(
         return_value={
@@ -253,7 +252,7 @@ def test_summary_error_returns_400(client, temp_db):
     conn.close()
 
     mock_llm = MagicMock()
-    mock_llm.__class__.__name__ = "GeminiClient"
+    mock_llm.display_name = "gemini-2.0-flash"
     mock_summarizer = AsyncMock()
     mock_summarizer.summarize = AsyncMock(side_effect=Exception("LLM timeout"))
     client.app.state.llm = mock_llm
