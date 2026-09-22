@@ -59,9 +59,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        # Pinned to match requirements.lock so this persistent self-hosted
-        # runner never silently pulls a newer httpx from PyPI (#339).
-        run: pip install "httpx==0.28.1"
+        # requirements.lock pins every runtime dependency (httpx, defusedxml, ...);
+        # `-e .` makes `academic_paper` importable for scripts/*.py's
+        # `from academic_paper.X import Y` on this persistent self-hosted runner
+        # (#432 — without it, and without the httpx pin, either import silently
+        # broke `Collect arXiv papers` for 3 weeks with no non-continue-on-error
+        # step to surface it).
+        run: pip install -r requirements.lock -e . --quiet
 
       - name: Wait for API health
         run: |
