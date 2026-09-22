@@ -49,6 +49,15 @@ jobs:
       # pass it as X-API-Key. Empty when the secret is unset — the server then
       # runs with auth disabled and ignores the header.
       PAPER_API_KEY: ${{ secrets.PAPER_API_KEY }}
+      # academic_paper.config.settings is instantiated at import time (via
+      # scripts/_collect_common.py) and Settings' reject_placeholder validator
+      # rejects the "<internal-host>" default, so these must be set to *some*
+      # non-placeholder value just to let the collector scripts import — they
+      # never call Qdrant/embedding-svc directly (only /papers/ingest over
+      # HTTP), so the value doesn't need to be reachable. Same values ci.yml's
+      # docker smoke test (#263) uses for the same reason (#450).
+      EMBEDDING_SVC_URL: http://localhost:9092
+      QDRANT_URL: http://localhost:6333
 
     steps:
       - uses: actions/checkout@v4
