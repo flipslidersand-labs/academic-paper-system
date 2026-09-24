@@ -76,6 +76,28 @@ uvicorn academic_paper.server:app --reload --port 8020
 Key env vars: `EMBEDDING_SVC_URL`, `QDRANT_URL`, `GOOGLE_API_KEY`, `OLLAMA_URL`  
 See `.env.example` for the full list.
 
+### Running with Docker
+
+```bash
+cp .env.example .env    # configure embedding-svc, Qdrant, Gemini API key
+docker compose up -d
+curl http://localhost:8020/health
+```
+
+`qdrant_storage`/`qdrant_snapshots` are created automatically by Compose on
+first run. To reuse an existing volume on a given host instead, add a
+`docker-compose.override.yml` (already gitignored):
+
+```yaml
+volumes:
+  qdrant_storage:
+    name: <existing-volume-name>
+    external: true
+  qdrant_snapshots:
+    name: <existing-volume-name>
+    external: true
+```
+
 ## Test
 
 ```bash

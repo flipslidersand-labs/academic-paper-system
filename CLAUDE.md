@@ -33,8 +33,15 @@ cp .env.example .env
 ### Docker での実行
 
 ```bash
-docker-compose up -d
+cp .env.example .env   # embedding-svc / Qdrant / Gemini API キーを設定
+docker compose up -d
+curl http://localhost:8020/health
 ```
+
+`qdrant_storage`/`qdrant_snapshots` は Compose が初回起動時に自動作成する
+named volume。既存の external volume を使い回したい場合は
+`docker-compose.override.yml` (gitignore 済み) で `name`/`external: true` を
+上書きする。
 
 ### ローカル開発環境
 
