@@ -284,7 +284,10 @@ async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-A
     configured = settings.api_key
     if not configured:
         return  # auth disabled
-    if not hmac.compare_digest(x_api_key or "", configured):
+    # hmac.compare_digest raises TypeError on str with non-ASCII characters;
+    # comparing as UTF-8 bytes accepts any header value and just fails the
+    # comparison instead of turning an unauthenticated request into a 500 (#425).
+    if not hmac.compare_digest((x_api_key or "").encode("utf-8"), configured.encode("utf-8")):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 

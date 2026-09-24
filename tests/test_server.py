@@ -1118,6 +1118,18 @@ def test_write_endpoints_require_api_key_when_configured(client, temp_db):
         assert r3.status_code != 401
 
 
+def test_non_ascii_api_key_header_rejected_with_401_not_500(client):
+    """Regression (#425): a non-ASCII X-API-Key must fail auth (401), not crash hmac.compare_digest (500).
+
+    hmac.compare_digest raises TypeError comparing str with non-ASCII characters;
+    Starlette decodes headers as latin-1, so a client can send one byte >0x7f and
+    turn an auth failure into an unhandled 500 unless the comparison is done in bytes.
+    """
+    with patch.object(settings, "api_key", "secret-key"):
+        r = client.get("/papers", headers={b"x-api-key": "caf\xe9".encode("latin-1")})
+        assert r.status_code == 401
+
+
 def test_write_endpoints_pass_without_api_key_when_unconfigured(client):
     """When API_KEY is empty (default), write endpoints accept requests without key."""
     with patch.object(settings, "api_key", ""):
