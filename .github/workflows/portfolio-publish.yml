@@ -22,6 +22,15 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # minipc's persistent self-hosted runner has no bare `python` on PATH
+      # (only python3), so this step must resolve one before the next step
+      # can run (#428 — 6 consecutive weekly runs failed with "python:
+      # command not found" here without ever reaching Generate portfolio).
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Wait for API
         run: |
           timeout 30 bash -c 'until curl -sf http://localhost:8020/health > /dev/null; do sleep 3; done'
