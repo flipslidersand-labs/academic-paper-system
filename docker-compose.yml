@@ -25,10 +25,18 @@ services:
     depends_on:
       - qdrant
 
+# qdrant_storage/qdrant_snapshots are compose-managed named volumes by
+# default (created automatically on first `docker compose up`). To reuse an
+# existing external volume on a given host instead, add a
+# docker-compose.override.yml (gitignored) with:
+#
+#   volumes:
+#     qdrant_storage:
+#       name: <existing-volume-name>
+#       external: true
+#     qdrant_snapshots:
+#       name: <existing-volume-name>
+#       external: true
 volumes:
-  qdrant_storage:
-    name: yuki_qdrant_storage
-    external: true
-  qdrant_snapshots:
-    name: yuki_qdrant_snapshots
-    external: true
+  qdrant_storage: {}
+  qdrant_snapshots: {}
