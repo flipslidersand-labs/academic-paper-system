@@ -185,9 +185,15 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Single source of the auth header so every curl to this API — including
+          # the status-polling ones below — sends it consistently (#422: the poll
+          # calls were missing it, so an API_KEY-configured server 401'd every poll
+          # and the step aborted after "Polling failed 5 times in a row").
+          AUTH=(${PAPER_API_KEY:+-H "X-API-Key: $PAPER_API_KEY"})
+
           # POST /jobs/summarize-all — capture HTTP status and body separately
           HTTP_CODE=$(curl -s -o /tmp/job_response.json -w "%{http_code}" \
-            ${PAPER_API_KEY:+-H "X-API-Key: $PAPER_API_KEY"} \
+            "${AUTH[@]}" \
             -X POST "$API_URL/jobs/summarize-all")
 
           if [ "$HTTP_CODE" = "202" ]; then
@@ -201,7 +207,7 @@ jobs:
             POLL_FAILS=0
             DEADLINE=$((SECONDS + 300))
             while [ $SECONDS -lt $DEADLINE ]; do
-              if POLLED=$(curl -sf "$API_URL/jobs/$JOB_ID" \
+              if POLLED=$(curl -sf "${AUTH[@]}" "$API_URL/jobs/$JOB_ID" \
                 | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])" 2>/dev/null); then
                 POLL_FAILS=0
                 STATUS="$POLLED"
@@ -222,7 +228,7 @@ jobs:
             done
 
             # Save and print final job details
-            curl -sf "$API_URL/jobs/$JOB_ID" > summarize-result.json 2>/dev/null \
+            curl -sf "${AUTH[@]}" "$API_URL/jobs/$JOB_ID" > summarize-result.json 2>/dev/null \
               || echo '{"status":"unknown","processed":0,"failed":0}' > summarize-result.json
             echo "=== Final job details ==="
             python3 -m json.tool < summarize-result.json || true
