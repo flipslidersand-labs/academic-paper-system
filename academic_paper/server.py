@@ -366,6 +366,26 @@ async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_na
     return len(chunks_list)
 
 
+async def _mark_paper_failed(paper_id: int) -> None:
+    """Best-effort: set a paper's status to 'failed' without blocking the event loop.
+
+    update_paper_status is synchronous sqlite3 I/O with a 5s busy_timeout, so it
+    is run in a thread (#277-style). A failure here (e.g. 'database is locked')
+    is logged and swallowed rather than raised, so callers can update job status
+    first and unconditionally — a paper-status write failure must never prevent
+    the job from being marked 'failed' (#421).
+    """
+    try:
+
+        def _update() -> None:
+            with db_connection(settings.academic_db) as conn:
+                update_paper_status(conn, paper_id, "failed")
+
+        await asyncio.to_thread(_update)
+    except Exception:
+        logger.error("Failed to mark paper_id=%s as failed (job status still updated)", paper_id, exc_info=True)
+
+
 async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str, file_name: str) -> None:
     """Background task: run the ingest pipeline, updating job + paper status."""
     job = job_store.get(job_id)
@@ -381,8 +401,10 @@ async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str,
         job.status = "done"
     except Exception as e:
         logger.exception("Background ingest failed for paper_id=%s", paper_id)
-        with db_connection(settings.academic_db) as conn:
-            update_paper_status(conn, paper_id, "failed")
+        # _mark_paper_failed never raises (#421): it swallows and logs its own
+        # errors, so the job attributes below always run afterward instead of
+        # being skipped by an exception from the paper-status write.
+        await _mark_paper_failed(paper_id)
         job.failed = 1
         job.errors.append(f"paper_id={paper_id}: {str(e) or type(e).__name__}")
         job.status = "failed"
@@ -484,8 +506,7 @@ async def ingest_paper(
                 chunks = await _ingest_pipeline(tmp_path, paper_id, file_hash, file_name)
             except Exception as e:
                 logger.exception("Synchronous ingest failed for paper_id=%s", paper_id)
-                with db_connection(settings.academic_db) as conn:
-                    update_paper_status(conn, paper_id, "failed")
+                await _mark_paper_failed(paper_id)
                 # _ingest_pipeline already compensates Qdrant on save_chunks failure;
                 # compensate here for embed/upsert errors that leave no Qdrant data.
                 try:
