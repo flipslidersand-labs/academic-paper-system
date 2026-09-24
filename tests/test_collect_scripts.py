@@ -236,6 +236,13 @@ def test_portfolio_build_html_smoke():
     assert "obj" in html_out
 
 
+def test_portfolio_build_html_footer_has_no_stale_org_path():
+    """Regression test for #434: footer must not hardcode the pre-move owner."""
+    html_out = generate_portfolio.build_html([], {}, "2026-08-31")
+    assert "github.com/flipslidersand/academic-paper-system" not in html_out
+    assert "github.com/flipslidersand-labs/academic-paper-system" in html_out
+
+
 def _fake_urlopen(pages, key="papers"):
     """Build a urlopen stand-in that pages through `pages` by the offset query param.
 
