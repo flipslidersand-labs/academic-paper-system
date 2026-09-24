@@ -73,7 +73,7 @@ pip install -e ".[dev]"
 uvicorn academic_paper.server:app --reload --port 8020
 ```
 
-Key env vars: `EMBEDDING_SVC_URL`, `QDRANT_URL`, `GOOGLE_API_KEY`, `OLLAMA_URL`  
+Key env vars: `EMBEDDING_SVC_URL`, `QDRANT_URL`, `GOOGLE_API_KEY`, `OLLAMA_URL`, `SUMMARIZE_TOTAL_TIMEOUT`, `LOG_FORMAT`  
 See `.env.example` for the full list.
 
 ## Test
