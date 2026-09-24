@@ -6,6 +6,8 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
+from academic_paper.arxiv_ids import ARXIV_ID_PATTERN
+
 
 def get_connection(db_path: str) -> sqlite3.Connection:
     """Get SQLite connection with foreign keys, WAL, and busy timeout enabled.
@@ -141,7 +143,7 @@ def init_db(db_path: str) -> None:
         conn.commit()
 
 
-_ARXIV_FILE_NAME_RE = re.compile(r"^arxiv_(\d{4}\.\d{4,5})(?:v\d+)?\.pdf$")
+_ARXIV_FILE_NAME_RE = re.compile(rf"^arxiv_({ARXIV_ID_PATTERN})(?:v\d+)?\.pdf$")
 
 
 def arxiv_id_from_file_name(file_name: str) -> str | None:
