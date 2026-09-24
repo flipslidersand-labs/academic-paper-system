@@ -73,6 +73,14 @@ jobs:
             exit 1
           fi
           echo "Smoke test OK (/health responded)"
+
+          # Regression guard for #426: uvicorn must not run as root.
+          uid="$(docker exec smoke id -u)"
+          if [ "$uid" = "0" ]; then
+            echo "Container is running as uid 0 (root); expected a non-root user" >&2
+            exit 1
+          fi
+          echo "Non-root check OK (uid=$uid)"
       - name: Clean up smoke container
         if: always()
         run: docker rm -f smoke || true

@@ -76,6 +76,18 @@ uvicorn academic_paper.server:app --reload --port 8020
 Key env vars: `EMBEDDING_SVC_URL`, `QDRANT_URL`, `GOOGLE_API_KEY`, `OLLAMA_URL`  
 See `.env.example` for the full list.
 
+### Docker Compose
+
+The `paper-rag` container runs as a non-root user (uid `10001`, #426). Since
+`docker-compose.yml` bind-mounts `./data:/data` for the SQLite DB, that host
+directory must be writable by uid `10001` before the first `docker-compose up`:
+
+```bash
+mkdir -p data
+sudo chown -R 10001:10001 data/
+docker-compose up -d
+```
+
 ## Test
 
 ```bash
