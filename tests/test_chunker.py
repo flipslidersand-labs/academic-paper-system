@@ -185,6 +185,42 @@ def test_chunk_pages_whitespace_handling() -> None:
         assert len(chunk["text"]) > 0
 
 
+def test_chunk_pages_whitespace_only_page_no_paragraphs() -> None:
+    """A page whose text is only newlines/whitespace has no paragraphs.
+
+    _split_paragraphs() returns [] for such text, exercising the
+    `_split_paragraphs(text) or [text]` fallback; the resulting fallback
+    paragraph itself has no words, so it contributes nothing. chunk_pages
+    must not crash and must still chunk any other page with real content.
+    """
+    pages = [
+        {"page": 1, "text": "\n\n   \n\n  \n\n"},
+        {"page": 2, "text": "Real content on second page."},
+    ]
+
+    chunks = chunk_pages(pages, chunk_size=512, overlap=64)
+
+    assert len(chunks) == 1
+    assert chunks[0]["page_start"] == 2
+    assert chunks[0]["page_end"] == 2
+    assert "Real content" in chunks[0]["text"]
+
+
+def test_chunk_pages_sliding_window_break_after_multiple_iterations() -> None:
+    """The sliding-window end-of-paragraph break should stay False across
+    several loop iterations before firing True on the window that reaches
+    the paragraph's end, covering both branches of the condition.
+    """
+    words = [f"w{i}" for i in range(25)]
+    pages = [{"page": 1, "text": " ".join(words)}]
+
+    chunks = chunk_pages(pages, chunk_size=10, overlap=2)
+
+    assert len(chunks) == 3
+    assert [c["token_count"] for c in chunks] == [10, 10, 9]
+    assert chunks[-1]["text"].split()[-1] == "w24"
+
+
 def test_chunk_pages_long_paragraph_across_pages() -> None:
     """Test that a very long single paragraph is split across pages."""
     # Create one very long paragraph spanning conceptually across pages
