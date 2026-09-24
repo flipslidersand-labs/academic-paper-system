@@ -294,3 +294,22 @@ def test_get_summary_cache_miss_404_no_generation(client, temp_db):
     assert response.status_code == 404
     assert "not generated yet" in response.json()["detail"].lower()
     mock_summarizer.summarize.assert_not_called()
+
+
+def test_summary_timeout_returns_504(client, temp_db):
+    """Regression (#423): summarizer.summarize timing out (builtin TimeoutError from
+    asyncio.wait_for, #237/#269) must map to 504, not an opaque unclassified 500."""
+    conn = get_connection(temp_db)
+    paper_id = save_paper(conn, "timeout.pdf", "hash_timeout")
+    save_chunks(conn, paper_id, _make_chunks())
+    conn.close()
+
+    mock_llm = MagicMock()
+    mock_llm.display_name = "gemini-2.0-flash"
+    mock_summarizer = AsyncMock()
+    mock_summarizer.summarize = AsyncMock(side_effect=TimeoutError("summarize exceeded timeout"))
+    client.app.state.llm = mock_llm
+    client.app.state.summarizer = mock_summarizer
+
+    response = client.post(f"/papers/{paper_id}/summary")
+    assert response.status_code == 504, response.text

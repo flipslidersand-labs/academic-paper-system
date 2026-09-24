@@ -228,7 +228,7 @@ def test_ingest_extract_timeout_fails_job_and_cleans_tmpfile(client):
             "/papers/ingest?wait=true",
             files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
         )
-        assert response.status_code in (400, 500)
+        assert response.status_code == 504, response.text
 
     assert "path" in captured
     assert not os.path.exists(captured["path"]), "temp file should be deleted after a timed-out extraction"
