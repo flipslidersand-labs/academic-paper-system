@@ -1,0 +1,3551 @@
+{
+  "updated": "2026-09-24",
+  "count": 143,
+  "papers": [
+    {
+      "id": 152,
+      "file_name": "arxiv_2609.28442v1.pdf",
+      "file_hash": "7b417af83c6a7fe8d8b67147716c8279b77bcb0d907fdae44e0d073934443b71",
+      "title": "Order-Invariant Answers, Order-Sensitive Representations in Mathematical Reasoning",
+      "authors": [
+        "Zhixu Silvia Tao"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:25:09.742253",
+      "status": "failed",
+      "categories": [
+        "cs.LG",
+        "cs.AI",
+        "cs.CL",
+        "cs.SC"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.9886
+    },
+    {
+      "id": 157,
+      "file_name": "arxiv_2609.28416v1.pdf",
+      "file_hash": "29050477a4d3c83304779841ceb37e186f7507b87f7a3ef265498475977cc7a5",
+      "title": "Agent-Editing World Model: Rethinking World Modeling for LLM Agents",
+      "authors": [
+        "Shuang Sun",
+        "Guoxin Chen",
+        "Fanzhe Meng",
+        "Jia Deng",
+        "Huatong Song",
+        "Jinhao Jiang",
+        "Wayne Xin Zhao",
+        "Hongteng Xu",
+        "Ji-Rong Wen"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:26:05.234338",
+      "status": "failed",
+      "categories": [
+        "cs.CL",
+        "cs.AI",
+        "cs.LG"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.9886
+    },
+    {
+      "id": 146,
+      "file_name": "arxiv_2609.28471v1.pdf",
+      "file_hash": "9281117ce61b0c27a594ce172111bf466d9bcb7f65c14ba5efea44a1f101603d",
+      "title": "Contrastive Learning for Authorship Verification",
+      "authors": [
+        "Peter Kirby"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:24:29.922138",
+      "status": "failed",
+      "categories": [
+        "cs.CL",
+        "cs.LG"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.8219
+    },
+    {
+      "id": 150,
+      "file_name": "arxiv_2609.28449v1.pdf",
+      "file_hash": "948158c37a2581ed4f7063e348dca97358cf711296fcf0cde05d09cf1738935e",
+      "title": "Can LLMs Reason About Runtime Behavior? A Repository-Level Dynamic Benchmark",
+      "authors": [
+        "Hamed Taherkhani",
+        "Mohammad Abdollahi",
+        "Melika Sepidband",
+        "Hridya Dhulipala",
+        "Tien N. Nguyen",
+        "Hadi Hemmati"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:24:52.770192",
+      "status": "failed",
+      "categories": [
+        "cs.SE",
+        "cs.AI",
+        "cs.CL"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.8219
+    },
+    {
+      "id": 159,
+      "file_name": "arxiv_2609.28409v1.pdf",
+      "file_hash": "3d7b8db37a948021ae99df6f0f5ee1637723db565fd35d3c1a3290757657ccde",
+      "title": "Learning Holographic Reduced Representations with Clifford Variational Autoencoders",
+      "authors": [
+        "Mohamed Malek Abid",
+        "P. Michael Furlong"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:26:16.520701",
+      "status": "failed",
+      "categories": [
+        "cs.LG",
+        "cs.AI",
+        "cs.NE"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.8219
+    },
+    {
+      "id": 162,
+      "file_name": "arxiv_2609.28395v1.pdf",
+      "file_hash": "25a5076636665f22d8d675a3fe5d5ec2c6ac4f142e5107414338f12b329d16fa",
+      "title": "Fine-Tuning LLMs for Translation: General Forgetting Mitigation Does Not Preserve MT-Specific Instruction Following",
+      "authors": [
+        "Niklas Scholz",
+        "David Thulke",
+        "Abdallah Nasir",
+        "Will Allred",
+        "Evgeny Matusov",
+        "Hermann Ney"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:26:29.847297",
+      "status": "failed",
+      "categories": [
+        "cs.CL",
+        "cs.LG"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.8219
+    },
+    {
+      "id": 164,
+      "file_name": "arxiv_2609.28385v1.pdf",
+      "file_hash": "5a97530ddd4579af1919ee892876f5c011292a7eb8bf0cabb890b4c5be0f862d",
+      "title": "When and Where to Trust the Teacher: Unifying On-Policy Distillation and GRPO through Entropy-Calibrated Credit Assignment",
+      "authors": [
+        "Jie Zhang",
+        "Jingxiao Yang",
+        "Zhehao Huang",
+        "Yuhang Liu",
+        "Xiaolin Huang"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:26:44.046333",
+      "status": "failed",
+      "categories": [
+        "cs.LG",
+        "cs.AI"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.8219
+    },
+    {
+      "id": 119,
+      "file_name": "arxiv_2608.27402v1.pdf",
+      "file_hash": "1ca545e9b08ba4767cf0a67374b836e5e392f80b08318e562e0dfb30a92ac840",
+      "title": "How Language Models Organize and Structure Moral Knowledge",
+      "authors": [
+        "Orion Reblitz-Richardson"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:30:20.225557",
+      "status": "indexed",
+      "categories": [
+        "cs.CL",
+        "cs.AI",
+        "cs.LG"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.7618
+    },
+    {
+      "id": 95,
+      "file_name": "arxiv_2608.26070v1.pdf",
+      "file_hash": "c944a21bb44e8590213296e21b0247aac8b4a7963bbb53ed1f710d5f8a34c12a",
+      "title": "Prefix Sliding for efficient test-time scaling",
+      "authors": [
+        "Niklas Muennighoff",
+        "Zhengyang Wang",
+        "Zeyi Chen",
+        "Weijia Shi",
+        "Binyuan Hui",
+        "John Yang",
+        "Dapeng Jiang",
+        "Mika Senghaas",
+        "Fares Obeid",
+        "Johannes Hagemann",
+        "Sami Jaghouar",
+        "Ludwig Schmidt",
+        "Percy Liang",
+        "Jason Wei",
+        "Andrew Y. Ng",
+        "Luke Zettlemoyer",
+        "Yejin Choi",
+        "Mike Lewis"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:29:48.053142",
+      "status": "indexed",
+      "categories": [
+        "cs.CL",
+        "cs.AI",
+        "cs.LG"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.7558
+    },
+    {
+      "id": 98,
+      "file_name": "arxiv_2608.26053v1.pdf",
+      "file_hash": "107916fa92780b793c4d6dca7f5087ce61960df2f3a8cf3578fa9ce652674660",
+      "title": "$R^3$: Training Robots to Reason in Natural Language via Reinforcement Learning",
+      "authors": [
+        "Lehong Wu",
+        "Yuxiao Qu",
+        "Zheyuan Hu",
+        "Ivan Zhang",
+        "Limin Wei",
+        "Zackory Erickson",
+        "Aviral Kumar"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:31:20.100117",
+      "status": "indexed",
+      "categories": [
+        "cs.RO",
+        "cs.AI",
+        "cs.CL",
+        "cs.LG"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.7558
+    },
+    {
+      "id": 99,
+      "file_name": "arxiv_2608.26052v1.pdf",
+      "file_hash": "fbe1bf94c77bba9c16a711fab4ce379782594e550b6a962d5baac9c35650bbbe",
+      "title": "How Much Rank Does LoRA Need? Rank-Error Bounds for Transformer Attention",
+      "authors": [
+        "Gerard Conangla Planes"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:31:47.409490",
+      "status": "indexed",
+      "categories": [
+        "cs.LG",
+        "cs.AI",
+        "cs.CL"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.7558
+    },
+    {
+      "id": 64,
+      "file_name": "arxiv_2608.23566v1.pdf",
+      "file_hash": "d91878bc49c8386152de59af6d6846edd1adf1997c8e3f30a410b62873b3ff2f",
+      "title": "How to Train a Critic Stably and Efficiently",
+      "authors": [
+        "Penghui Qi",
+        "Xiangxin Zhou",
+        "Wee Sun Lee"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:36:36.992588",
+      "status": "indexed",
+      "categories": [
+        "cs.LG",
+        "cs.AI",
+        "cs.CL"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.7443
+    },
+    {
+      "id": 71,
+      "file_name": "arxiv_2608.23551v1.pdf",
+      "file_hash": "1bc0b06485d0315e9837714f0209772119eea5b34c9c8bd78f55f5feb6a66269",
+      "title": "ConvergeFlow: Language Flow with Provable Convergence to Token Embeddings",
+      "authors": [
+        "Na Li",
+        "Yuchen Jiao",
+        "Changxiao Cai",
+        "Gen Li"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:39:56.432845",
+      "status": "indexed",
+      "categories": [
+        "cs.CL",
+        "cs.AI",
+        "cs.LG",
+        "stat.ML"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.7443
+    },
+    {
+      "id": 25,
+      "file_name": "arxiv_2608.07458v1.pdf",
+      "file_hash": "70856378670a6cabf70e97d0a5ab502948ccabc70e43673f806d0372abed2c8b",
+      "title": "CoinRAG: Contextualized Information Nugget KV Cache Reuse for Long-Context RAG",
+      "authors": [
+        "Gyuwan Kim",
+        "Cheoneum Park",
+        "Tao Yang"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:50:34.197344",
+      "status": "indexed",
+      "categories": [
+        "cs.CL",
+        "cs.AI",
+        "cs.IR",
+        "cs.LG"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.6649
+    },
+    {
+      "id": 145,
+      "file_name": "arxiv_2609.28473v1.pdf",
+      "file_hash": "613198e049c6790a756b31568093413ea298a102704682b5c78ef1e688384f6c",
+      "title": "On the Diffusibility of High-Dimensional Latents",
+      "authors": [
+        "Chao Feng",
+        "Zhiyang Xu",
+        "Bowei Chen",
+        "Yuanjun Xiong",
+        "Xiyao Wang",
+        "Jui-Hsien Wang",
+        "Richard Zhang",
+        "Zhe Lin",
+        "Andrew Owens",
+        "Yijun Li"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:24:27.517538",
+      "status": "failed",
+      "categories": [
+        "cs.CV",
+        "cs.LG"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.6553
+    },
+    {
+      "id": 147,
+      "file_name": "arxiv_2609.28470v1.pdf",
+      "file_hash": "c6123f58e50cdcc5b30c75ed3e567dc169d404a3b5e97a059877801bc36bde53",
+      "title": "StudentBench: AI and human tutoring yield equivalent GRE learning gains",
+      "authors": [
+        "Curtis Northcutt",
+        "Inaara Hasmani",
+        "Kevin Feng",
+        "Trevor Khangi",
+        "Andreas Plesner",
+        "Jonas Mueller"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:24:40.992443",
+      "status": "failed",
+      "categories": [
+        "cs.AI",
+        "cs.CY"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.6553
+    },
+    {
+      "id": 148,
+      "file_name": "arxiv_2609.28467v1.pdf",
+      "file_hash": "7fc80def40c677f441843cead3750d34705a3587a329b952988bd22b38b4c15d",
+      "title": "Where Should I Join? Robot Group Joining via Language-Guided Goal Prediction",
+      "authors": [
+        "Zilin Fang",
+        "Zishuo Wang",
+        "Gim Hee Lee",
+        "David Hsu"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:24:44.001119",
+      "status": "failed",
+      "categories": [
+        "cs.RO",
+        "cs.AI"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.6553
+    },
+    {
+      "id": 149,
+      "file_name": "arxiv_2609.28459v1.pdf",
+      "file_hash": "ee015fe2dcff514435f47e782a98b85fd21b19595821d14cc02b1f04ce1df60b",
+      "title": "Even Sharper Bounds for Transductive Learning and Its Applications",
+      "authors": [
+        "Yingzhen Yang"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:24:48.999651",
+      "status": "failed",
+      "categories": [
+        "cs.LG",
+        "cs.IT",
+        "math.ST"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.6553
+    },
+    {
+      "id": 151,
+      "file_name": "arxiv_2609.28448v1.pdf",
+      "file_hash": "25aa5abb2017636cc20d262c715aa3abe2487a5815c3a66ab44383f3126cf4bf",
+      "title": "Nonequilibrium Phases of Repulsive Self-Attention: Chaos, Attention Condensation, and Emergent Locality",
+      "authors": [
+        "Qucheng Gao",
+        "Zuyi Yang",
+        "Xiao Chen"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:25:07.459846",
+      "status": "failed",
+      "categories": [
+        "cond-mat.dis-nn",
+        "cond-mat.stat-mech",
+        "cs.LG"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.6553
+    },
+    {
+      "id": 153,
+      "file_name": "arxiv_2609.28438v1.pdf",
+      "file_hash": "669f63ce97820ab3c128addf57b3ec88859d75f5ef813e4ad77b14ec9d9d3288",
+      "title": "Minimal-Norm Univariate Two-Layer ReLU Classification: Exact Solutions and Global Optimality with Skip Connections",
+      "authors": [
+        "Karolina Drabik",
+        "Ben Lewis",
+        "Antoni Puch",
+        "Etienne Boursier",
+        "Piotr Hofman",
+        "Matthias Englert",
+        "Ranko Lazić"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:25:21.227186",
+      "status": "failed",
+      "categories": [
+        "cs.LG"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.6553
+    },
+    {
+      "id": 154,
+      "file_name": "arxiv_2609.28430v1.pdf",
+      "file_hash": "adf074e74051cd6baabdcaa9403681cff5720d46be79d7dd9747c0859c5b7085",
+      "title": "Cross-Scale Transfer Learning for Depression Severity Prediction: From PHQ-8 to HAMD-17 Across Languages and Clinical Paradigms",
+      "authors": [
+        "Wenjie Feng",
+        "Sahba Zojaji",
+        "Satoshi Nakamura"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:25:23.739324",
+      "status": "failed",
+      "categories": [
+        "cs.CL"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.6553
+    },
+    {
+      "id": 155,
+      "file_name": "arxiv_2609.28427v1.pdf",
+      "file_hash": "812f3eb5e78af08e57dbddd137992b5b632df8c32d58dc1e3e23cf2435f1db45",
+      "title": "Context-Continuous Preference Learning for Exoskeleton Personalization",
+      "authors": [
+        "Sunin Baek",
+        "Sungwoo Park",
+        "Daekyum Kim"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:25:38.259386",
+      "status": "failed",
+      "categories": [
+        "cs.LG",
+        "cs.RO"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.6553
+    },
+    {
+      "id": 156,
+      "file_name": "arxiv_2609.28425v1.pdf",
+      "file_hash": "278d14776184f406282d41d4d74b27ff9a77b4116cc06b9d3b9b77b497c6d97b",
+      "title": "Repairability of Inexact Solvers in Recursive State Estimation with Machine Learning",
+      "authors": [
+        "Yanjun Ji",
+        "Dennis Willsch",
+        "Orkun Şensebat",
+        "Priyanka Arkalgud Ganeshamurthy",
+        "Zhi Pei",
+        "M. Sahnawaz Alam",
+        "Ivelina Stoyanova",
+        "Frank K. Wilhelm",
+        "Bo Zhao",
+        "Chao Wang",
+        "Kristel Michielsen"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:25:54.923844",
+      "status": "failed",
+      "categories": [
+        "quant-ph",
+        "cs.LG"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.6553
+    },
+    {
+      "id": 158,
+      "file_name": "arxiv_2609.28414v1.pdf",
+      "file_hash": "ba9a8681b83557e4ab30d396c11ee90a0c66e3124f2db095faca4e18aca18df9",
+      "title": "Frozen Flows Forget: Diagnosing and Restoring Lost Motion in a Latent-flow World Model",
+      "authors": [
+        "Xiwen Chen",
+        "Rigaudiere Z. Li",
+        "Zhiruo Zhou",
+        "Xiaojun Zhu",
+        "Houde Liu"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:26:07.862012",
+      "status": "failed",
+      "categories": [
+        "cs.CV",
+        "cs.AI",
+        "cs.RO"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.6553
+    },
+    {
+      "id": 160,
+      "file_name": "arxiv_2609.28405v1.pdf",
+      "file_hash": "dcf7d051159ef44d2a125019f915ab6e7e6113ecb9279c07fd879bf89b611c3d",
+      "title": "Learning Collective Dynamics with Differentiable Gaussian Representations",
+      "authors": [
+        "Jianxiang Ma",
+        "Mingfu Zhang",
+        "Xiaocui Yang",
+        "Yichen Gao",
+        "Junzhao Huang",
+        "Yuesong Hou"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:26:20.946593",
+      "status": "failed",
+      "categories": [
+        "cs.LG"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.6553
+    },
+    {
+      "id": 161,
+      "file_name": "arxiv_2609.28399v1.pdf",
+      "file_hash": "9f050ae144486eb7dccf39d89f4c047ab360b56a86c20e8e9e235dd1b4c23cf3",
+      "title": "Memory Attention",
+      "authors": [
+        "Jiale Kang"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:26:24.684491",
+      "status": "failed",
+      "categories": [
+        "cs.LG"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.6553
+    },
+    {
+      "id": 163,
+      "file_name": "arxiv_2609.28391v1.pdf",
+      "file_hash": "033e41d379147951e0dc16c3a2deee941db69b958cdfaf64a3d480a71a85d38b",
+      "title": "Quantum score matching with applications to learning thermal states",
+      "authors": [
+        "Yulong Dong",
+        "Jiaqi Leng"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-09-24T13:26:40.478967",
+      "status": "failed",
+      "categories": [
+        "quant-ph",
+        "cs.LG"
+      ],
+      "published_date": "2026-09-23",
+      "source": "arxiv",
+      "score": 0.6553
+    },
+    {
+      "id": 126,
+      "file_name": "arxiv_2608.28578v1.pdf",
+      "file_hash": "eae312d3bd0086b0910700275057d0eba73c4140a2fbfe486b59a3a023f08f04",
+      "title": "Aero Hand Open: A Simulation-Ready Tendon-Driven Hand for Dexterous Manipulation Learning",
+      "authors": [
+        "Nan Wang",
+        "Mohit Yadav",
+        "Jonathan Wulff",
+        "Aidan Rosenbaum",
+        "Kezhou Chen",
+        "Yuvan Sharma",
+        "Xu Dong",
+        "Yiwei Tao"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:40:50.854520",
+      "status": "indexed",
+      "categories": [
+        "cs.RO",
+        "cs.AI",
+        "cs.LG"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.6012
+    },
+    {
+      "id": 127,
+      "file_name": "arxiv_2608.28576v1.pdf",
+      "file_hash": "93b784fdc009876f9bf4c8b421200878da4578ce3da31fc76dde43c291b50ca6",
+      "title": "Learning a Size-Weight Frontier for Synthetic-Augmented Inference",
+      "authors": [
+        "Chengpiao Huang",
+        "Kaizheng Wang"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:41:12.561624",
+      "status": "indexed",
+      "categories": [
+        "stat.ME",
+        "cs.AI",
+        "cs.LG",
+        "stat.ML"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.6012
+    },
+    {
+      "id": 131,
+      "file_name": "arxiv_2608.28557v1.pdf",
+      "file_hash": "b24d0bfb57547072a12c974cd3174a2a3ae5e231cef4cbebb4a3772f904ef693",
+      "title": "Blog: Survey of Optimizers",
+      "authors": [
+        "Ruoran Xu"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:43:17.329687",
+      "status": "indexed",
+      "categories": [
+        "cs.LG",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.6012
+    },
+    {
+      "id": 136,
+      "file_name": "arxiv_2608.28541v1.pdf",
+      "file_hash": "c2c9d997d2142e92a81700d5b12f23633ff75e11e6618dacb0aee3772ff04c68",
+      "title": "An Enclosed Mode Is a Gauge Choice: Topology Relative to Reach in Certified Code World Models",
+      "authors": [
+        "Javier Aguilar Martín"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:45:31.061859",
+      "status": "indexed",
+      "categories": [
+        "cs.LG",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.6012
+    },
+    {
+      "id": 139,
+      "file_name": "arxiv_2608.28518v1.pdf",
+      "file_hash": "687f155d067fc30288aff56d8abbe511f00d42e6761f59b58c1e1990eca5a41c",
+      "title": "When Robots Mishear Us: Mapping the Safety Risks of Voice-Controlled Embodied AI",
+      "authors": [
+        "Sihan Jia",
+        "Oliver Lemon"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:46:59.598337",
+      "status": "indexed",
+      "categories": [
+        "cs.AI",
+        "cs.CL",
+        "cs.RO"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.6012
+    },
+    {
+      "id": 105,
+      "file_name": "arxiv_2608.27454v1.pdf",
+      "file_hash": "65afc6e12f6f707483fe1b79a97ab67c03abf4b4992f82fde03eb7b8d9ad4a69",
+      "title": "WikiSkill: Compiling Agent Experience into Persistent Knowledge for Skill Evolution",
+      "authors": [
+        "Liyan Tang",
+        "Cyrus Rashtchian",
+        "Chun-Sung Ferng",
+        "Andrew Tomkins",
+        "Da-Cheng Juan",
+        "Tu Vu"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:25:17.762913",
+      "status": "indexed",
+      "categories": [
+        "cs.AI",
+        "cs.CL"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.5951
+    },
+    {
+      "id": 106,
+      "file_name": "arxiv_2608.27449v1.pdf",
+      "file_hash": "572093080102b117a391fb915980cde0b3ab5afed025746d8f60faf2ed2b0fe3",
+      "title": "SWE-Prime: Fewer Trajectories, Better Performance",
+      "authors": [
+        "Dewu Zheng",
+        "Ruizhe Ye",
+        "Yanlin Wang",
+        "Yang Ye",
+        "Hongyu Zhang",
+        "Ensheng Shi",
+        "Xilin Liu",
+        "Yuchi Ma",
+        "Jianxing Yu",
+        "Zibin Zheng"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:25:47.545918",
+      "status": "indexed",
+      "categories": [
+        "cs.SE",
+        "cs.AI",
+        "cs.CL"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.5951
+    },
+    {
+      "id": 108,
+      "file_name": "arxiv_2608.27442v1.pdf",
+      "file_hash": "75ff75f007f284ba006ad4f414a77daf0c7dcd808654cc5f91b6307895391fd7",
+      "title": "From Static to Dynamic: Benchmarking Real-World Code Review with MCR-Bench",
+      "authors": [
+        "Dewu Zheng",
+        "Yanlin Wang",
+        "Xiwen Wang",
+        "Kefeng Duan",
+        "Hongyu Zhang",
+        "Xilin Liu",
+        "Yuchi Ma",
+        "Zibin Zheng"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:26:28.803637",
+      "status": "indexed",
+      "categories": [
+        "cs.SE",
+        "cs.AI",
+        "cs.CL"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.5951
+    },
+    {
+      "id": 114,
+      "file_name": "arxiv_2608.27421v1.pdf",
+      "file_hash": "ffc0d845c1ee8d5527bf59eec58008e3a769f3fd782b3305608e002fbf38a5d0",
+      "title": "Learning a Continuous Sepsis Severity Score Without Hour-by-Hour Supervision: A Two-Site Retrospective Study",
+      "authors": [
+        "Kevin Zhu",
+        "Ryan Zhang",
+        "Baraa Abed",
+        "Tilendra Choudhary",
+        "Malvern Madondo",
+        "Mehak Arora",
+        "Yixuan Yang",
+        "Alasdair Gent",
+        "Aditya Nagori",
+        "Omer T. Inan",
+        "Krista L. Haines",
+        "Patrick Georgoff",
+        "Suresh M. Agarwal",
+        "Vijay Krishnamoorthy",
+        "Tetsu Ohnuma",
+        "Mihai V. Podgoreanu",
+        "Michael R. Pinsky",
+        "Gilles Clermont",
+        "Craig M. Coopersmith",
+        "Craig S. Jabaley",
+        "Rishikesan Kamaleswaran"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:28:35.681255",
+      "status": "indexed",
+      "categories": [
+        "cs.AI",
+        "cs.LG"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.5951
+    },
+    {
+      "id": 120,
+      "file_name": "arxiv_2608.27397v1.pdf",
+      "file_hash": "9f0e7d40a610187deae3b6bb5551a5da720f1987b7a5b4b1d9fbadcb40804c1d",
+      "title": "Making Clinical Language Models Auditable: Concept-Guided Fine-Tuning for Robust Prediction",
+      "authors": [
+        "Jin Mu",
+        "Guanhua Chen"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:30:49.249624",
+      "status": "indexed",
+      "categories": [
+        "cs.CL",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.5951
+    },
+    {
+      "id": 84,
+      "file_name": "arxiv_2608.26105v1.pdf",
+      "file_hash": "2ce3e5029b509ac7f8786d35e70279ac94ac2cf408fc03bc37fd353a314003ce",
+      "title": "VBVR-Pro: A Scalable and Verifiable Suite for Native Visual Reasoning",
+      "authors": [
+        "Junxiang Xu",
+        "Ruisi Wang",
+        "Fanyi Pu",
+        "Maijunxian Wang",
+        "Ran Ji",
+        "Tongxi Zhou",
+        "Chenyang Gu",
+        "Jing Zuo",
+        "Hongcan Xiao",
+        "Yimeng Geng",
+        "Wanqi Yin",
+        "Wei Chen",
+        "Oscar Qian",
+        "Zhengan Yan",
+        "Ziqi Huang",
+        "Haiwen Diao",
+        "Liang Pan",
+        "Bo Li",
+        "Xiangyu Fan",
+        "Dezhi Luo",
+        "Fengyuan Yu",
+        "Zehong Zhao",
+        "Qingying Gao",
+        "Tinghui Zhu",
+        "Yilan Zhang",
+        "Jingqi Tong",
+        "Pinyuan Feng",
+        "Zhengze Jiang",
+        "Letian Wang",
+        "Ziyu Guo",
+        "Renrui Zhang",
+        "Jieneng Chen",
+        "Sonia Joseph",
+        "Constantin Venhoff",
+        "Saman Motamed",
+        "Mengyue Yang",
+        "Chandra Sripada",
+        "Alan Yuille",
+        "Philip Torr",
+        "Lvmin Zhang",
+        "Vikash Kumar",
+        "Daniel Khashabi",
+        "Nikolaus Kriegeskorte",
+        "Raphaël Millière",
+        "Vincent C. Müller",
+        "Anyi Rao",
+        "Quan Wang",
+        "Ziwei Liu",
+        "Dahua Lin",
+        "Lei Yang",
+        "Hokin Deng",
+        "Zhongang Cai"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:24:13.390778",
+      "status": "indexed",
+      "categories": [
+        "cs.CV",
+        "cs.AI",
+        "cs.LG",
+        "cs.MM",
+        "cs.RO"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.5891
+    },
+    {
+      "id": 86,
+      "file_name": "arxiv_2608.26094v1.pdf",
+      "file_hash": "f57a1ead6a2bd28343d68027fa4e1da94eb5f762e1a1255100c4267b7bc049a2",
+      "title": "MyoMechanix: Biomechanically-Grounded Compositional Skilled Activity Understanding and Coaching",
+      "authors": [
+        "Hao Yin",
+        "Paritosh Parmar",
+        "Lijun Gu",
+        "Lin Xu",
+        "Tianxiao Guo",
+        "Xiujin Liu",
+        "Tianyou Zheng",
+        "Yang Zhang",
+        "Weiwei Fu"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:26:01.732682",
+      "status": "indexed",
+      "categories": [
+        "cs.CV",
+        "cs.AI",
+        "cs.ET",
+        "cs.HC",
+        "cs.LG"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.5891
+    },
+    {
+      "id": 89,
+      "file_name": "arxiv_2608.26090v1.pdf",
+      "file_hash": "2734f6d3966c0f98a98f80c7f2012e92f04f3d132019ba0e7335df5d83517383",
+      "title": "Finding and using interpretable latents in a neutrino foundation model with sparse autoencoders",
+      "authors": [
+        "Raphaël Bonnet-Guerrini",
+        "Johann Ioannou-Nikolaides",
+        "Inar Timiryasov",
+        "Vincenzo Piuri"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:26:44.904972",
+      "status": "indexed",
+      "categories": [
+        "astro-ph.HE",
+        "cs.AI",
+        "cs.LG",
+        "hep-ex"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.5891
+    },
+    {
+      "id": 90,
+      "file_name": "arxiv_2608.26088v1.pdf",
+      "file_hash": "f55a72ad21486773a7b2d2ec3a3a90bc52abb7dd50dafc79a52987867fd7e56b",
+      "title": "Planetary Prediction Engine: Autonomous Geospatial Prediction via Intelligent Data Selection and Foundation Model Embeddings",
+      "authors": [
+        "Evelyn Ma",
+        "Rama Kumar Pasumarthi",
+        "Kishwar Shafin",
+        "Mandar Sharma",
+        "Mimi Sun",
+        "Hamed Sadeghi",
+        "Dav M. Ebengo",
+        "Mbulayi Onesime",
+        "Rouslan Solomakhin",
+        "John Wamburu",
+        "William Ogallo",
+        "Aisha Walcott-Bryant",
+        "Sanxing Chen",
+        "Arbaaz Muslim",
+        "Yael Mayer",
+        "Ronald Ho",
+        "Roy Lee",
+        "Ruth Alcantara",
+        "Abdoulaye Diack",
+        "Monica Bharel",
+        "Lambert Rosique",
+        "Jeremy Amez-Droz",
+        "Christopher Haire",
+        "James Manyika",
+        "Yossi Matias",
+        "Niv Efron",
+        "Gautam Prasad",
+        "Shravya Shetty"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:27:10.411641",
+      "status": "indexed",
+      "categories": [
+        "cs.AI",
+        "cs.LG"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.5891
+    },
+    {
+      "id": 91,
+      "file_name": "arxiv_2608.26086v1.pdf",
+      "file_hash": "910165b71b6a62575963673e1b03fe2c16691db5d9559b0496bcad4ec533a6ba",
+      "title": "TraceML: An Empirical Analysis of Human-Agent Planning in Machine Learning Development",
+      "authors": [
+        "Jiarui Yan",
+        "Weiwei Sun",
+        "Sijie Li",
+        "Wenhan Li",
+        "Yiming Yang"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:27:41.737631",
+      "status": "indexed",
+      "categories": [
+        "cs.LG",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.5891
+    },
+    {
+      "id": 92,
+      "file_name": "arxiv_2608.26083v1.pdf",
+      "file_hash": "a368e66ef1c0e5e7b1e78b9464762a13fb0fb3a5fe90b9243d32bb3ccfc6f355",
+      "title": "ICON Decomposition: Multivariate Concept-Level Explanations of Deep Representations for Model Auditing",
+      "authors": [
+        "Roshan Prakash Rane",
+        "Marco Simnacher",
+        "Manuel Pfeuffer",
+        "Marc-Andre Schulz",
+        "Nys Tjade Siegel",
+        "Maximilian Dreyer",
+        "Frederik Pahde",
+        "Wojciech Samek",
+        "Sonja Greven",
+        "Kerstin Ritter"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:28:17.152498",
+      "status": "indexed",
+      "categories": [
+        "cs.LG",
+        "cs.AI",
+        "cs.CV",
+        "stat.ML"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.5891
+    },
+    {
+      "id": 93,
+      "file_name": "arxiv_2608.26081v1.pdf",
+      "file_hash": "d6a63c277f30cd590d2f3c27c5c46e9f7b95c2a3e82d75234631553f17bdb4c1",
+      "title": "SwarmWorld: Stigmergic technological evolution in societies of language-model agents",
+      "authors": [
+        "Subhadeep Pal",
+        "Fiona Y. Wang",
+        "Markus J. Buehler"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:28:55.593320",
+      "status": "indexed",
+      "categories": [
+        "cs.AI",
+        "cond-mat.mtrl-sci",
+        "cs.CL"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.5891
+    },
+    {
+      "id": 102,
+      "file_name": "arxiv_2608.26036v1.pdf",
+      "file_hash": "a7fae3578b919f584b66591e83b070c06f7cba808e52f7bf5b56551f793196db",
+      "title": "Trace Integrity for LLM Data Agents: A Vision for Auditable Structured Reasoning in Real-World Systems",
+      "authors": [
+        "Srimonti Dutta",
+        "Akshata Kishore Moharir"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:33:16.879544",
+      "status": "indexed",
+      "categories": [
+        "cs.AI",
+        "cs.CL"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.5891
+    },
+    {
+      "id": 66,
+      "file_name": "arxiv_2608.23564v1.pdf",
+      "file_hash": "beed95d54eaa0eabdb3b22649bc8512c4e68b070657f6d03792167ffb24f72f4",
+      "title": "SWE Refactor Bench: Can Coding Agents Complete a Long-Horizon, Whole-Repository Stack Migration?",
+      "authors": [
+        "Deyao Hong",
+        "Yizhe Chi",
+        "Wenyi Li",
+        "Xiaoqiu Wang",
+        "Mingju Gao",
+        "Kaisen Yang",
+        "Bingxiang He",
+        "Youjie Zheng",
+        "Calvin Xiao",
+        "Qinhuai Na"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:37:19.665318",
+      "status": "indexed",
+      "categories": [
+        "cs.CL",
+        "cs.AI",
+        "cs.SE"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.5776
+    },
+    {
+      "id": 70,
+      "file_name": "arxiv_2608.23552v1.pdf",
+      "file_hash": "973323f2d3d85f3ec9b21709248b65ba236cf527cd5cc9ff556909104a5fd370",
+      "title": "Prime Agent: A Self-Improving RLM Harness",
+      "authors": [
+        "Seth Karten",
+        "Alex L. Zhang",
+        "Kevin Thomas",
+        "Sebastian Müller",
+        "Elie Bakouch",
+        "Daniel Auras",
+        "Mika Senghaas",
+        "Fares Obeid",
+        "Konstantin Dunas",
+        "Johannes Hagemann",
+        "Sami Jaghouar"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:39:27.490963",
+      "status": "indexed",
+      "categories": [
+        "cs.AI",
+        "cs.CL",
+        "cs.SE"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.5776
+    },
+    {
+      "id": 82,
+      "file_name": "arxiv_2608.23507v1.pdf",
+      "file_hash": "16939b36fc07d820b3965e144c3779f32f0e71904c73aad8d5a1acb45648f8a6",
+      "title": "When Names Cross Scripts: A Source-Grounded Benchmark for Historical Entity Reconciliation in the Mongol World",
+      "authors": [
+        "Xiang Chen",
+        "Zeyu Zhang"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:45:33.518189",
+      "status": "indexed",
+      "categories": [
+        "cs.CL",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.5776
+    },
+    {
+      "id": 83,
+      "file_name": "arxiv_2608.23497v1.pdf",
+      "file_hash": "4b5956c73f1a6f0d7e03f97097b26cca5905fb7e75060b4f17580928bfa4982f",
+      "title": "Mitigating Reasoning-Induced Misalignment via Safety-Direction Penalty",
+      "authors": [
+        "Yipeng Zhao",
+        "Qishun Yang",
+        "Shenzhe Zhu",
+        "Shu Yang",
+        "Di Wang"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:46:03.688197",
+      "status": "indexed",
+      "categories": [
+        "cs.AI",
+        "cs.CL"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.5776
+    },
+    {
+      "id": 24,
+      "file_name": "arxiv_2608.07460v1.pdf",
+      "file_hash": "a4163c0a60f695b7323557438b73ee67f41294679527fcbce1bdc5f200524f3f",
+      "title": "CreativeInstruct: Scalably Teaching LLMs to Balance Quality, Creativity, and Diversity",
+      "authors": [
+        "Ananya Sahu",
+        "Mohit Bansal",
+        "Elias Stengel-Eskin"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:50:12.181032",
+      "status": "indexed",
+      "categories": [
+        "cs.CL",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.4982
+    },
+    {
+      "id": 28,
+      "file_name": "arxiv_2608.07449v1.pdf",
+      "file_hash": "c87fd61057e6d3d5510b125e816f67acb7cd7b1a8275566c0039a28800673e0c",
+      "title": "SkillProx: Self-Evolving Agent Skills via Proximal Textual Gradient Descent",
+      "authors": [
+        "Mingxuan Zheng",
+        "Yujin Zhou",
+        "Chuxue Cao",
+        "Boqin Yin",
+        "Yuyao Zhang",
+        "Jiapeng Sun",
+        "Shuaishuai Gong",
+        "Sirui Han",
+        "Yike Guo"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:51:49.830653",
+      "status": "indexed",
+      "categories": [
+        "cs.AI",
+        "cs.CL"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.4982
+    },
+    {
+      "id": 33,
+      "file_name": "arxiv_2608.07438v1.pdf",
+      "file_hash": "97bbbe620540481997efde75c49e957d55e4bf80605de4a9a75c03b6a3b5407b",
+      "title": "PsychoAgent: An Affect-Sensitive Cognitive Architecture for Conflict-Aware Memory in LLM Agents",
+      "authors": [
+        "Mohammad Amanlou",
+        "Parham Abed Azad",
+        "Farbod Davoodi",
+        "Mostafa Masumi",
+        "Behnam Bahrak",
+        "Abdol-Hossein Vahabie"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:54:30.137121",
+      "status": "indexed",
+      "categories": [
+        "cs.AI",
+        "cs.CL",
+        "cs.HC"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.4982
+    },
+    {
+      "id": 35,
+      "file_name": "arxiv_2608.07436v1.pdf",
+      "file_hash": "b16ff4ecdf83ba49d1c214e82302b68129238b0045103d50ae31778671f387c3",
+      "title": "Post-Grokking Collapse at the Representation-Readout Interface in Muon-Trained Transformers",
+      "authors": [
+        "Ali Janati",
+        "Kaoutar El Maghraoui",
+        "Andrei Kanavalau",
+        "Anass Belfatmi"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:55:47.067813",
+      "status": "indexed",
+      "categories": [
+        "cs.AI",
+        "cs.LG"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.4982
+    },
+    {
+      "id": 36,
+      "file_name": "arxiv_2608.07435v1.pdf",
+      "file_hash": "252900119d31202b958167644f6ad637464076b663fb3128223b931b2f37579f",
+      "title": "SABRE: Scalable and Automated Benchmarking of VLMs under Stress",
+      "authors": [
+        "Zixuan Lan",
+        "Luzhe Sun",
+        "Matthew R. Walter",
+        "Jiawei Zhou"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:57:09.669750",
+      "status": "indexed",
+      "categories": [
+        "cs.CV",
+        "cs.AI",
+        "cs.CL"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.4982
+    },
+    {
+      "id": 38,
+      "file_name": "arxiv_2608.07430v1.pdf",
+      "file_hash": "6b56282c72b110334acc34c1acba9c09651ef647c19cd91e701cdbd1e8f3a0ba",
+      "title": "Diffusion LLMs as Targets and Adversaries: Mechanistic Safety Exploits",
+      "authors": [
+        "Elena Dumitrescu",
+        "Gert Lek",
+        "Lydia Y. Chen",
+        "Jérémie Decouchant"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:58:17.746001",
+      "status": "indexed",
+      "categories": [
+        "cs.LG",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.4982
+    },
+    {
+      "id": 125,
+      "file_name": "arxiv_2608.28589v1.pdf",
+      "file_hash": "218605c2026947f3631213261accc5599d855d7bee3a868b8100a79ddb17e8f5",
+      "title": "QGPINNs: A Physics-Informed Neural Network Framework for Nonlocal Differential Equations on Quantum Graphs",
+      "authors": [
+        "Vaibhav Mehandiratta",
+        "Saket Ramchandra"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:40:21.967687",
+      "status": "indexed",
+      "categories": [
+        "cs.LG",
+        "math.NA"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.4346
+    },
+    {
+      "id": 128,
+      "file_name": "arxiv_2608.28566v1.pdf",
+      "file_hash": "772c178fef4e80449fff7d5aa865f1dc92a89ca48a8aeda196d422d063dc0c6b",
+      "title": "On two proofs of $d^2$ mixing of weighted Dikin walks",
+      "authors": [
+        "Yuansi Chen",
+        "Yunbum Kook"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:41:44.679263",
+      "status": "indexed",
+      "categories": [
+        "cs.DS",
+        "cs.LG",
+        "math.OC",
+        "math.PR",
+        "stat.CO"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.4346
+    },
+    {
+      "id": 129,
+      "file_name": "arxiv_2608.28564v1.pdf",
+      "file_hash": "1419c9ba0407dc0abbd7236b0dd4390388b86bf77242db34e69c2bc49685e12c",
+      "title": "Learning between the peaks: sharp asymptotics for kernel ridge regression under power-law anisotropy",
+      "authors": [
+        "Lorenzo Rizzi",
+        "Arie Wortsman Zurich",
+        "Bruno Loureiro"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:42:20.283969",
+      "status": "indexed",
+      "categories": [
+        "stat.ML",
+        "cs.LG"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.4346
+    },
+    {
+      "id": 130,
+      "file_name": "arxiv_2608.28560v1.pdf",
+      "file_hash": "7937ff37abffeed4fab11aabd8d1aa7b5905b6e2a889f21389c23dfd6acebcce",
+      "title": "A Formal Limitation on Learning Human Language From Textual Corpora",
+      "authors": [
+        "Emily Cheng",
+        "Ryan Cotterell"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:42:51.486935",
+      "status": "indexed",
+      "categories": [
+        "cs.CL"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.4346
+    },
+    {
+      "id": 132,
+      "file_name": "arxiv_2608.28553v1.pdf",
+      "file_hash": "9a22f970959c884c9ecca63c2dd04e9476566b56260e51306146f07aced905a2",
+      "title": "Logos: An Agent Harness on a Cross-Process Bus",
+      "authors": [
+        "Hanzhang Jia",
+        "Liheng Zeng",
+        "Hao Cheng",
+        "Yi Gao",
+        "Bo Ma"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:43:44.414191",
+      "status": "indexed",
+      "categories": [
+        "cs.AI",
+        "cs.MA"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.4346
+    },
+    {
+      "id": 133,
+      "file_name": "arxiv_2608.28552v1.pdf",
+      "file_hash": "35a1c72ede5ab8b484d4bfc810f4e24e0ef1cae48702c77d3cec04b6b1e7850a",
+      "title": "Advancing Interaction-Sensitive Feature Selection: Novel Relief-Based Algorithms, Expanded Comparisons, and Recommendations for Biomedical Data Mining",
+      "authors": [
+        "Kia Kazemi-Nia",
+        "Harsh Bandhey",
+        "Philip J. Freda",
+        "Ryan J. Urbanowicz"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:44:03.901728",
+      "status": "indexed",
+      "categories": [
+        "cs.LG"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.4346
+    },
+    {
+      "id": 134,
+      "file_name": "arxiv_2608.28549v1.pdf",
+      "file_hash": "5d491e65a68ee02163c03c36956ddb1b50f95892d69f2d62575a8ccce3432749",
+      "title": "Video Generative Models as Geometry Learner",
+      "authors": [
+        "Haosen Yang",
+        "Jifei Song",
+        "Zhensong Zhang",
+        "Xiatian Zhu",
+        "Jiankang Deng"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:44:27.980888",
+      "status": "indexed",
+      "categories": [
+        "cs.CV",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.4346
+    },
+    {
+      "id": 135,
+      "file_name": "arxiv_2608.28547v1.pdf",
+      "file_hash": "ae96c7d3f26431b1055422e228fae3621f2864aab7ac7159c0713fc5fc8be495",
+      "title": "DARTS: Decoder-Aware Representation Tuning via Surgery for Model Merging",
+      "authors": [
+        "Aaryan Ajay Sharma",
+        "Sai Nishanth Padala",
+        "Seganrasan Subramanian"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:44:59.020283",
+      "status": "indexed",
+      "categories": [
+        "cs.LG"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.4346
+    },
+    {
+      "id": 137,
+      "file_name": "arxiv_2608.28534v1.pdf",
+      "file_hash": "9b1dbb9cc614f386eaf6ad252633ba0a4493e417fbf4ecbadd58e93b34c2b67d",
+      "title": "InstructMesh: Selective Refinement of Generative 3D Models for Fabrication",
+      "authors": [
+        "Faraz Faruqi",
+        "Ahmed Katary",
+        "Demircan Tas",
+        "Theresa Hradilak",
+        "Ning Zhang",
+        "Jiaji Li",
+        "Fabian Manhardt",
+        "Martin Nisser",
+        "Vrushank Phadnis",
+        "Ruofei Du",
+        "Federico Tombari",
+        "Megan Hofmann",
+        "Stefanie Mueller"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:46:00.703422",
+      "status": "indexed",
+      "categories": [
+        "cs.AI"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.4346
+    },
+    {
+      "id": 138,
+      "file_name": "arxiv_2608.28524v1.pdf",
+      "file_hash": "b36c9a685884c6bc535ca5b883138ca45ba9fa8aede53f36164d60ff31f747eb",
+      "title": "Texture Image Classification Using DWT AlexNet Feature Fusion and Deep Neural Networks",
+      "authors": [
+        "Arun D. Kulkarni"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:46:32.883905",
+      "status": "indexed",
+      "categories": [
+        "cs.CV",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.4346
+    },
+    {
+      "id": 140,
+      "file_name": "arxiv_2608.28515v1.pdf",
+      "file_hash": "3f2912d8e26f5c03b1bf3ea7046833ca388adceede642167741ffd1c1e42dade",
+      "title": "Conformal Uncertainty Quantification Guarantees for Neural Operators",
+      "authors": [
+        "Tom Stent",
+        "Nicolas Boullé"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:47:18.162827",
+      "status": "indexed",
+      "categories": [
+        "math.NA",
+        "cs.AI",
+        "math.PR"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.4346
+    },
+    {
+      "id": 141,
+      "file_name": "arxiv_2608.28511v1.pdf",
+      "file_hash": "10bebca0596f8a671c27075299cec07978fb5891d9a726a7ece6ac2b824e4d49",
+      "title": "Training Communication-Efficient Mixture-of-Experts Language Models with Layer Re-Configuration",
+      "authors": [
+        "Simeng Sun",
+        "Roger Waleffe"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:47:47.331016",
+      "status": "indexed",
+      "categories": [
+        "cs.AI"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.4346
+    },
+    {
+      "id": 142,
+      "file_name": "arxiv_2608.28508v1.pdf",
+      "file_hash": "2391fd51730501345e6689f7997e7ec7dfe1fb794308c4e2d7d731e98dd9dcf0",
+      "title": "Phoneme- and Word-Level Metrics Using Self-Supervised Speech Representations for Forced Alignment Evaluation",
+      "authors": [
+        "V. S. D. S. Mahesh Akavarapu",
+        "Michael Daniel",
+        "Gerhard Jäger"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:48:09.775153",
+      "status": "indexed",
+      "categories": [
+        "cs.CL"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.4346
+    },
+    {
+      "id": 143,
+      "file_name": "arxiv_2608.28499v1.pdf",
+      "file_hash": "20f05f5775388a7d1f058dc1631e61544f0d47b931ba75d4baa5fa861e34dc7e",
+      "title": "REPLICANT: Learning Policies for Evading and Hardening Malware Detectors",
+      "authors": [
+        "Shae McFadden",
+        "Ilias Tsingenopoulos",
+        "Mario D'Onghia",
+        "Alexander Herzog",
+        "Myles Foley",
+        "Chris Hicks",
+        "Lorenzo Cavallaro",
+        "Fabio Pierazzi"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:48:41.374301",
+      "status": "indexed",
+      "categories": [
+        "cs.LG",
+        "cs.CR"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.4346
+    },
+    {
+      "id": 144,
+      "file_name": "arxiv_2608.28497v1.pdf",
+      "file_hash": "60ab96888bcd0322dff5d30d8c729576660f90b28fc38aa600745b5d9ada020d",
+      "title": "On the Maintenance and Co-evolution of Agent Plugins: An Empirical Study of Claude Code Plugin Marketplaces",
+      "authors": [
+        "Ahmed Hereiz",
+        "Yingzhe Lyu",
+        "Hao Li",
+        "Bram Adams",
+        "Ahmed E. Hassan"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-31T04:49:12.861694",
+      "status": "indexed",
+      "categories": [
+        "cs.SE",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-28",
+      "source": "arxiv",
+      "score": 0.4346
+    },
+    {
+      "id": 104,
+      "file_name": "arxiv_2608.27455v1.pdf",
+      "file_hash": "1fa0948b49139c504b129c09b26972357ddeebdd79a383eb01394976a836ee77",
+      "title": "CritICL: Inference-Time Weak-to-Strong Generalization from Small Language Model Failure Modes",
+      "authors": [
+        "Yufan Wu",
+        "Yinghui He",
+        "Zhengyi Hu",
+        "Lang Wei",
+        "Ruichen Li",
+        "Qifan Yang",
+        "Ting Zhu"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:25:00.054102",
+      "status": "indexed",
+      "categories": [
+        "cs.CL"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.4285
+    },
+    {
+      "id": 107,
+      "file_name": "arxiv_2608.27448v1.pdf",
+      "file_hash": "d67e875ffc81fe065c02c0c02808f522653ba8ddaec5e629507a3a5ee7fa7e22",
+      "title": "TTPO: Test-Time Policy Optimization",
+      "authors": [
+        "Aozhe Wang",
+        "Zhengxi Lu",
+        "Jianze Wang",
+        "Shangke Lv",
+        "Ying Liu",
+        "Weiming Lu",
+        "Jun Xiao",
+        "Yueting Zhuang",
+        "Hua Yang",
+        "Qianglong Chen",
+        "Yongliang Shen"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:26:08.657557",
+      "status": "indexed",
+      "categories": [
+        "cs.CL"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.4285
+    },
+    {
+      "id": 109,
+      "file_name": "arxiv_2608.27439v1.pdf",
+      "file_hash": "9324d47e37c48f9884388624362935d93efacae9c6aa1fa9921b99fca0d3b0bb",
+      "title": "RedEvoAgent: Automatic Red-Teaming Agent with Experience-Driven Skill Evolution",
+      "authors": [
+        "Junjie Zhang",
+        "Hui Liu",
+        "Kecheng Chen",
+        "Xianbo Mo",
+        "Changsheng Chen",
+        "Haoliang Li"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:26:43.031011",
+      "status": "indexed",
+      "categories": [
+        "cs.CR",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.4285
+    },
+    {
+      "id": 110,
+      "file_name": "arxiv_2608.27429v1.pdf",
+      "file_hash": "3ff0f469087b7323ddef7224bc05ff186193f021b9074fc981ae9419afaafd73",
+      "title": "Mechanistic Reaction Prediction via Discrete Flow Matching on Graph-Structured Electron Occupation",
+      "authors": [
+        "Nguyen Xuan-Vu",
+        "Octavian Susanu",
+        "Daniel Armstrong",
+        "Philippe Schwaller"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:27:06.779390",
+      "status": "indexed",
+      "categories": [
+        "cs.AI"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.4285
+    },
+    {
+      "id": 111,
+      "file_name": "arxiv_2608.27428v1.pdf",
+      "file_hash": "0b7f5d175a291bda61ed014e9d85fb290d42abb9fc7dd9f511c95ba808fd2692",
+      "title": "Stochastic Estimation of Transduced Language Models",
+      "authors": [
+        "Vésteinn Snæbjarnarson",
+        "Samuel Kiegeland",
+        "Manuel de Prada Corral",
+        "Ryan Cotterell",
+        "Tim Vieira"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:27:29.489625",
+      "status": "indexed",
+      "categories": [
+        "cs.CL"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.4285
+    },
+    {
+      "id": 112,
+      "file_name": "arxiv_2608.27427v1.pdf",
+      "file_hash": "f0d9eeda392ce0af485f8e784eedb14e6768d0e3b3add960bdb2c68053b70df3",
+      "title": "Persona-Execution Separation: An Architecture Pattern for Evolving LLM Agents under Execution Audit",
+      "authors": [
+        "Yisen Xi"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:27:57.646255",
+      "status": "indexed",
+      "categories": [
+        "cs.SE",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.4285
+    },
+    {
+      "id": 113,
+      "file_name": "arxiv_2608.27424v1.pdf",
+      "file_hash": "9d5954ef2019e8291a56c29846b1aacb029ff0d394c0b395fd3319d8d315d53d",
+      "title": "Beyond F1: Evaluating Coverage and Failure Recovery in AI Model Security Scanners",
+      "authors": [
+        "Qianlong Lan",
+        "Vinothini Pandurangan",
+        "Anuj Kaul",
+        "Indranil Sanyal"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:28:25.932448",
+      "status": "indexed",
+      "categories": [
+        "cs.CR",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.4285
+    },
+    {
+      "id": 115,
+      "file_name": "arxiv_2608.27420v1.pdf",
+      "file_hash": "bf095b03a91e13014da19643a6debfdd28aa0bf148aa34733e5aaceb33b7fbf0",
+      "title": "Boosting LLM Exploration via Weak-Model Guidance in RLVR",
+      "authors": [
+        "Xingyu Shen",
+        "Huishuai Zhang",
+        "Peng Li",
+        "Yinchun Wang",
+        "Dongyan Zhao"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:28:57.366195",
+      "status": "indexed",
+      "categories": [
+        "cs.CL"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.4285
+    },
+    {
+      "id": 116,
+      "file_name": "arxiv_2608.27413v1.pdf",
+      "file_hash": "eceabead41369db6f47a3c24fc162c8fc5b5be7face64fb2e56f09c84190d2fd",
+      "title": "Scaling Graph Neural Networks for Friend Recommendation: Multi-Hash User Embeddings and Temporal Neighbor Sampling",
+      "authors": [
+        "Maksim Utushkin",
+        "Andrei Ovsiannikov",
+        "Alexander D'yakonov"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:29:14.620919",
+      "status": "indexed",
+      "categories": [
+        "cs.IR",
+        "cs.LG",
+        "cs.SI"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.4285
+    },
+    {
+      "id": 117,
+      "file_name": "arxiv_2608.27409v1.pdf",
+      "file_hash": "cb48ba6660db06921a828e6856e9acdf2f155105e1b3cf21951a1256ae62d769",
+      "title": "Consolidating RLVR Capabilities Across Domains: A Deep Dive into Fusion Paradigms",
+      "authors": [
+        "Siye Wu",
+        "Kai Yang",
+        "Yuchen Cai",
+        "Xin Xu",
+        "Peng-Yuan Wang",
+        "Jiaxuan Wang",
+        "Jiashun Liu",
+        "Jiafei Lyu",
+        "Yangkun Chen",
+        "Saiyong Yang",
+        "Yanghua Xiao"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:29:23.208259",
+      "status": "indexed",
+      "categories": [
+        "cs.CL"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.4285
+    },
+    {
+      "id": 118,
+      "file_name": "arxiv_2608.27406v1.pdf",
+      "file_hash": "f6493557dc8649967d2a1b2b377286cdb96a10da38928de2f13243bd0832740e",
+      "title": "CLAP: Cross-Embodiment Video World Models are Zero-Shot Physical Simulators",
+      "authors": [
+        "Kechen Liu",
+        "Ola Shorinwa"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:29:50.271514",
+      "status": "indexed",
+      "categories": [
+        "cs.RO",
+        "cs.AI",
+        "cs.CV"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.4285
+    },
+    {
+      "id": 121,
+      "file_name": "arxiv_2608.27395v1.pdf",
+      "file_hash": "047a945c5ccc7846269aa077fabce672f2b6c62b1aefba38ffa23004e63bad08",
+      "title": "LeVJEPA: Efficient & Scalable Video Pretraining without the Heuristics",
+      "authors": [
+        "Lukas Kuhn",
+        "Lucas Maes",
+        "Giuseppe Serra",
+        "Quentin Le Lidec",
+        "Yann LeCun",
+        "Randall Balestriero",
+        "Florian Buettner"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:31:12.901494",
+      "status": "indexed",
+      "categories": [
+        "cs.CV",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.4285
+    },
+    {
+      "id": 122,
+      "file_name": "arxiv_2608.27394v1.pdf",
+      "file_hash": "ed9a5d846b211187a7976148398fe0485f0bef75cdbff2e86f0630913861affa",
+      "title": "RATIO: A Benchmark for Retrieval Across Typed Ideation Operations in Scientific Literature",
+      "authors": [
+        "Maayan Sharon",
+        "Tom Hope"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:31:37.688165",
+      "status": "indexed",
+      "categories": [
+        "cs.CL",
+        "cs.IR"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.4285
+    },
+    {
+      "id": 123,
+      "file_name": "arxiv_2608.27392v1.pdf",
+      "file_hash": "dc34a3db82903522549137bf3eea47c673e05d0972521f9d5a0d1f5727074141",
+      "title": "Property-Specific Recoverability from Contact PPG to Camera rPPG under Heterogeneous Observation Conditions",
+      "authors": [
+        "Timothy Oladunni",
+        "Farouk Ganiyu-Adewumi"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-28T10:32:08.555680",
+      "status": "indexed",
+      "categories": [
+        "eess.SP",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-27",
+      "source": "arxiv",
+      "score": 0.4285
+    },
+    {
+      "id": 85,
+      "file_name": "arxiv_2608.26095v1.pdf",
+      "file_hash": "47b11fda765be342e417e0540498175c4feb9e5cf5d9ae57da83a49f78bd9a90",
+      "title": "A Visual Dependence-Aware Framework for Multimodal Unsupervised Continual Post-Training",
+      "authors": [
+        "Kaichen Li",
+        "Zhilin Zhu",
+        "Jianhao Huang",
+        "Zhengqin Lai",
+        "Baochen Xiong",
+        "Zibo Shao",
+        "Yaguang Song",
+        "Linhui Xiao",
+        "Xiaoshan Yang",
+        "Changsheng Xu"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:24:38.955215",
+      "status": "indexed",
+      "categories": [
+        "cs.CV",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.4225
+    },
+    {
+      "id": 87,
+      "file_name": "arxiv_2608.26093v1.pdf",
+      "file_hash": "ebf892b7c3d08fb5aaaeea2a0e82c8612a667fd839afa2f2de6aecebe677d2c0",
+      "title": "Agentic Autoresearch for Cell-Edge Power Control: Radically Redefining the Researcher's Role",
+      "authors": [
+        "Ahmad Khan",
+        "Akram Bin Sediq",
+        "Sara Azadegi Naeini",
+        "Raviraj S. Adve"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:26:03.650520",
+      "status": "indexed",
+      "categories": [
+        "cs.LG",
+        "cs.IT",
+        "eess.SY"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.4225
+    },
+    {
+      "id": 88,
+      "file_name": "arxiv_2608.26091v1.pdf",
+      "file_hash": "cd3c72611414983ce1c258d44f447f626faf1e28255eb90f86892ded05e7e04e",
+      "title": "PlanSightRAG: A Visual-First Multimodal RAG for Automating Question Answering and Compliance Checking for Civil Standard Plans",
+      "authors": [
+        "Nabaraj Subedi",
+        "Shuvo Dip Datta",
+        "Ahmed Abdelaty",
+        "Shivanand Venkanna Sheshappanavar"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:26:09.631338",
+      "status": "indexed",
+      "categories": [
+        "cs.IR",
+        "cs.CL",
+        "cs.CV"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.4225
+    },
+    {
+      "id": 94,
+      "file_name": "arxiv_2608.26074v1.pdf",
+      "file_hash": "2630d44fada6a805faf1b8717efe595867fb893a65c35c90ce5a4d40d81e1320",
+      "title": "Gating Before Commitment: Anticipating Intent Divergence to Prevent Post-Interaction Decision Failures in Autonomous Driving",
+      "authors": [
+        "Cong Xu",
+        "Ravi Sankar"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:29:11.572060",
+      "status": "indexed",
+      "categories": [
+        "cs.RO",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.4225
+    },
+    {
+      "id": 96,
+      "file_name": "arxiv_2608.26069v1.pdf",
+      "file_hash": "1fafc646b8d6a38e013c905780c9318cdca925bf004a196ffff01194376e6086",
+      "title": "Group-Shared Low-Rank Approximation for Mobile-Efficient Pointwise Convolutions in Large-Kernel CNNs",
+      "authors": [
+        "Hao Luo",
+        "Yiting Yang",
+        "Wenyi Zhao",
+        "Man Jiang",
+        "Zhijun Lin",
+        "Ghulam Mohiuddin",
+        "Ting Jiang",
+        "Kunming Luo",
+        "Zihao Zhang",
+        "Qingsen Yan",
+        "Guoqing Wang",
+        "Wei Dong",
+        "Peng Wang"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:30:15.328944",
+      "status": "indexed",
+      "categories": [
+        "cs.LG"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.4225
+    },
+    {
+      "id": 97,
+      "file_name": "arxiv_2608.26060v1.pdf",
+      "file_hash": "d9740983229e7cf317fa6cd314b08ede14bcb00f6c8ce139ad51aeeb25ac4f45",
+      "title": "Fine-Tuning Whisper for Automatic Speech Recognition in Baniwa: A Preliminary Study",
+      "authors": [
+        "Leonardo Duart",
+        "Tiago Fonseca",
+        "Thiago Chacón"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:30:42.631856",
+      "status": "indexed",
+      "categories": [
+        "cs.CL",
+        "stat.ML"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.4225
+    },
+    {
+      "id": 100,
+      "file_name": "arxiv_2608.26051v1.pdf",
+      "file_hash": "0665e6ea7fdf7ead3418c721c48aaf18bd5afb98f5393e4667bc5d6adf04c9f0",
+      "title": "The Value of Human Expertise",
+      "authors": [
+        "Bradley Sturt"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:32:20.925961",
+      "status": "indexed",
+      "categories": [
+        "math.OC",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.4225
+    },
+    {
+      "id": 101,
+      "file_name": "arxiv_2608.26043v1.pdf",
+      "file_hash": "35daa4bfe5b0b116f405b8aee8048266114cdef1153bb56b7551f5534f0264c4",
+      "title": "Robust CurveMoE: Multi-Norm Adversarial Defense for Mixture-of-Experts Models via Mode Connectivity",
+      "authors": [
+        "Xu Zhang",
+        "Ren Wang"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:32:48.119074",
+      "status": "indexed",
+      "categories": [
+        "cs.LG"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.4225
+    },
+    {
+      "id": 103,
+      "file_name": "arxiv_2608.26035v1.pdf",
+      "file_hash": "f59dfb5af980db74c0a936d429c73f474ce04e1cb70ca0a0fb5cec75e3eac472",
+      "title": "Beyond Local Surprise: Grounded Dialogue as Selective Belief Revision under Referential Uncertainty",
+      "authors": [
+        "Ziming Liu",
+        "Bhanu Chaitanya Jasti",
+        "Ziyang Xu",
+        "Hongyu Wu",
+        "Yi Wu",
+        "Jiqun Liu"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-27T08:33:48.704245",
+      "status": "indexed",
+      "categories": [
+        "cs.CL"
+      ],
+      "published_date": "2026-08-26",
+      "source": "arxiv",
+      "score": 0.4225
+    },
+    {
+      "id": 65,
+      "file_name": "arxiv_2608.23565v1.pdf",
+      "file_hash": "401877fea768b37cb05f818952ff2599e4fe383a70de37ce23552ed3780f1ffe",
+      "title": "ReWorld: An Interactive World Model with Long-Horizon Memory",
+      "authors": [
+        "Zhifei Chen",
+        "Luozhou Wang",
+        "Guibao Shen",
+        "Dongyu Yan",
+        "Shuai Yang",
+        "Tianshuo Xu",
+        "Yihua Du",
+        "Wei Wang",
+        "Tianyi Gui",
+        "Lianghua Huang",
+        "Yingcong Chen"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:36:48.078925",
+      "status": "indexed",
+      "categories": [
+        "cs.AI"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.411
+    },
+    {
+      "id": 67,
+      "file_name": "arxiv_2608.23563v1.pdf",
+      "file_hash": "5b3a24a305fe7e3fef6f27da317edce3a43b1f822b92a09c289d433e2a65ed18",
+      "title": "EG-ARSA: An Expert-Grounded Open Model for Visual Road Safety Auditing in Low-Resource Settings",
+      "authors": [
+        "Md Thamed Bin Zaman Chowdhury",
+        "Moazzem Hossain"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:37:50.188529",
+      "status": "indexed",
+      "categories": [
+        "cs.CV",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.411
+    },
+    {
+      "id": 68,
+      "file_name": "arxiv_2608.23562v1.pdf",
+      "file_hash": "4ce50c59649b5f2f0fd5ede412f522e449237be5129abfa2ccad009c8b323701",
+      "title": "Physics-Constrained Deep Learning Model for Contactless Blood Pressure Monitoring from Triaxial Bodyseismography",
+      "authors": [
+        "Yuanyuan Zhang",
+        "Yida Zhang",
+        "Jiahui Li",
+        "Yuyan Wu",
+        "Fei Dou",
+        "Xiao Yin",
+        "Zhenlin An",
+        "Hae Young Noh",
+        "Wenzhan Song"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:39:18.048603",
+      "status": "indexed",
+      "categories": [
+        "eess.SP",
+        "cs.AI",
+        "physics.bio-ph"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.411
+    },
+    {
+      "id": 69,
+      "file_name": "arxiv_2608.23554v1.pdf",
+      "file_hash": "0ce1a5e08616536e963cf4809846b6add3d4e3568a8a0eaeff8bd5a207f0b056",
+      "title": "Provably adaptive sampling with uniform and remasking discrete diffusion models",
+      "authors": [
+        "Daniil Dmitriev",
+        "Zhihan Huang",
+        "Yuting Wei"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:39:24.507403",
+      "status": "indexed",
+      "categories": [
+        "cs.LG",
+        "cs.IT",
+        "math.ST",
+        "stat.ML"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.411
+    },
+    {
+      "id": 72,
+      "file_name": "arxiv_2608.23547v1.pdf",
+      "file_hash": "7ade7c2f96ce259e9b7d90ae84c1c2ce504fdf6bef36035267e0e0d3a0d9a09b",
+      "title": "Robustness of Anomaly Detection Models for Industrial Control Systems under Training-Time Data Contamination",
+      "authors": [
+        "Mustafa Umut Ozbek",
+        "Taiwo Ojo",
+        "Pooria Madani",
+        "Khalil El-Khatib",
+        "Li Yang"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:40:22.571137",
+      "status": "indexed",
+      "categories": [
+        "cs.CR",
+        "cs.LG"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.411
+    },
+    {
+      "id": 73,
+      "file_name": "arxiv_2608.23546v1.pdf",
+      "file_hash": "a6b33e3d73e39f8cebf233aec5e2e07b72db604b0b13d1594c1c21aab8f3dba0",
+      "title": "Inertial Manifold Neural Operator for Dissipative Time-Dependent Partial Differential Equations",
+      "authors": [
+        "Xiaoyang Xie",
+        "Clarence W. Rowley"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:40:56.113904",
+      "status": "indexed",
+      "categories": [
+        "math.NA",
+        "cs.LG",
+        "math.DS"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.411
+    },
+    {
+      "id": 74,
+      "file_name": "arxiv_2608.23543v1.pdf",
+      "file_hash": "9c31c900060e4ddeb3f36b7ced3970d5b1acadabb288931962492244f83eb402",
+      "title": "How AI Assistance Affects Human Skill Development: A Study of Learning with Logic Puzzles",
+      "authors": [
+        "Shang Wu",
+        "Catarina G Belem",
+        "Shuyuan Fu",
+        "Mark Steyvers",
+        "Padhraic Smyth"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:41:24.829493",
+      "status": "indexed",
+      "categories": [
+        "cs.AI"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.411
+    },
+    {
+      "id": 75,
+      "file_name": "arxiv_2608.23541v1.pdf",
+      "file_hash": "f1dd415dd63d4e75cbbf26babaf10d369aa672e8fc223ff95f468fa567319b94",
+      "title": "The Interaction Tax: When Communication Erases Diversity in Multi-Agent Teams",
+      "authors": [
+        "Summer Eunhyung Ann",
+        "Haokun Liu",
+        "Chenhao Tan"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:41:55.452199",
+      "status": "indexed",
+      "categories": [
+        "cs.MA",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.411
+    },
+    {
+      "id": 76,
+      "file_name": "arxiv_2608.23538v1.pdf",
+      "file_hash": "40ab26a2ca70c58ea9ab6f81cbe704bb77aa5cb0757d803c48ffa7839766fb2c",
+      "title": "Interpretable AI with Local Distillation",
+      "authors": [
+        "Erin Craig",
+        "Yiling Huang",
+        "Snigdha Panigrahi"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:42:29.091317",
+      "status": "indexed",
+      "categories": [
+        "stat.ME",
+        "cs.LG",
+        "stat.ML"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.411
+    },
+    {
+      "id": 77,
+      "file_name": "arxiv_2608.23536v1.pdf",
+      "file_hash": "917bf3957db805f464bee98cdad483578636bfb54012d42517f2c5e6333c551e",
+      "title": "Adapter-Based Few-Shot Continual Learning for Malicious Packet Recognition",
+      "authors": [
+        "Kyle Stein",
+        "Guillermo Francia",
+        "III Eman El-Sheikh",
+        "Andrew Arash Mahyari"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:42:55.752816",
+      "status": "indexed",
+      "categories": [
+        "cs.CR",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.411
+    },
+    {
+      "id": 78,
+      "file_name": "arxiv_2608.23531v1.pdf",
+      "file_hash": "a3efb5e7601b45a30a4dba50a83e4b504b5d23e22f94eb05e2068d24bffcd2cb",
+      "title": "Predicting Multiple Clinical Outcomes Related to Functional Recovery and Social Isolation Among Older Adults After Lower-Limb Fracture or Hip Replacement",
+      "authors": [
+        "Santosh Ray",
+        "Pratik K. Mishra",
+        "Ali Abedi",
+        "Charlene H. Chu",
+        "Amir Ahmad",
+        "Shehroz S. Khan"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:43:29.638831",
+      "status": "indexed",
+      "categories": [
+        "cs.CV",
+        "cs.LG"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.411
+    },
+    {
+      "id": 79,
+      "file_name": "arxiv_2608.23526v1.pdf",
+      "file_hash": "c9e73f91a33c2106b2a88a91ebccb008137a2407d2da02b7e75258f486b45a3f",
+      "title": "Correcting a learned physical invariant improves world-model rollouts",
+      "authors": [
+        "Richard Bao"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:43:57.546015",
+      "status": "indexed",
+      "categories": [
+        "cs.AI"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.411
+    },
+    {
+      "id": 80,
+      "file_name": "arxiv_2608.23525v1.pdf",
+      "file_hash": "208d458fad6c5629beef7a7ee18b566eef61564238f1c897e18fe8889f1236b9",
+      "title": "EarthVerse: Benchmarking Scientific Agents Across Dynamic Earth Systems and Natural Hazards",
+      "authors": [
+        "Zhiqing Cui",
+        "Xinxiang Yin",
+        "Yihong Tang",
+        "Xinglang Zhang",
+        "Yuanzhe Hu",
+        "Siru Zhong",
+        "Weidong Tang",
+        "Yuxuan Liang",
+        "Weijia Li",
+        "Ming Jin",
+        "Shirui Pan",
+        "Yuhao Kang",
+        "Dingyi Zhuang",
+        "Jinhua Zhao"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:44:34.400220",
+      "status": "indexed",
+      "categories": [
+        "cs.AI"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.411
+    },
+    {
+      "id": 81,
+      "file_name": "arxiv_2608.23524v1.pdf",
+      "file_hash": "bdbd0a97d41d323bbfd21d395e8ba89d8e8ad09e3d2da9d1fe700771277cf0e9",
+      "title": "The Measurement Revolution? Credible Measurement and Inference in the Age of AI",
+      "authors": [
+        "Melissa Dell",
+        "Ashesh Rambachan"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-26T01:45:02.492113",
+      "status": "indexed",
+      "categories": [
+        "econ.GN",
+        "cs.AI",
+        "stat.AP"
+      ],
+      "published_date": "2026-08-24",
+      "source": "arxiv",
+      "score": 0.411
+    },
+    {
+      "id": 62,
+      "file_name": "arxiv_2508.11845v3.pdf",
+      "file_hash": "a5db1fba1e8d9bb12bd213a6d243bb2444d48c0f524b222485276d2d240e2b41",
+      "title": "AVEX: What Matters for Animal Vocalization Encoding",
+      "authors": [
+        "Marius Miron",
+        "David Robinson",
+        "Milad Alizadeh",
+        "Ellen Gilsenan-McMahon",
+        "Gagan Narula",
+        "Emmanuel Chemla",
+        "Maddie Cusimano",
+        "Felix Effenberger",
+        "Masato Hagiwara",
+        "Benjamin Hoffman",
+        "Sara Keen",
+        "Diane Kim",
+        "Jane Lawton",
+        "Jen-Yu Liu",
+        "Aza Raskin",
+        "Olivier Pietquin",
+        "Matthieu Geist"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-11T15:50:53.835544",
+      "status": "indexed",
+      "categories": [
+        "cs.SD",
+        "cs.AI",
+        "cs.IR",
+        "cs.LG"
+      ],
+      "published_date": "2025-08-15",
+      "source": "arxiv",
+      "score": 0.3333
+    },
+    {
+      "id": 23,
+      "file_name": "arxiv_2608.07463v1.pdf",
+      "file_hash": "644b77d1d5a2d3665f20cf86b4b901ee1a4ac0d3107684af6f00304e52d964bf",
+      "title": "MirrorWorld: Taming Video Diffusion Models for Mirror Reflection Generation",
+      "authors": [
+        "Youjun Zhao",
+        "Alex Warren",
+        "Gary K. L. Tam",
+        "Rynson W. H. Lau"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:49:47.568502",
+      "status": "indexed",
+      "categories": [
+        "cs.CV",
+        "cs.LG"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.3316
+    },
+    {
+      "id": 26,
+      "file_name": "arxiv_2608.07457v1.pdf",
+      "file_hash": "46d3f0b1dade5aa678d40666784375931cbef105a2622071097f1e8e2ed67d53",
+      "title": "Interaction Creates Dynamical AI Behavior Absent in Isolation",
+      "authors": [
+        "Bella Xinrui Li",
+        "Frank Yingjie Huo",
+        "Neil F Johnson"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:50:56.635585",
+      "status": "indexed",
+      "categories": [
+        "cs.AI",
+        "cond-mat.dis-nn",
+        "cond-mat.stat-mech",
+        "physics.soc-ph"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.3316
+    },
+    {
+      "id": 27,
+      "file_name": "arxiv_2608.07454v1.pdf",
+      "file_hash": "ef9577df76c2ac1c7455a049c3e11b5124f7b60d42145e679ab8437e282465cf",
+      "title": "Strategy-first synthesis planning for complex natural products",
+      "authors": [
+        "Daniel Armstrong",
+        "Xuan-Vu Nguyen",
+        "Octavian Susanu",
+        "Gabriel Gibberd",
+        "Théo A. Neukomm",
+        "Taddäus Strunden",
+        "Dan Forster",
+        "Morgane Delattre",
+        "Shawn Teh",
+        "Clément Rols",
+        "John Federice",
+        "Hayden Leatherwood",
+        "M. Lavelle Barnes",
+        "Maarten R. Dobbelaere",
+        "Peter Wipf",
+        "Jon T. Njardarson",
+        "Jieping Zhu",
+        "Philippe Schwaller"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:51:22.438983",
+      "status": "indexed",
+      "categories": [
+        "cs.MA",
+        "cs.AI"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.3316
+    },
+    {
+      "id": 29,
+      "file_name": "arxiv_2608.07446v1.pdf",
+      "file_hash": "e80f9aa1359107f5744893f0173764fd5debbe81aac020ee7b624abf352cef67",
+      "title": "Taxonomy-Driven Analysis of Open-Source AI Risk Mitigation Tools",
+      "authors": [
+        "Afreen Alam",
+        "Evgenija Popchanovska",
+        "Ana Gjorgjevikj",
+        "Maryan Rizinski",
+        "Lubomir T. Chitkushev",
+        "Irena Vodenska",
+        "Dimitar Trajanov"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:52:22.324995",
+      "status": "indexed",
+      "categories": [
+        "cs.SE",
+        "cs.AI",
+        "cs.CY"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.3316
+    },
+    {
+      "id": 30,
+      "file_name": "arxiv_2608.07444v1.pdf",
+      "file_hash": "75dd181e31486946b371c88e45614c2f4aae2ddce7f3c2f535185e3937cee5fa",
+      "title": "RIS-Aided mmWave Localization Under Cross-Link Interference via Beam-Domain ML Fingerprinting",
+      "authors": [
+        "Md Tarek Hassan",
+        "Dmitry Zelenchuk",
+        "Muhammad Ali Babar Abbasi"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:53:02.543983",
+      "status": "indexed",
+      "categories": [
+        "eess.SP",
+        "cs.ET",
+        "cs.LG"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.3316
+    },
+    {
+      "id": 31,
+      "file_name": "arxiv_2608.07440v1.pdf",
+      "file_hash": "3f834ebeb09ad4c352da87f2dbfcb1185e4493b3afa5729d3e30f1f0ec6070e9",
+      "title": "Blast Radius",
+      "authors": [
+        "MY Pitsane",
+        "Hope Mogale"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:53:31.743140",
+      "status": "indexed",
+      "categories": [
+        "cs.AI"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.3316
+    },
+    {
+      "id": 32,
+      "file_name": "arxiv_2608.07439v1.pdf",
+      "file_hash": "dd359dd8a2e74666f0e2e7c60033732d48d796b090d73919ee47bb6d740f5c09",
+      "title": "An Exploratory Evaluation of LLM-Assisted Rewriting of Moderate-Complexity Financial Sentences for DisCoCat-Based Sentiment Analysis",
+      "authors": [
+        "Brian Llinas",
+        "Nikos Chrisochoides"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:53:57.823650",
+      "status": "indexed",
+      "categories": [
+        "cs.CL",
+        "quant-ph"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.3316
+    },
+    {
+      "id": 34,
+      "file_name": "arxiv_2608.07437v1.pdf",
+      "file_hash": "ab9ad77b4aef3626a51ca04528571a1e5e85352cb0b6d11ddab7bc03b7b69b7f",
+      "title": "Fisher-R1: Training LLM Agents for Reliable Hypothesis Testing",
+      "authors": [
+        "Jiacheng Miao",
+        "Jin Mu",
+        "Guanhua Chen",
+        "James Zou"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:55:17.444916",
+      "status": "indexed",
+      "categories": [
+        "cs.AI"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.3316
+    },
+    {
+      "id": 37,
+      "file_name": "arxiv_2608.07433v1.pdf",
+      "file_hash": "559176727dfbd80d54a88dc0c6fbd1a7624407eb977f82824b4646662039b7dd",
+      "title": "Wasserstein Policy Gradient for Entropy-Regularized Linear-Quadratic Control",
+      "authors": [
+        "Zhaoyu Zhu",
+        "Rui Gao",
+        "Shuang Li"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:57:38.416264",
+      "status": "indexed",
+      "categories": [
+        "math.OC",
+        "cs.LG"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.3316
+    },
+    {
+      "id": 39,
+      "file_name": "arxiv_2608.07429v1.pdf",
+      "file_hash": "da7c92be265c48dae8466e0b54e743c069d2a46d2ceffbdc742f094a7e36d5e4",
+      "title": "TEPA: Revoking Stale Memories for Conflict-Robust Language Agents",
+      "authors": [
+        "Yan Zhou",
+        "Yue Ouyang",
+        "Kaiyang Zheng",
+        "Suncheng Xiang"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:58:45.616797",
+      "status": "indexed",
+      "categories": [
+        "cs.AI"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.3316
+    },
+    {
+      "id": 40,
+      "file_name": "arxiv_2608.07427v1.pdf",
+      "file_hash": "c6d6120b514ebf5fc35fc3e3c2ac165459a4fa2563ebb483b5281d58b0066b77",
+      "title": "A Picture is Worth a Thousand Tokens: How Vision Language Models Cut AI Energy Costs While Improving Accuracy",
+      "authors": [
+        "Bhavika Jalli",
+        "Nikhil Korati Prasanna",
+        "Jayanta Choudhury"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:59:15.661939",
+      "status": "indexed",
+      "categories": [
+        "cs.AI",
+        "cs.PF"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.3316
+    },
+    {
+      "id": 41,
+      "file_name": "arxiv_2608.07424v1.pdf",
+      "file_hash": "9bf5b11c65abc7ede9fb36f0614cb4674fcbc01815fa0bbbc92f3952092aacb2",
+      "title": "CoBa: Cost-Effective Test-Time Scaling via Compute-Balanced Routing",
+      "authors": [
+        "Yan Zhou",
+        "Yue Ouyang",
+        "Kaiyang Zheng",
+        "Suncheng Xiang"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:59:48.607087",
+      "status": "indexed",
+      "categories": [
+        "cs.AI"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.3316
+    },
+    {
+      "id": 42,
+      "file_name": "arxiv_2608.07423v1.pdf",
+      "file_hash": "8bc2dd68878d0300a6d5584d958dfd1cf16373c5c27b1d3d8447f4ce57cc24bc",
+      "title": "Cloud-Boosted Low-Compute Multi-Channel Speech Enhancement",
+      "authors": [
+        "Xulin Fan",
+        "Juan Azcarreta",
+        "Ashutosh Pandey",
+        "Jesus Alvarez",
+        "Ke Tan",
+        "Jacob Donley",
+        "Ritwik Giri",
+        "Buye Xu"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T15:00:10.709641",
+      "status": "indexed",
+      "categories": [
+        "cs.SD",
+        "cs.LG"
+      ],
+      "published_date": "2026-08-07",
+      "source": "arxiv",
+      "score": 0.3316
+    },
+    {
+      "id": 63,
+      "file_name": "arxiv_2508.11836v2.pdf",
+      "file_hash": "2f6cbc94a18aa4add6cea3712fe81f62fcfebb61ae66e1716db4623533f90cd3",
+      "title": "Finite Automata Extraction: Low-data World Model Learning as Programs from Gameplay Video",
+      "authors": [
+        "Dave Goel",
+        "Matthew Guzdial",
+        "Anurag Sarkar"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-11T15:51:21.379863",
+      "status": "indexed",
+      "categories": [
+        "cs.AI"
+      ],
+      "published_date": "2025-08-15",
+      "source": "arxiv",
+      "score": 0.1667
+    },
+    {
+      "id": 43,
+      "file_name": "oa_W7172502716.pdf",
+      "file_hash": "0d4a428b6a652d8cbcfd80295102692011965646cabf486e591a7fec5e20cf9f",
+      "title": "Retrieval-Augmented Generation for Reducing Hallucinations in Drug-Related Question Answering Systems",
+      "authors": [
+        "Pratik Kumar",
+        "Rajat Verma"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T17:41:03.971141",
+      "status": "indexed",
+      "categories": [
+        "Computer Science"
+      ],
+      "published_date": "2026-08-05",
+      "source": "openalex",
+      "score": 0.1575
+    },
+    {
+      "id": 44,
+      "file_name": "oa_W7172554326.pdf",
+      "file_hash": "0d9f0256c6c409c8cd926eebd14c673669a74e4054267a3f7e192021054ed863",
+      "title": "AeroSAR: Structure-Aware Retrieval-Augmented Generation for Instructional Aviation Manuals",
+      "authors": [
+        "Jingbo Zhao",
+        "Yang Zhang",
+        "C. Li",
+        "Youyong Kong"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T17:41:16.662142",
+      "status": "indexed",
+      "categories": [
+        "Computer Science"
+      ],
+      "published_date": "2026-08-05",
+      "source": "openalex",
+      "score": 0.1575
+    },
+    {
+      "id": 22,
+      "file_name": "2408.07424.pdf",
+      "file_hash": "08afef1fe035e16845dfc33db246164961de91f56d1cb325fad974413927e0f4",
+      "title": "Test Paper 2",
+      "authors": null,
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T14:01:44.294695",
+      "status": "indexed",
+      "categories": null,
+      "published_date": null,
+      "source": "arxiv",
+      "score": 0.1
+    },
+    {
+      "id": 45,
+      "file_name": "oa_W4413737842.pdf",
+      "file_hash": "93016a35cda434dabb75baebd5245d5fffc2642523015bcd7a862b78ba1d4996",
+      "title": "AI-augmented systems engineering: conceptual application of retrieval-augmented generation for model-based systems engineering graph",
+      "authors": [
+        "Fabian Hanke",
+        "Isaac Mpidi Bita",
+        "Oliver von Heißen",
+        "Weller Julian",
+        "Hovemann Aschot",
+        "Dumitrescu Roman"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T17:43:04.823954",
+      "status": "indexed",
+      "categories": [
+        "Computer Science",
+        "Engineering",
+        "Business, Management and Accounting"
+      ],
+      "published_date": "2025-08-01",
+      "source": "openalex",
+      "score": 0.0
+    },
+    {
+      "id": 46,
+      "file_name": "oa_W4413259164.pdf",
+      "file_hash": "7c329e7a59e5f6c2cda29046043e4d104d0ac6de1ed3a25f8c8eea5cbd2f4402",
+      "title": "Development and Evaluation of a Retrieval-Augmented Generation-Based Electronic Medical Record Chatbot System",
+      "authors": [
+        "Namrye Son",
+        "Inchul Kang",
+        "I Kim",
+        "Keehyuck Lee",
+        "Sejin Nam",
+        "Donghyoung Lee"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T17:43:23.164365",
+      "status": "indexed",
+      "categories": [
+        "Medicine",
+        "Computer Science",
+        "Health Professions"
+      ],
+      "published_date": "2025-07-31",
+      "source": "openalex",
+      "score": 0.0
+    },
+    {
+      "id": 47,
+      "file_name": "oa_W7128087180.pdf",
+      "file_hash": "8b36d687e5e85f9f75fef136e73d43579b8962ec416bc6fdca7b757145f0bd6c",
+      "title": "An LLM-based Framework with Retrieval-Augmented Generation for Building Code Interpretation",
+      "authors": [
+        "Fan Yang",
+        "Yiru Hou",
+        "Jiansong Zhang"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T17:43:42.682728",
+      "status": "indexed",
+      "categories": [
+        "Computer Science",
+        "Engineering"
+      ],
+      "published_date": "2025-07-31",
+      "source": "openalex",
+      "score": 0.0
+    },
+    {
+      "id": 48,
+      "file_name": "oa_W4412690906.pdf",
+      "file_hash": "84ee8e4e6ad291d089c72e41fc32403aca25bf008f44bf2d7b30bf6b4aa0f8ae",
+      "title": "Efficient RAG(Retrieval-Augmented Generation) for Construction in Low-Resource Language",
+      "authors": [
+        "Kichang Choi",
+        "Seungwon Baek",
+        "Jian-Chuan Ma",
+        "Hongjo Kim"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-10T17:44:05.788159",
+      "status": "indexed",
+      "categories": [
+        "Computer Science"
+      ],
+      "published_date": "2025-07-27",
+      "source": "openalex",
+      "score": 0.0
+    },
+    {
+      "id": 49,
+      "file_name": "oa_W4405202975.pdf",
+      "file_hash": "a43d30431c70c7dc33138f63748aa95f144d5874d679203388cb2f4f7ea89777",
+      "title": "CASSIA: a multi-agent large language model for reference free, interpretable, and automated cell annotation of single-cell RNA-sequencing data",
+      "authors": [
+        "Elliot Xie",
+        "Lingxin Cheng",
+        "Jack Shireman",
+        "Yujia Cai",
+        "Jihua Liu",
+        "Chitrasen Mohanty",
+        "Mahua Dey",
+        "Christina Kendziorski"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-11T15:41:53.485977",
+      "status": "indexed",
+      "categories": [
+        "Biochemistry, Genetics and Molecular Biology"
+      ],
+      "published_date": "2024-12-08",
+      "source": "openalex",
+      "score": 0.0
+    },
+    {
+      "id": 50,
+      "file_name": "oa_W4404445814.pdf",
+      "file_hash": "a9e819471c97b1333971a999f82b6506b47d73d5955a3c3e77b610003438e4e1",
+      "title": "Beyond Chatbots: Enhancing Luxembourgish Language Learning Through Multi-agent Systems and Large Language Model",
+      "authors": [
+        "Sana Nouzri",
+        "Meryem EL Fatimi",
+        "Titouan Guerin",
+        "Mahfoud Othmane",
+        "Amro Najjar"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-11T15:42:19.265662",
+      "status": "indexed",
+      "categories": [
+        "Computer Science"
+      ],
+      "published_date": "2024-11-15",
+      "source": "openalex",
+      "score": 0.0
+    },
+    {
+      "id": 51,
+      "file_name": "oa_W7115349593.pdf",
+      "file_hash": "f407119e7e236afeda9be0bb32ee780de9c3219f1e33dfa23468915b0b305cda",
+      "title": "EHRFlow: A Large Language Model-Driven Iterative Multi-Agent Electronic Health Record Data Analysis Workflow",
+      "authors": [
+        "Wu, Hao",
+        "Zhu, Yinghao",
+        "Wang, Zixiang",
+        "Zheng, Xiaochen",
+        "Wang, Ling",
+        "Tang, Wen",
+        "Wang, Yasha",
+        "Pan, Chengwei",
+        "Harrison, Ewen M; id_orcid 0000-0002-5018-3066",
+        "Gao, Junyi; id_orcid 0000-0002-4951-8682",
+        "Ma, Liantao"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-11T15:42:42.777945",
+      "status": "indexed",
+      "categories": [
+        "Computer Science",
+        "Medicine"
+      ],
+      "published_date": "2024-08-26",
+      "source": "openalex",
+      "score": 0.0
+    },
+    {
+      "id": 52,
+      "file_name": "oa_W4415470786.pdf",
+      "file_hash": "2d781830f43dc35849aa2fa664cc56ec6001eedbb2fff0ee07be4f380e29f3b1",
+      "title": "A Study on Gallbladder Retrieval via Epigastria V/S Supraumbilical port in Laparoscopic Cholecystectomy",
+      "authors": [
+        "Bikram Duwal",
+        "Banira Karki",
+        "Lok Bahadur Kathayat",
+        "Dr. Dishan Maharjan"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-11T15:43:29.852794",
+      "status": "indexed",
+      "categories": [
+        "Medicine"
+      ],
+      "published_date": "2024-06-30",
+      "source": "openalex",
+      "score": 0.0
+    },
+    {
+      "id": 53,
+      "file_name": "oa_W4400789620.pdf",
+      "file_hash": "e4f170e00e10f9277f62f3b4a0e02213b0a1f64a9c0d001bc4d4555e3a07e306",
+      "title": "Enhanced Plant Leaf Disease Identification by Integrating 2DCNN and Transfer Learning for a Content-Based Image Retrieval System",
+      "authors": [
+        "M. Pradhiba Selvarani",
+        "M Arulselvi"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-11T15:44:03.067309",
+      "status": "indexed",
+      "categories": [
+        "Agricultural and Biological Sciences"
+      ],
+      "published_date": "2024-06-30",
+      "source": "openalex",
+      "score": 0.0
+    },
+    {
+      "id": 54,
+      "file_name": "oa_W4400161844.pdf",
+      "file_hash": "327e74a28734f384555863bd5446b7062136191fae4451964eb3a79c43c08be3",
+      "title": "GeneRAG: Enhancing Large Language Models with Gene-Related Task by Retrieval-Augmented Generation",
+      "authors": [
+        "Xinyi Lin",
+        "Gelei Deng",
+        "Yuekang Li",
+        "Jingquan Ge",
+        "Joshua W. K. Ho",
+        "Yi Liu"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-11T15:44:33.566441",
+      "status": "indexed",
+      "categories": [
+        "Biochemistry, Genetics and Molecular Biology",
+        "Computer Science"
+      ],
+      "published_date": "2024-06-28",
+      "source": "openalex",
+      "score": 0.0
+    },
+    {
+      "id": 55,
+      "file_name": "oa_W4405822181.pdf",
+      "file_hash": "c4ff5cb07661f0a89a7a8f16472fcdb82d7bd4bf33c9401b165b1f13f9e72e64",
+      "title": "Leveraging large language models for enhanced construction safety regulation extraction",
+      "authors": [
+        "Si Van-Tien Tran",
+        "Jaehun Yang",
+        "Rahat Hussain",
+        "Nasrullah Khan",
+        "Emmanuel Charles Kimito",
+        "Akeem Pedro",
+        "Mehrtash Sotani",
+        "Ung-Kyun Lee",
+        "Chansik Park"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-11T15:45:07.687634",
+      "status": "indexed",
+      "categories": [
+        "Decision Sciences",
+        "Health Professions"
+      ],
+      "published_date": "2024-12-26",
+      "source": "openalex",
+      "score": 0.0
+    },
+    {
+      "id": 56,
+      "file_name": "oa_W4403847921.pdf",
+      "file_hash": "706113613d5c8b94ba4c3b211d297b94a4e094d66149c841f9a201169d275795",
+      "title": "Nexus Scissor: Enhance Open-Access Language Model Safety by Connection Pruning",
+      "authors": [
+        "Yan Pang",
+        "Peihua Mai",
+        "Youjia Yang",
+        "Ran Yan"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-11T15:45:34.020144",
+      "status": "indexed",
+      "categories": [
+        "Computer Science",
+        "Social Sciences"
+      ],
+      "published_date": "2024-10-28",
+      "source": "openalex",
+      "score": 0.0
+    },
+    {
+      "id": 57,
+      "file_name": "oa_W4403482928.pdf",
+      "file_hash": "6bfa078afe67d043f5e41978d363b720356f4c01b74586a48aac2851099af5e5",
+      "title": "A Comprehensive Survey of Multimodal Large Language Models: Concept, Application and Safety",
+      "authors": [
+        "Shuai Liu",
+        "Weilin Pu",
+        "Wenjun Xu",
+        "Zishuo Huang",
+        "Qian Li",
+        "Hang Wang",
+        "Chenhao Lin",
+        "Chao Shen"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-11T15:45:49.630746",
+      "status": "indexed",
+      "categories": [
+        "Computer Science"
+      ],
+      "published_date": "2024-10-18",
+      "source": "openalex",
+      "score": 0.0
+    },
+    {
+      "id": 58,
+      "file_name": "oa_W4403045779.pdf",
+      "file_hash": "45b5c85255610f8ef01bd565ecf37f81d2c072eb066381b13d6856190ebf0025",
+      "title": "Physician- and Large Language Model-Generated Hospital Discharge Summaries: A Blinded, Comparative Quality and Safety Study",
+      "authors": [
+        "Christopher Y. K. Williams",
+        "Charumathi Raghu Subramanian",
+        "Syed Salman Ali",
+        "Michael Apolinario",
+        "Elisabeth Askin",
+        "Peter Barish",
+        "Monica Cheng",
+        "William James Deardorff",
+        "Nisha Donthi",
+        "Smitha Ganeshan",
+        "Owen Huang",
+        "Molly A. Kantor",
+        "Andrew Lai",
+        "Ashley Manchanda",
+        "K Moore",
+        "Anoop Muniyappa",
+        "Geethu Nair",
+        "Prashant P Patel",
+        "Lekshmi Santhosh",
+        "Susan Schneider",
+        "Shawn Torres",
+        "Michi Yukawa",
+        "Colin C. Hubbard",
+        "B. Rosner"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-11T15:46:19.209211",
+      "status": "indexed",
+      "categories": [
+        "Computer Science",
+        "Nursing"
+      ],
+      "published_date": "2024-09-30",
+      "source": "openalex",
+      "score": 0.0
+    },
+    {
+      "id": 59,
+      "file_name": "oa_W4401024228.pdf",
+      "file_hash": "a127f305003c1cbd82e2ce940828e57cc1ba87d2b6b54c013e10eff98cecbf63",
+      "title": "Evaluating and Mitigating Linguistic Discrimination in Large Language Models: Perspectives on Safety Equity and Knowledge Equity",
+      "authors": [
+        "Guoliang Dong",
+        "Haoyu Wang",
+        "Jun Sun",
+        "Xinyu Wang"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-11T15:46:51.179397",
+      "status": "indexed",
+      "categories": [
+        "Engineering"
+      ],
+      "published_date": "2024-07-26",
+      "source": "openalex",
+      "score": 0.0
+    },
+    {
+      "id": 60,
+      "file_name": "oa_W4405563851.pdf",
+      "file_hash": "038816b5bfd342e28565be2973fc14da1b3897f714cabe472e9b00b0ecddd032",
+      "title": "Multi-Agent Reinforcement Learning based Edge Content Caching for Connected Autonomous Vehicles in IoV",
+      "authors": [
+        "Xiaolong Xu",
+        "Linjie Gu",
+        "Muhammad Bilal",
+        "Maqbool Khan",
+        "Yiping Wen",
+        "Guoqiang Liu",
+        "Yuan Yuan"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-11T15:48:34.577139",
+      "status": "indexed",
+      "categories": [
+        "Computer Science"
+      ],
+      "published_date": "2024-12-18",
+      "source": "openalex",
+      "score": 0.0
+    },
+    {
+      "id": 61,
+      "file_name": "oa_W7110625086.pdf",
+      "file_hash": "52db9d08ddc8f84613d7ce5227f4eabd41c3198059015679608e59ca848c333e",
+      "title": "Cooperative UAVs with Asynchronous Multi-agent Learning for Remote Data Collection",
+      "authors": [
+        "LE, Van Cuong",
+        "VU, Thang Xuan",
+        "CHATZINOTAS, Symeon"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-11T15:48:47.642486",
+      "status": "indexed",
+      "categories": [
+        "Engineering",
+        "Computer Science"
+      ],
+      "published_date": "2024-12-08",
+      "source": "openalex",
+      "score": 0.0
+    },
+    {
+      "id": 124,
+      "file_name": "s2_5263141f4c7c.pdf",
+      "file_hash": "1e4873904f81fa7c796dbe283e714e54a21b66b921e448bdce53f4c71814cee1",
+      "title": "A Comprehensive Survey of Deep Learning Techniques Natural Language Processing",
+      "authors": [
+        "Jasmin Praful Bharadiya"
+      ],
+      "year": null,
+      "pages": null,
+      "ingested_at": "2026-08-29T06:25:39.635625",
+      "status": "indexed",
+      "categories": null,
+      "published_date": "2023-05-23",
+      "source": "semantic_scholar",
+      "score": 0.0
+    }
+  ]
+}
