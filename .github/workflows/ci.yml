@@ -26,7 +26,10 @@ jobs:
       # インストールしてから -e ".[dev]" することで、pyproject.toml の
       # 緩い範囲指定でランタイム依存が最新にドリフトするのを防ぐ (#338)。
       # dev extras (pytest等) はlock対象外のため範囲指定のまま解決される。
-      install-command: pip install -r requirements.lock -e ".[dev]" --quiet
+      # requirements.lock がハッシュ付きになった (#436) ため pip の
+      # hash-checking mode が有効になり、同一コマンドに -e (エディタブル、
+      # ハッシュ不可) を混ぜると失敗する。2コマンドに分離して回避する。
+      install-command: pip install --require-hashes -r requirements.lock --quiet && pip install -e ".[dev]" --quiet
 
   docker-build:
     # linux-general (ARC self-hosted) には docker socket が無く `docker build` が
