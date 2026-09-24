@@ -129,3 +129,7 @@ dmypy.json
 
 # Data directories
 data/
+
+# Host-specific docker-compose overrides (e.g. reusing an existing external
+# volume) — see docker-compose.yml
+docker-compose.override.yml

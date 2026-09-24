@@ -34,6 +34,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Validate docker-compose.yml (#435)
+        # Fails fast if compose ever regresses to requiring an external
+        # volume (or other config) that isn't created automatically.
+        # paper-rag's env_file just needs to exist for `config` to resolve;
+        # .env.example (no secrets) is enough.
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+          rm .env
       - name: Build Docker image
         run: docker build -t academic-paper-system:test .
       - name: Smoke test image (#263)
