@@ -4,7 +4,7 @@ WORKDIR /build
 COPY pyproject.toml README.md requirements.lock ./
 COPY academic_paper/ ./academic_paper/
 RUN python -m venv /opt/venv && \
-    /opt/venv/bin/pip install --no-cache-dir -r requirements.lock && \
+    /opt/venv/bin/pip install --no-cache-dir --require-hashes -r requirements.lock && \
     /opt/venv/bin/pip install --no-cache-dir --no-deps .
 
 # Stage 2: Runtime — slim image with only the venv, no build toolchain
