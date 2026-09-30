@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Paper RAG system for academic paper processing and retrieval"
 requires-python = ">=3.12"
 authors = [
-    {name = "dev-nodee", email = "yukihanajob2025@gmail.com"},
+    {name = "flipslidersand"},
 ]
 license = {text = "MIT"}
 readme = "README.md"
