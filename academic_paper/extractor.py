@@ -45,8 +45,5 @@ def hash_file(path: str) -> str:
     Returns:
         Hexadecimal SHA-256 hash string.
     """
-    sha256 = hashlib.sha256()
     with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            sha256.update(chunk)
-    return sha256.hexdigest()
+        return hashlib.file_digest(f, "sha256").hexdigest()
