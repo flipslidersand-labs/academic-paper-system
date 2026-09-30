@@ -51,8 +51,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/flipslidersand/academic-paper-system"
-Repository = "https://github.com/flipslidersand/academic-paper-system.git"
+Homepage = "https://github.com/flipslidersand-labs/academic-paper-system"
+Repository = "https://github.com/flipslidersand-labs/academic-paper-system.git"
 
 [tool.hatch.build.targets.wheel]
 packages = ["academic_paper"]
