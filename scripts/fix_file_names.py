@@ -30,7 +30,6 @@ Environment:
 import argparse
 import json
 import os
-import re
 import shutil
 import sqlite3
 import sys
@@ -38,7 +37,9 @@ from datetime import datetime, timezone
 
 import httpx
 
-ARXIV_ID_RE = re.compile(r"arXiv:(\d{4}\.\d{4,5})(v\d+)?")
+# academic_paper is importable from repo root (pip install -e .)
+from academic_paper.arxiv_ids import find_arxiv_watermark
+
 DEFAULT_VERSION = "v1"  # legacy collects fetched the initial submission
 
 
@@ -73,15 +74,16 @@ def _qdrant_head_chunks(
 
 
 def _detect_arxiv_id(text: str) -> tuple[str, str] | None:
-    """Extract (arxiv_id, version) from chunk text, scanning forward and mirrored."""
-    m = ARXIV_ID_RE.search(text)
-    if m:
-        return m.group(1), m.group(2) or DEFAULT_VERSION
-    # Mirrored extraction: reversing the text restores "arXiv:NNNN.NNNNNvX" reading order.
-    m = ARXIV_ID_RE.search(text[::-1])
-    if m:
-        return m.group(1), m.group(2) or DEFAULT_VERSION
-    return None
+    """Extract (arxiv_id, version) from chunk text, scanning forward and mirrored.
+
+    Thin wrapper over academic_paper.arxiv_ids.find_arxiv_watermark (#424);
+    see there for the forward/mirrored scan (#163).
+    """
+    found = find_arxiv_watermark(text)
+    if found is None:
+        return None
+    arxiv_id, version = found
+    return arxiv_id, version or DEFAULT_VERSION
 
 
 def cmd_resolve(args: argparse.Namespace) -> int:
