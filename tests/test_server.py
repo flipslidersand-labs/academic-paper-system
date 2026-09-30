@@ -1,5 +1,6 @@
 """Tests for FastAPI server endpoints."""
 
+import sqlite3
 import tempfile
 import time
 from io import BytesIO
@@ -666,6 +667,30 @@ def test_ingest_async_job_failed_on_no_text(client):
 
     paper = client.get(f"/papers/{body['paper_id']}").json()
     assert paper["status"] == "failed"
+
+
+def test_ingest_async_job_failed_when_paper_status_update_raises(client):
+    """Regression (#421): if update_paper_status raises (e.g. 'database is locked')
+    while handling an ingest failure, the job must still end up 'failed' with
+    finished_at set — not stuck at 'running' forever."""
+    pdf_content = create_minimal_pdf()
+
+    with (
+        patch("academic_paper.server.extract_text") as mock_extract,
+        patch("academic_paper.server.update_paper_status", side_effect=sqlite3.OperationalError("database is locked")),
+    ):
+        mock_extract.return_value = []  # triggers the "No text extracted" failure path
+        response = client.post(
+            "/papers/ingest",
+            files={"file": ("locked.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert response.status_code == 202
+        body = response.json()
+        job = _wait_for_job(client, body["job_id"])
+
+    assert job["status"] == "failed"
+    assert job["finished_at"] is not None
+    assert job["errors"]
 
 
 def test_list_papers_pagination(client, temp_db):
