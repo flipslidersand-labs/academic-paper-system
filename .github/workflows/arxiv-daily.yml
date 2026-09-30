@@ -347,7 +347,7 @@ jobs:
                       "inline": False,
                   },
               ],
-              "footer": {"text": "flipslidersand/academic-paper-system"},
+              "footer": {"text": os.environ.get("GITHUB_REPOSITORY", "flipslidersand-labs/academic-paper-system")},
           }
 
           payload = json.dumps({"embeds": [embed]}).encode()
