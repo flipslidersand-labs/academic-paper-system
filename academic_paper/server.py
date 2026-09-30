@@ -247,6 +247,13 @@ def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
         return HTTPException(status_code=503, detail="Upstream service unavailable")
     if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)):
         return HTTPException(status_code=503, detail="Upstream service timeout or network error")
+    if isinstance(exc, TimeoutError):
+        # builtin TimeoutError (raised by asyncio.wait_for on extraction/summarization
+        # deadlines, #238/#237/#269) is not a subclass of httpx.TimeoutException, so it
+        # falls through to the catch-all below without this check. It's an expected
+        # boundary condition the client should retry/split on, not an unclassified
+        # error (#423).
+        return HTTPException(status_code=504, detail=fallback_msg or "Processing timed out")
     if isinstance(exc, EmbeddingCountMismatchError):
         # Checked before the generic ValueError branch below (#336): this is an
         # upstream protocol failure, not bad client input, so it maps to 502.
