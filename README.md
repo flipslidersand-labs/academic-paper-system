@@ -85,7 +85,23 @@ directory must be writable by uid `10001` before the first `docker-compose up`:
 ```bash
 mkdir -p data
 sudo chown -R 10001:10001 data/
-docker-compose up -d
+cp .env.example .env    # configure embedding-svc, Qdrant, Gemini API key
+docker compose up -d
+curl http://localhost:8020/health
+```
+
+`qdrant_storage`/`qdrant_snapshots` are created automatically by Compose on
+first run. To reuse an existing volume on a given host instead, add a
+`docker-compose.override.yml` (already gitignored):
+
+```yaml
+volumes:
+  qdrant_storage:
+    name: <existing-volume-name>
+    external: true
+  qdrant_snapshots:
+    name: <existing-volume-name>
+    external: true
 ```
 
 ## Test
