@@ -1,5 +1,7 @@
 """Tests for academic_paper/config.py — placeholder URL rejection (#200)."""
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -133,3 +135,16 @@ def test_non_positive_numeric_fields_rejected(field):
             qdrant_url="http://localhost:6333",
             **{field: 0},
         )
+
+
+def test_env_example_documents_every_settings_field():
+    # Regression test for #433: .env.example is documented as the source of truth for
+    # env vars ("See .env.example for the full list" in README.md), so every
+    # Settings field must have a corresponding KEY= line there or the docs are a lie.
+    env_example_path = Path(__file__).parent.parent / ".env.example"
+    content = env_example_path.read_text()
+    documented_keys = {
+        line.split("=", 1)[0] for line in content.splitlines() if "=" in line and not line.startswith("#")
+    }
+    missing = [name for name in Settings.model_fields if name.upper() not in documented_keys]
+    assert not missing, f"Settings fields missing from .env.example: {missing}"
