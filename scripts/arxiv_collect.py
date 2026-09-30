@@ -27,7 +27,6 @@ Exit codes:
 import argparse
 import io
 import json
-import re
 import sys
 import threading
 from urllib.parse import quote
@@ -38,6 +37,7 @@ from _collect_common import download_pdf, ingest_pdf, run_collect
 from cli_utils import check_date_order, iso_date, positive_int
 
 # academic_paper is importable from repo root (pip install -e .)
+from academic_paper.arxiv_ids import find_arxiv_watermark
 from academic_paper.retry import with_retry
 
 ARXIV_API = "https://export.arxiv.org/api/query"
@@ -152,20 +152,14 @@ def fetch_papers(
     return papers
 
 
-ARXIV_WATERMARK_RE = re.compile(r"arXiv:(\d{4}\.\d{4,5})(?:v\d+)?")
-
-
 def find_arxiv_id_in_text(text: str) -> str | None:
     """Extract the bare arXiv ID from page text, scanning forward and mirrored.
 
-    pdfplumber sometimes extracts the sideways arXiv watermark reversed
-    (e.g. "1v17001.0142:viXra"), so the mirrored text is scanned too (#163).
+    Thin wrapper over academic_paper.arxiv_ids.find_arxiv_watermark (#424);
+    see there for the forward/mirrored scan (#163).
     """
-    m = ARXIV_WATERMARK_RE.search(text)
-    if m:
-        return m.group(1)
-    m = ARXIV_WATERMARK_RE.search(text[::-1])
-    return m.group(1) if m else None
+    found = find_arxiv_watermark(text)
+    return found[0] if found else None
 
 
 PDF_EXTRACT_TIMEOUT = 20  # seconds; guards against pdfminer hangs on malicious PDFs (#307)

@@ -9,18 +9,10 @@ import arxiv_collect  # noqa: E402
 
 
 def test_find_arxiv_id_forward():
+    # Forward/mirrored scan itself is covered by tests/test_arxiv_ids.py (#424);
+    # this is just a regression check on the thin wrapper's return shape.
     text = "arXiv:2410.10071v1 [cs.MA] 14 Oct 2024 Content Caching-Assisted Vehicular Edge Computing"
     assert arxiv_collect.find_arxiv_id_in_text(text) == "2410.10071"
-
-
-def test_find_arxiv_id_mirrored():
-    # pdfplumber extracts the sideways watermark reversed
-    text = "4202 tcO 41 ]AM.sc[ 1v17001.0142:viXra Content Caching-Assisted"
-    assert arxiv_collect.find_arxiv_id_in_text(text) == "2410.10071"
-
-
-def test_find_arxiv_id_absent():
-    assert arxiv_collect.find_arxiv_id_in_text("ACCEPTED TO IEEE TRANSACTIONS 1 Cooperative UAVs") is None
 
 
 def test_verify_arxiv_id_unreadable_pdf_returns_none():
