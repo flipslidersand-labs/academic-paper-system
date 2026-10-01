@@ -43,6 +43,7 @@ from academic_paper.extractor import extract_text, hash_file
 from academic_paper.jobs import job_store
 from academic_paper.llm import OllamaClient, get_llm_client
 from academic_paper.logging_config import configure_logging
+from academic_paper.models import PaperSummary
 from academic_paper.scorer import compute_score
 from academic_paper.services.search_service import run_search
 from academic_paper.summarizer import RAGSummarizer
@@ -591,6 +592,17 @@ def get_paper_endpoint(paper_id: int):
         raise _http_exc_for(e, "Failed to get paper")
 
 
+def _summary_response(paper_id: int, model: str, summary: dict, cached: bool) -> dict:
+    """Build the summary response; summary fields come from PaperSummary.model_fields."""
+    defaults = PaperSummary().model_dump()
+    return {
+        "paper_id": paper_id,
+        "model": model,
+        **{f: summary.get(f, defaults[f]) for f in PaperSummary.model_fields},
+        "cached": cached,
+    }
+
+
 @app.get("/papers/{paper_id}/summary", dependencies=[Depends(verify_api_key)])
 async def get_summary_endpoint(paper_id: int):
     """Return the cached summary only. GET is safe/idempotent (#140):
@@ -609,16 +621,7 @@ async def get_summary_endpoint(paper_id: int):
                     status_code=404,
                     detail="Summary not generated yet — POST /papers/{paper_id}/summary to generate",
                 )
-            return {
-                "paper_id": paper_id,
-                "model": cached_summary["model"],
-                "objective": cached_summary["objective"],
-                "method": cached_summary["method"],
-                "results": cached_summary["results"],
-                "limitations": cached_summary["limitations"],
-                "keywords": cached_summary["keywords"],
-                "cached": True,
-            }
+            return _summary_response(paper_id, cached_summary["model"], cached_summary, True)
     except HTTPException:
         raise
     except Exception as e:
@@ -641,16 +644,7 @@ async def generate_summary_endpoint(paper_id: int, force: bool = Query(False)):
             if not force:
                 cached_summary = get_summary(conn, paper_id)
                 if cached_summary is not None:
-                    return {
-                        "paper_id": paper_id,
-                        "model": cached_summary["model"],
-                        "objective": cached_summary["objective"],
-                        "method": cached_summary["method"],
-                        "results": cached_summary["results"],
-                        "limitations": cached_summary["limitations"],
-                        "keywords": cached_summary["keywords"],
-                        "cached": True,
-                    }
+                    return _summary_response(paper_id, cached_summary["model"], cached_summary, True)
     except HTTPException:
         raise
     except Exception as e:
@@ -677,16 +671,7 @@ async def generate_summary_endpoint(paper_id: int, force: bool = Query(False)):
         with db_connection(settings.academic_db) as conn:
             save_summary(conn, paper_id, model, summary)
 
-        return {
-            "paper_id": paper_id,
-            "model": model,
-            "objective": summary.get("objective", ""),
-            "method": summary.get("method", ""),
-            "results": summary.get("results", ""),
-            "limitations": summary.get("limitations", ""),
-            "keywords": summary.get("keywords", []),
-            "cached": False,
-        }
+        return _summary_response(paper_id, model, summary, False)
 
     except Exception as e:
         logger.exception("Summarization error for paper_id=%s", paper_id)
