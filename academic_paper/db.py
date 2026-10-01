@@ -405,7 +405,7 @@ def search_fts(
     if paper_id is None:
         cursor.execute(
             """
-            SELECT c.id as chunk_id, c.paper_id, c.text, bm25(chunks_fts) as rank
+            SELECT c.id as chunk_id, c.paper_id, c.chunk_index, c.page_start, c.text, bm25(chunks_fts) as rank
             FROM chunks_fts
             JOIN chunks c ON chunks_fts.rowid = c.id
             WHERE chunks_fts MATCH ?
@@ -417,7 +417,7 @@ def search_fts(
     else:
         cursor.execute(
             """
-            SELECT c.id as chunk_id, c.paper_id, c.text, bm25(chunks_fts) as rank
+            SELECT c.id as chunk_id, c.paper_id, c.chunk_index, c.page_start, c.text, bm25(chunks_fts) as rank
             FROM chunks_fts
             JOIN chunks c ON chunks_fts.rowid = c.id
             WHERE chunks_fts MATCH ? AND c.paper_id = ?
