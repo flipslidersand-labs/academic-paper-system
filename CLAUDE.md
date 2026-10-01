@@ -246,6 +246,11 @@ pytest tests/ --cov=academic_paper --cov-report=html
 - `test_ingest_client.py` — `scripts/ingest_client.py` の認証ヘッダー
 - `test_config.py` — 設定値のプレースホルダー URL 拒否
 - `test_hybrid.py` — ハイブリッド検索 RRF マージ
+- `test_cli_utils.py` — `scripts/cli_utils.py` の argparse バリデータ
+- `test_http_client.py` — `academic_paper/http_client.py` の注入/一時 AsyncClient ヘルパー
+- `test_scripts_deps.py` — scripts/ が import するサードパーティ依存の宣言漏れ検出
+- `test_search_service.py` — `academic_paper/services/search_service.py` (FastAPI 非起動の単体テスト)
+- `conftest.py` — テスト共通 fixture（`temp_db` など）・環境変数の初期値設定
 
 ## 開発
 
@@ -284,6 +289,10 @@ academic-paper-system/
 │   ├── jobs.py               # バックグラウンドジョブ管理 (bulk 操作)
 │   ├── retry.py              # 一時的な通信失敗のリトライ
 │   ├── scorer.py             # 論文スコアリング (鮮度・カテゴリ関連度)
+│   ├── http_client.py        # 注入 or 一時 AsyncClient ヘルパー
+│   ├── services/             # サービス層
+│   │   ├── __init__.py
+│   │   └── search_service.py # 検索ロジック (FastAPI 非依存)
 │   ├── logging_config.py     # 構造化 JSON ロギング設定
 │   └── telemetry.py          # OpenTelemetry 計装
 ├── scripts/                  # 論文収集・運用スクリプト
@@ -299,8 +308,13 @@ academic-paper-system/
 ├── tests/                   # テストスイート
 │   ├── test_*.py
 │   └── __init__.py
+├── frontend/                # フロントエンド (index.html)
+├── docs/                    # ポートフォリオ公開ページ・マイグレーション記録
 ├── data/                    # SQLite DB (docker-compose mount)
 ├── pyproject.toml           # プロジェクト設定・依存関係
+├── requirements.lock        # ハッシュ固定した依存ロック
+├── renovate.json            # Renovate 設定
+├── dep-policy.yaml          # 依存更新ポリシー
 ├── docker-compose.yml       # コンテナオーケストレーション
 ├── Dockerfile               # コンテナイメージ
 ├── .github/workflows/
@@ -390,9 +404,11 @@ docker run -d \
 
 ### Kubernetes としてデプロイ
 
-仕様は TBD (Phase 5 の scope)。
+対象外（本リポジトリは Kubernetes マニフェストを提供しない）。
 
 ## Last Updated
+
+2026-10-01 — ディレクトリ構造・テスト一覧を実ファイルに合わせて更新。
 
 2026-08-23 — Phase 5 完了。
 全 11 Issue (#96-#106) 実装・PR 化（#110-#119）。
