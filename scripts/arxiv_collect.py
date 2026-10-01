@@ -26,15 +26,14 @@ Exit codes:
 
 import argparse
 import io
-import json
 import sys
 import threading
 from urllib.parse import quote
 
 import defusedxml.ElementTree as ET  # noqa: N817 (matches stdlib ET convention)
 import httpx
-from _collect_common import download_pdf, ingest_pdf, run_collect
-from cli_utils import check_date_order, iso_date, positive_int
+from _collect_common import add_common_args, format_date_range, ingest_downloaded, run_collect, write_summary
+from cli_utils import check_date_order, positive_int
 
 # academic_paper is importable from repo root (pip install -e .)
 from academic_paper.arxiv_ids import find_arxiv_watermark
@@ -221,27 +220,29 @@ def ingest_paper(
     poll_timeout: int = 300,
 ) -> dict:
     """Stream the PDF from arXiv and submit it via the ingest API."""
-    with download_pdf(client, paper["pdf_url"], pdf_timeout) as tmp_path:
+
+    def _verify(tmp_path: str) -> None:
         if verify_arxiv_id(tmp_path, paper["arxiv_id"]) is False:
             print(
                 f"[arxiv-collect] WARN [{paper['arxiv_id']}] PDF watermark does not match the expected "
                 "arXiv ID — downloaded content may belong to a different paper (#163). Ingesting anyway.",
                 file=sys.stderr,
             )
-        result = ingest_pdf(
-            client,
-            api_url,
-            paper["file_name"],
-            tmp_path,
-            {
-                "title": paper["title"],
-                "authors": json.dumps(paper["authors"]),
-                "categories": json.dumps(paper["categories"]),
-                "published_date": paper["published_date"] or "",
-                "source": "arxiv",
-            },
-            poll_timeout,
-        )
+
+    result = ingest_downloaded(
+        client,
+        api_url,
+        pdf_url=paper["pdf_url"],
+        file_name=paper["file_name"],
+        title=paper["title"],
+        authors=paper["authors"],
+        categories=paper["categories"],
+        published_date=paper["published_date"],
+        source="arxiv",
+        pdf_timeout=pdf_timeout,
+        poll_timeout=poll_timeout,
+        pre_ingest=_verify,
+    )
     return {**result, "label": paper["arxiv_id"], "arxiv_id": paper["arxiv_id"]}
 
 
@@ -262,43 +263,11 @@ def main() -> None:
         metavar="N",
         help="Maximum papers to fetch per run (default: 20)",
     )
-    parser.add_argument(
-        "--from-date",
-        type=iso_date,
-        default="",
-        metavar="YYYY-MM-DD",
-        help="Filter papers published on or after this date (inclusive)",
-    )
-    parser.add_argument(
-        "--until-date",
-        type=iso_date,
-        default="",
-        metavar="YYYY-MM-DD",
-        help="Filter papers published on or before this date (inclusive)",
-    )
-    parser.add_argument(
-        "--api-url",
-        default="http://localhost:8020",
-        help="academic-paper-system API base URL (default: http://localhost:8020)",
-    )
-    parser.add_argument(
-        "--poll-timeout",
-        type=int,
-        default=300,
-        metavar="SEC",
-        help="Max seconds to wait for each ingest job to finish (default: 300)",
-    )
-    parser.add_argument(
-        "--summary-file",
-        default=None,
-        help="Write run summary JSON to this path (optional)",
-    )
+    add_common_args(parser)
     args = parser.parse_args()
     check_date_order(parser, args.from_date, args.until_date)
 
-    date_range = ""
-    if args.from_date or args.until_date:
-        date_range = f" [{args.from_date or '*'} → {args.until_date or '*'}]"
+    date_range = format_date_range(args.from_date, args.until_date)
     print(f"[arxiv-collect] categories={args.categories} max={args.max_results}{date_range} api={args.api_url}")
 
     try:
@@ -310,6 +279,7 @@ def main() -> None:
         )
     except Exception as exc:
         print(f"[arxiv-collect] ERROR fetching arXiv: {exc}", file=sys.stderr)
+        write_summary(args.summary_file, fetched=0, fetch_error=str(exc))
         sys.exit(1)
 
     print(f"[arxiv-collect] fetched {len(papers)} papers")
