@@ -53,3 +53,83 @@ def test_extract_first_page_text_hang_times_out(monkeypatch):
 
     assert result is None
     assert elapsed < 2  # bounded by the timeout, not the 5s hang
+
+
+# --- #526: fetch failure summary + shared ingest path ---
+
+
+def test_main_fetch_failure_writes_fetch_error_summary_and_exits_1(monkeypatch, tmp_path):
+    import json
+
+    import pytest
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("arxiv down")
+
+    monkeypatch.setattr(arxiv_collect, "fetch_papers", _boom)
+    out = tmp_path / "s.json"
+    monkeypatch.setattr(sys, "argv", ["arxiv_collect.py", "--summary-file", str(out)])
+    with pytest.raises(SystemExit) as ei:
+        arxiv_collect.main()
+    assert ei.value.code == 1
+    data = json.loads(out.read_text())
+    assert data["fetched"] == 0
+    assert data["fetch_error"] == "arxiv down"
+    assert {"ingested", "duplicate", "failed", "detail"} <= data.keys()
+
+
+def test_main_fetch_failure_without_summary_file_still_exits_1(monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(arxiv_collect, "fetch_papers", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+    monkeypatch.setattr(sys, "argv", ["arxiv_collect.py"])
+    with pytest.raises(SystemExit) as ei:
+        arxiv_collect.main()
+    assert ei.value.code == 1
+
+
+def _paper():
+    return {
+        "arxiv_id": "2410.10071v1",
+        "pdf_url": "https://arxiv.org/pdf/2410.10071v1",
+        "file_name": "2410.10071v1.pdf",
+        "title": "T",
+        "authors": ["A"],
+        "categories": ["cs.AI"],
+        "published_date": None,
+    }
+
+
+def test_ingest_paper_metadata_and_warn_on_mismatch(monkeypatch, capsys):
+    import json
+    from contextlib import contextmanager
+
+    captured = {}
+
+    @contextmanager
+    def _fake_download(client, url, timeout=60, max_mb=None):
+        yield "/tmp/fake.pdf"
+
+    def _fake_ingest(client, api_url, file_name, tmp_path, metadata, poll_timeout=300):
+        captured["metadata"] = metadata
+        captured["file_name"] = file_name
+        return {"status": "ingested"}
+
+    import _collect_common
+
+    monkeypatch.setattr(_collect_common, "download_pdf", _fake_download)
+    monkeypatch.setattr(_collect_common, "ingest_pdf", _fake_ingest)
+    monkeypatch.setattr(arxiv_collect, "verify_arxiv_id", lambda *_a: False)
+
+    result = arxiv_collect.ingest_paper(None, _paper(), "http://api")
+    assert result["label"] == "2410.10071v1"
+    assert result["status"] == "ingested"
+    assert captured["file_name"] == "2410.10071v1.pdf"
+    assert captured["metadata"] == {
+        "title": "T",
+        "authors": json.dumps(["A"]),
+        "categories": json.dumps(["cs.AI"]),
+        "published_date": "",
+        "source": "arxiv",
+    }
+    assert "WARN" in capsys.readouterr().err
