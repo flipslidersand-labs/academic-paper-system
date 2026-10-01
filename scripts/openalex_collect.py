@@ -18,14 +18,13 @@ Exit codes:
 """
 
 import argparse
-import json
 import re
 import sys
 import time
 
 import httpx
-from _collect_common import download_pdf, ingest_pdf, run_collect
-from cli_utils import check_date_order, iso_date, positive_int
+from _collect_common import add_common_args, format_date_range, ingest_downloaded, run_collect, write_summary
+from cli_utils import check_date_order, positive_int
 
 OPENALEX_API = "https://api.openalex.org/works"
 FIELDS = ",".join(
@@ -185,21 +184,19 @@ def ingest_paper(
     )
     pub_date = (work.get("publication_date") or "")[:10] or None
 
-    with download_pdf(client, pdf_url, pdf_timeout) as tmp_path:
-        result = ingest_pdf(
-            client,
-            api_url,
-            file_name,
-            tmp_path,
-            {
-                "title": title,
-                "authors": json.dumps([a for a in authors if a]),
-                "categories": json.dumps(topics),
-                "published_date": pub_date or "",
-                "source": "openalex",
-            },
-            poll_timeout,
-        )
+    result = ingest_downloaded(
+        client,
+        api_url,
+        pdf_url=pdf_url,
+        file_name=file_name,
+        title=title,
+        authors=[a for a in authors if a],
+        categories=topics,
+        published_date=pub_date,
+        source="openalex",
+        pdf_timeout=pdf_timeout,
+        poll_timeout=poll_timeout,
+    )
     work_id = (work.get("id") or "").split("/")[-1]
     return {**result, "label": label, "id": work_id, "arxiv_id": arxiv_id}
 
@@ -212,41 +209,13 @@ def main() -> None:
         help="Title search keyword (default: 'large language model')",
     )
     parser.add_argument(
-        "--from-date",
-        type=iso_date,
-        default="",
-        help="Start date YYYY-MM-DD (inclusive). Example: 2025-02-01",
-    )
-    parser.add_argument(
-        "--until-date",
-        type=iso_date,
-        default="",
-        help="End date YYYY-MM-DD (inclusive). Example: 2025-08-01",
-    )
-    parser.add_argument(
         "--max",
         type=positive_int,
         default=10,
         dest="max_results",
         help="Max papers to ingest (default: 10)",
     )
-    parser.add_argument(
-        "--api-url",
-        default="http://localhost:8020",
-        help="academic-paper-system API base URL",
-    )
-    parser.add_argument(
-        "--poll-timeout",
-        type=int,
-        default=300,
-        metavar="SEC",
-        help="Max seconds to wait for each ingest job to finish (default: 300)",
-    )
-    parser.add_argument(
-        "--summary-file",
-        default=None,
-        help="Write run summary JSON to this path",
-    )
+    add_common_args(parser)
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -255,9 +224,7 @@ def main() -> None:
     args = parser.parse_args()
     check_date_order(parser, args.from_date, args.until_date)
 
-    date_range = ""
-    if args.from_date or args.until_date:
-        date_range = f" [{args.from_date or '*'} → {args.until_date or '*'}]"
+    date_range = format_date_range(args.from_date, args.until_date)
     print(f"[openalex] query='{args.query}'{date_range} max={args.max_results} api={args.api_url}")
 
     papers, fetch_error = fetch_papers(
@@ -269,9 +236,7 @@ def main() -> None:
     print(f"[openalex] found {len(papers)} papers with PDF URLs")
     if fetch_error and not papers:
         print(f"[openalex] FATAL: search API failed with no results: {fetch_error}", file=sys.stderr)
-        if args.summary_file:
-            with open(args.summary_file, "w") as f:
-                json.dump({"fetched": 0, "fetch_error": fetch_error}, f, indent=2)
+        write_summary(args.summary_file, fetched=0, fetch_error=fetch_error)
         sys.exit(1)
 
     if args.dry_run:
