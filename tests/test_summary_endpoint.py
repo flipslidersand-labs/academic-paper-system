@@ -313,3 +313,26 @@ def test_summary_timeout_returns_504(client, temp_db):
 
     response = client.post(f"/papers/{paper_id}/summary")
     assert response.status_code == 504, response.text
+
+
+def test_summary_response_helper_keys_order_and_defaults():
+    from academic_paper.server import _summary_response
+
+    full = {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
+    for cached in (True, False):
+        resp = _summary_response(7, "mdl", full, cached)
+        assert list(resp) == [
+            "paper_id",
+            "model",
+            "objective",
+            "method",
+            "results",
+            "limitations",
+            "keywords",
+            "cached",
+        ]
+        assert resp["cached"] is cached
+        assert resp["keywords"] == ["k"]
+
+    missing = _summary_response(7, "mdl", {}, False)
+    assert missing["objective"] == "" and missing["keywords"] == []
