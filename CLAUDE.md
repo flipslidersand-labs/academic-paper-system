@@ -6,7 +6,7 @@
 
 ```
 PDF → pdfplumber抽出 → テキストチャンク分割(512/64)
-    → embedding-svc:9092 (e5 768-d) → Qdrant:6333
+    → embedding-svc:9092 (multilingual-e5-base 768-d) → Qdrant:6333
     → SQLite FTS5 + BM25
     → RRF ハイブリッド検索
     → Gemini / Ollama で構造化要約
@@ -15,7 +15,7 @@ PDF → pdfplumber抽出 → テキストチャンク分割(512/64)
 **スタック**:
 - **Backend**: FastAPI + uvicorn
 - **PDF処理**: pdfplumber
-- **ベクトル化**: embedding-svc (e5-large-v2 768次元)
+- **ベクトル化**: embedding-svc (multilingual-e5-base 768次元。Qdrant コレクションは768次元固定のため、モデルを変える場合はコレクションの作り直しが必要)
 - **ベクトルDB**: Qdrant
 - **検索**: SQLite FTS5 + BM25 + RRF
 - **要約LLM**: Google Generative AI (Gemini) / Ollama (Mistral)
@@ -324,7 +324,7 @@ academic-paper-system/
 
 ## 関連インフラ
 
-- **embedding-svc**: MINIPC `:9092` (e5-large-v2, 768次元)
+- **embedding-svc**: MINIPC `:9092` (intfloat/multilingual-e5-base, 768次元)
 - **Qdrant**: MINIPC `:6333`
 - **OTel Collector**: dev-infrastructure `:4317` (オプション)
 - **API ポート**: `:8020` (search-engine が `:8010` 使用中)
