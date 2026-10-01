@@ -1,0 +1,56 @@
+name: Scheduled Watchdog
+
+# Watches the self-hosted-runner cron workflows (#499). A job that never gets a
+# runner executes no steps, so its own `if: always()` notification and
+# timeout-minutes can't fire. This runs on GitHub-hosted runners instead.
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check scheduled workflows
+        run: |
+          set +e
+          : > "$RUNNER_TEMP/violations.txt"
+          rc=0
+          # workflow file | workflowName | max hours since last success
+          # arxiv-daily is daily (26h); portfolio-publish is weekly (~170h).
+          for spec in "arxiv-daily.yml|arXiv Daily Collect|26" "portfolio-publish.yml|Portfolio Publish|170"; do
+            IFS='|' read -r file name max_age <<< "$spec"
+            gh run list --workflow "$file" --limit 30 \
+              --json status,conclusion,createdAt,workflowName > "$RUNNER_TEMP/runs.json" || { echo "gh run list failed for $file" >> "$RUNNER_TEMP/violations.txt"; rc=1; continue; }
+            python3 scripts/watchdog_check.py --workflow "$name" --max-queued-hours 3 \
+              --max-success-age-hours "$max_age" --input "$RUNNER_TEMP/runs.json" >> "$RUNNER_TEMP/violations.txt" || rc=1
+          done
+          cat "$RUNNER_TEMP/violations.txt"
+          exit $rc
+
+      - name: Notify Discord
+        if: failure()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_WEBHOOK_URL not set, skipping"
+            exit 0
+          fi
+          body=$(head -c 1500 "$RUNNER_TEMP/violations.txt" 2>/dev/null)
+          jq -n --arg c "Scheduled watchdog: violations detected
+          $body
+          $RUN_URL" '{content: $c}' \
+            | curl -sS --max-time 20 -H 'Content-Type: application/json' -d @- "$DISCORD_WEBHOOK_URL" || true
