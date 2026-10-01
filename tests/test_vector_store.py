@@ -1,6 +1,7 @@
 import asyncio
 from unittest.mock import MagicMock, patch
 
+import pytest
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from academic_paper.vector_store import _QDRANT_RETRYABLE, QdrantStore, make_qdrant_id
@@ -41,11 +42,39 @@ def test_ensure_collection_skips_when_exists():
         mock_collection = MagicMock()
         mock_collection.name = "test-collection"
         mock_client.get_collections.return_value.collections = [mock_collection]
+        mock_client.get_collection.return_value.config.params.vectors.size = 768
 
         store = QdrantStore(url="http://test", collection="test-collection")
         store.ensure_collection()
 
         mock_client.create_collection.assert_not_called()
+
+
+def test_ensure_collection_uses_configured_vector_size():
+    """vector_size 指定がコレクション作成に反映される (#494)"""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+        mock_client.get_collections.return_value.collections = []
+
+        QdrantStore(url="http://test", collection="c", vector_size=1024).ensure_collection()
+
+        assert mock_client.create_collection.call_args[1]["vectors_config"].size == 1024
+
+
+def test_ensure_collection_raises_on_dimension_mismatch():
+    """既存コレクションの次元が不一致なら ValueError (#494)"""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+        mock_collection = MagicMock()
+        mock_collection.name = "c"
+        mock_client.get_collections.return_value.collections = [mock_collection]
+        mock_client.get_collection.return_value.config.params.vectors.size = 384
+
+        store = QdrantStore(url="http://test", collection="c", vector_size=768)
+        with pytest.raises(ValueError, match="vector size 384"):
+            store.ensure_collection()
 
 
 def test_ensure_collection_passes_retry_params():
