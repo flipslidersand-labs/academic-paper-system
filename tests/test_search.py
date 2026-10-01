@@ -203,8 +203,15 @@ def test_search_hybrid_mode(client):
     """Test GET /search with hybrid mode calls both FTS and vector search."""
     # Mock FTS results
     mock_fts_results = [
-        {"chunk_id": 1, "paper_id": 1, "text": "Machine learning basics", "rank": -5.0},
-        {"chunk_id": 2, "paper_id": 1, "text": "Neural networks", "rank": -3.0},
+        {
+            "chunk_id": 1,
+            "paper_id": 1,
+            "text": "Machine learning basics",
+            "rank": -5.0,
+            "chunk_index": 0,
+            "page_start": 1,
+        },
+        {"chunk_id": 2, "paper_id": 1, "text": "Neural networks", "rank": -3.0, "chunk_index": 1, "page_start": 2},
     ]
 
     # Mock vector results
@@ -268,8 +275,15 @@ def test_search_keyword_mode(client):
     """Test GET /search with keyword mode calls FTS5 only."""
     # Mock FTS results
     mock_fts_results = [
-        {"chunk_id": 1, "paper_id": 1, "text": "Machine learning basics", "rank": -5.0, "chunk_index": 0},
-        {"chunk_id": 2, "paper_id": 1, "text": "Neural networks", "rank": -3.0, "chunk_index": 1},
+        {
+            "chunk_id": 1,
+            "paper_id": 1,
+            "text": "Machine learning basics",
+            "rank": -5.0,
+            "chunk_index": 0,
+            "page_start": 1,
+        },
+        {"chunk_id": 2, "paper_id": 1, "text": "Neural networks", "rank": -3.0, "chunk_index": 1, "page_start": 2},
     ]
 
     with (
@@ -283,12 +297,6 @@ def test_search_keyword_mode(client):
         mock_conn.__enter__.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
         mock_get_conn.return_value = mock_conn
-
-        # Mock cursor.fetchone for page_start lookups
-        mock_cursor.fetchone.side_effect = [
-            {"page_start": 1},
-            {"page_start": 2},
-        ]
 
         response = client.get("/search?q=machine learning&mode=keyword")
 
@@ -318,6 +326,7 @@ def test_search_nugget_mode_returns_results(client):
             "text": "Deep learning is a subset of machine learning. It uses neural networks. Results are impressive.",
             "rank": -5.0,
             "chunk_index": 0,
+            "page_start": 1,
         }
     ]
     mock_vector_results = [
@@ -347,9 +356,8 @@ def test_search_nugget_mode_returns_results(client):
         mock_conn.__enter__.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
         mock_get_conn.return_value = mock_conn
-        # fetchall is called multiple times: FTS chunk_index enrichment, then page_start lookup
+        # fetchall is called twice: qdrant_id -> chunk_id map, then page_start lookup
         mock_cursor.execute.return_value.fetchall.side_effect = [
-            [{"id": 1, "chunk_index": 0}],  # FTS chunk_index enrichment
             [],  # missing qdrant_id → chunk_id map
             [{"id": 1, "page_start": 2}],  # page_start lookup for merged results
         ]
@@ -374,6 +382,7 @@ def test_search_nugget_mode_calls_embed_single_and_embed(client):
             "text": "Sentence one. Sentence two. Sentence three.",
             "rank": -4.0,
             "chunk_index": 0,
+            "page_start": 1,
         }
     ]
     mock_vector_results = [
@@ -403,7 +412,6 @@ def test_search_nugget_mode_calls_embed_single_and_embed(client):
         mock_conn.cursor.return_value = mock_cursor
         mock_get_conn.return_value = mock_conn
         mock_cursor.execute.return_value.fetchall.side_effect = [
-            [{"id": 1, "chunk_index": 0}],
             [],
             [{"id": 1, "page_start": 1}],
         ]
@@ -426,6 +434,7 @@ def test_search_nugget_mode_embed_weight_zero_skips_batch_embed(client):
             "text": "Sentence one. Sentence two.",
             "rank": -4.0,
             "chunk_index": 0,
+            "page_start": 1,
         }
     ]
     mock_vector_results = [
@@ -455,7 +464,6 @@ def test_search_nugget_mode_embed_weight_zero_skips_batch_embed(client):
         mock_conn.cursor.return_value = mock_cursor
         mock_get_conn.return_value = mock_conn
         mock_cursor.execute.return_value.fetchall.side_effect = [
-            [{"id": 1, "chunk_index": 0}],
             [],
             [{"id": 1, "page_start": 1}],
         ]
