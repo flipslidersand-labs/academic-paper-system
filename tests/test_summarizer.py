@@ -565,3 +565,55 @@ async def test_summarize_overall_timeout_bounds_stacked_individual_timeouts(monk
     summarizer = RAGSummarizer(mock_llm, mock_qdrant, embedder=mock_embedder)
     with pytest.raises(TimeoutError):
         await summarizer.summarize(paper_id=1, file_hash="abc", title="paper")
+
+
+# --- PaperSummary model / prompt generation (#529) ---
+
+_LEGACY_JSON_EXAMPLE = """{
+    "objective": "Main objective or research question",
+    "method": "Methodology used",
+    "results": "Key findings and results",
+    "limitations": "Study limitations",
+    "keywords": ["keyword1", "keyword2", "keyword3"]
+}"""
+
+
+def test_summary_json_example_matches_legacy_prompt():
+    from academic_paper.summarizer import _summary_json_example
+
+    assert _summary_json_example() == _LEGACY_JSON_EXAMPLE
+
+
+def test_paper_summary_normalizes_nested_values():
+    from academic_paper.models import PaperSummary
+
+    result = PaperSummary(
+        objective={"a": "日本語"},
+        method=["x", "y"],
+        results=3,
+        limitations="ok",
+        keywords="solo",
+    ).model_dump()
+    assert result["objective"] == '{"a": "日本語"}'
+    assert result["method"] == '["x", "y"]'
+    assert result["results"] == "3"
+    assert result["limitations"] == "ok"
+    assert result["keywords"] == ["solo"]
+
+
+def test_paper_summary_keywords_list_items_stringified():
+    from academic_paper.models import PaperSummary
+
+    assert PaperSummary(keywords=[1, "b"]).keywords == ["1", "b"]
+
+
+def test_paper_summary_missing_fields_default_empty():
+    from academic_paper.models import PaperSummary
+
+    assert PaperSummary().model_dump() == {
+        "objective": "",
+        "method": "",
+        "results": "",
+        "limitations": "",
+        "keywords": [],
+    }
