@@ -193,17 +193,33 @@ file: <PDF file>
 | `EMBEDDING_TIMEOUT` | embedding-svc HTTP タイムアウト秒（大バッチは 30s 超） | `120` |
 | `QDRANT_URL` | Qdrant URL | `http://<internal-host>:6333` |
 | `QDRANT_API_KEY` | Qdrant APIキー | (空) |
+| `QDRANT_TIMEOUT` | Qdrant クライアントタイムアウト秒 | `30` |
 | `QDRANT_COLLECTION` | Qdrant コレクション名 | `academic-papers` |
 | `ACADEMIC_DB` | SQLite DB パス | `/data/academic.db` |
 | `CHUNK_SIZE` | テキストチャンクサイズ | `512` |
 | `CHUNK_OVERLAP` | チャンク間のオーバーラップ | `64` |
 | `GOOGLE_API_KEY` | Gemini APIキー (要約用) | (空) |
+| `GEMINI_TIMEOUT_MS` | Gemini API HTTP タイムアウト (ミリ秒) | `60000` |
 | `OLLAMA_URL` | Ollama URL (フォールバック) | `http://localhost:11434` |
 | `OLLAMA_MODEL` | Ollama モデル | `mistral` |
+| `OLLAMA_TIMEOUT` | Ollama 1回あたりの HTTP タイムアウト秒（generate は最大3回リトライ） | `300` |
 | `OTEL_ENDPOINT` | OpenTelemetry コレクタエンドポイント | (空) |
+| `LOG_LEVEL` | ルートログレベル (DEBUG/INFO/WARNING/ERROR) | `INFO` |
+| `LOG_FORMAT` | ログ形式 (`json` / `text`) | `json` |
+| `PREFERRED_CATEGORIES` | スコアリングで優先する arXiv カテゴリ（カンマ区切り） | `cs.AI,cs.LG,cs.CL` |
+| `MAX_UPLOAD_MB` | PDF アップロード上限 (MB) | `50` |
+| `PDF_EXTRACT_TIMEOUT` | `extract_text()` の上限秒（超過で ingest ジョブ失敗） | `120` |
+| `LLM_GENERATE_TIMEOUT` | 要約時の `llm.generate()` 上限秒 | `903` |
+| `SUMMARIZE_TOTAL_TIMEOUT` | `summarize()` 全体の上限秒 | `1063` |
 | `PORT` | API サーバーポート | `8020` |
-| `API_KEY` | 書き込み系エンドポイントの X-API-Key（空=認証無効） | (空) |
+| `API_KEY` | `/health` 以外の全エンドポイントの X-API-Key（読み取り系含む。空=認証無効） | (空) |
 | `PAPER_API_KEY` | コレクタ側が送る X-API-Key（cron は repo secret 経由） | (空) |
+| `SEMANTIC_SCHOLAR_API_KEY` | `scripts/semantic_scholar_collect.py` 用 API キー（`--api-key` でも指定可。サーバー設定ではない） | (空) |
+
+**タイムアウトの連動制約** (`academic_paper/config.py`):
+- `OLLAMA_TIMEOUT` × 3 + 3 ≤ `LLM_GENERATE_TIMEOUT`（Ollama は最大3回リトライ + backoff 1s+2s。既定 300×3+3=903）
+- `SUMMARIZE_TOTAL_TIMEOUT` ≥ `EMBEDDING_TIMEOUT` + `QDRANT_TIMEOUT` + `LLM_GENERATE_TIMEOUT`（各 wait_for は逐次実行され累積するため。既定 120+30+903=1053 + 余裕）
+- `OLLAMA_TIMEOUT` を上げる場合は `LLM_GENERATE_TIMEOUT` と `SUMMARIZE_TOTAL_TIMEOUT` も合わせて上げる
 
 ## テスト
 
