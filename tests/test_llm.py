@@ -184,24 +184,22 @@ def test_get_llm_client_returns_ollama_when_url_set(monkeypatch):
         assert isinstance(client, OllamaClient)
 
 
-def test_gemini_client_close_and_aclose():
-    """GeminiClient.close()/aclose() release the underlying genai.Client HTTP session (#262)."""
+@pytest.mark.anyio
+async def test_gemini_client_aclose():
+    """GeminiClient.aclose() releases the underlying genai.Client HTTP session (#262)."""
     with patch("google.genai.Client") as mock_genai_client:
         mock_client_instance = MagicMock()
         mock_client_instance.aio.aclose = AsyncMock()
         mock_genai_client.return_value = mock_client_instance
 
         client = GeminiClient(api_key="test-key")
-        client.close()
+        await client.aclose()
         mock_client_instance.close.assert_called_once()
-
-        import asyncio
-
-        asyncio.run(client.aclose())
         mock_client_instance.aio.aclose.assert_awaited_once()
 
 
-def test_gemini_client_aclose_also_closes_sync_client():
+@pytest.mark.anyio
+async def test_gemini_client_aclose_also_closes_sync_client():
     """aclose() must also close the sync client since generate() only uses it via to_thread (#304)."""
     with patch("google.genai.Client") as mock_genai_client:
         mock_client_instance = MagicMock()
@@ -210,21 +208,43 @@ def test_gemini_client_aclose_also_closes_sync_client():
 
         client = GeminiClient(api_key="test-key")
 
-        import asyncio
-
-        asyncio.run(client.aclose())
+        await client.aclose()
         mock_client_instance.close.assert_called_once()
         mock_client_instance.aio.aclose.assert_awaited_once()
 
 
-def test_ollama_client_close_and_aclose_are_noop():
-    """BaseLLMClient's default close()/aclose() are no-ops for clients without HTTP resources to release (#262)."""
-    client = OllamaClient(base_url="http://localhost:11434", model="mistral")
-    client.close()
+@pytest.mark.anyio
+async def test_ollama_client_aclose_noop_without_client():
+    """aclose() with no HTTP client is a no-op (#262)."""
+    await OllamaClient(base_url="http://localhost:11434", model="mistral").aclose()
 
-    import asyncio
 
-    asyncio.run(client.aclose())
+@pytest.mark.anyio
+async def test_ollama_client_aclose_does_not_close_injected_client():
+    """An injected client is owned by the injector and is not closed by aclose() (#498)."""
+    http = MagicMock(spec=httpx.AsyncClient)
+    http.aclose = AsyncMock()
+    await OllamaClient(client=http).aclose()
+    http.aclose.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_ollama_client_aclose_closes_owned_client():
+    """A client the instance owns is closed by aclose() (#498)."""
+    http = MagicMock(spec=httpx.AsyncClient)
+    http.aclose = AsyncMock()
+    await OllamaClient(client=http, owns_client=True).aclose()
+    http.aclose.assert_awaited_once()
+
+
+def test_get_llm_client_injects_http_client_into_ollama():
+    """get_llm_client(http_client=...) builds OllamaClient with the injected client, not owned (#498)."""
+    http = MagicMock(spec=httpx.AsyncClient)
+    with patch("academic_paper.llm.settings", _provider_settings("ollama")):
+        client = get_llm_client(http_client=http)
+    assert isinstance(client, OllamaClient)
+    assert client._client is http
+    assert client._owns_client is False
 
 
 def test_get_llm_client_returns_none_when_no_config(monkeypatch):
