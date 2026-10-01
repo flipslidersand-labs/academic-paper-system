@@ -120,3 +120,15 @@ def test_rrf_merge_sorted_by_score():
     assert result[0]["chunk_id"] == 1
     assert result[1]["chunk_id"] == 2
     assert result[2]["chunk_id"] == 3
+
+
+def test_rrf_merge_tolerates_none_payload():
+    """A vector point with payload=None is skipped instead of raising (#497)."""
+    fts_results = [
+        {"chunk_id": 1, "paper_id": 1, "chunk_index": 0, "text": "Test", "rank": -5.0},
+    ]
+    vector_results = [{"id": "vec-none", "score": 0.9, "payload": None}]
+
+    result = rrf_merge(fts_results, vector_results)
+
+    assert [r["chunk_id"] for r in result] == [1]
