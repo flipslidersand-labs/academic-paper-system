@@ -29,11 +29,8 @@ class BaseLLMClient(ABC):
             Generated text response
         """
 
-    def close(self) -> None:
-        """Release any underlying HTTP resources. Default: no-op (#262)."""
-
     async def aclose(self) -> None:
-        """Async variant of close(). Default: no-op (#262)."""
+        """Release any underlying HTTP resources. Default: no-op (#262)."""
 
     @property
     def display_name(self) -> str:
@@ -97,10 +94,6 @@ class GeminiClient(BaseLLMClient):
         """Model name recorded alongside generated summaries (#347)."""
         return self.model
 
-    def close(self) -> None:
-        """Close the underlying genai.Client HTTP session (#262)."""
-        self.client.close()
-
     async def aclose(self) -> None:
         """Close both the sync and async genai.Client HTTP sessions.
 
@@ -120,6 +113,7 @@ class OllamaClient(BaseLLMClient):
         base_url: str | None = None,
         model: str | None = None,
         client: httpx.AsyncClient | None = None,
+        owns_client: bool = False,
     ):
         """Initialize Ollama client.
 
@@ -129,11 +123,19 @@ class OllamaClient(BaseLLMClient):
             client: Injected persistent AsyncClient (managed by lifespan).
                     If None, a per-call client is created as fallback (tests /
                     direct instantiation without lifespan).
+            owns_client: If True, aclose() closes ``client``. Default False:
+                    an injected client is closed by whoever injected it (#498).
         """
         self.base_url = base_url or settings.ollama_url
         self.model = model or settings.ollama_model
         # Persistent client injected from lifespan; None → per-call fallback.
         self._client = client
+        self._owns_client = owns_client
+
+    async def aclose(self) -> None:
+        """Close the HTTP client only if this instance owns it (#498)."""
+        if self._owns_client and self._client is not None:
+            await self._client.aclose()
 
     @property
     def display_name(self) -> str:
@@ -175,7 +177,7 @@ class OllamaClient(BaseLLMClient):
             )
 
 
-def get_llm_client() -> BaseLLMClient | None:
+def get_llm_client(http_client: httpx.AsyncClient | None = None) -> BaseLLMClient | None:
     """Get LLM client based on settings.llm_provider.
 
     - auto (default): GeminiClient if GOOGLE_API_KEY is set, else OllamaClient
@@ -183,6 +185,8 @@ def get_llm_client() -> BaseLLMClient | None:
     - gemini: GeminiClient; raises ValueError if GOOGLE_API_KEY is empty
     - ollama: OllamaClient
     - none: None (LLM disabled)
+
+    ``http_client`` is injected into OllamaClient (not owned: the caller closes it).
     """
     provider = settings.llm_provider
     if provider == "none":
@@ -192,9 +196,9 @@ def get_llm_client() -> BaseLLMClient | None:
             raise ValueError("LLM_PROVIDER=gemini requires GOOGLE_API_KEY to be set")
         return GeminiClient()
     if provider == "ollama":
-        return OllamaClient()
+        return OllamaClient(client=http_client)
     if settings.google_api_key:
         return GeminiClient()
     if settings.ollama_url:
-        return OllamaClient()
+        return OllamaClient(client=http_client)
     return None
