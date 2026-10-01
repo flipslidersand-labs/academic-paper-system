@@ -9,6 +9,14 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 
 from academic_paper.arxiv_ids import ARXIV_ID_PATTERN
+from academic_paper.models import PaperSummary
+
+# Column lists derived from PaperSummary. Only trusted in-code names ever reach
+# the SQL strings below (no user input). The CREATE TABLE DDL stays hand-written
+# on purpose (schema changes belong to migrations); a test checks it matches.
+SUMMARY_FIELDS = tuple(PaperSummary.model_fields)
+SUMMARY_TEXT_FIELDS = tuple(n for n, f in PaperSummary.model_fields.items() if f.annotation is str)
+SUMMARY_COLUMNS = (*SUMMARY_FIELDS, "raw_json", "created_at")
 
 logger = logging.getLogger(__name__)
 
@@ -457,8 +465,8 @@ def get_summary(conn: sqlite3.Connection, paper_id: int) -> dict | None:
     """Get cached summary for a paper."""
     cursor = conn.cursor()
     cursor.execute(
-        """
-        SELECT model, objective, method, results, limitations, keywords, raw_json, created_at
+        f"""
+        SELECT model, {", ".join(SUMMARY_COLUMNS)}
         FROM summaries WHERE paper_id = ?
     """,
         (paper_id,),
@@ -488,17 +496,13 @@ def list_summaries(
     cursor.execute("SELECT COUNT(*) FROM summaries")
     total = cursor.fetchone()[0]
 
+    summary_select = ", ".join(f"s.{c}" for c in (*SUMMARY_FIELDS, "created_at"))
     cursor.execute(
-        """
+        f"""
         SELECT
             s.paper_id,
             s.model,
-            s.objective,
-            s.method,
-            s.results,
-            s.limitations,
-            s.keywords,
-            s.created_at,
+            {summary_select},
             p.file_name,
             p.title,
             p.authors,
@@ -524,28 +528,21 @@ def save_summary(conn: sqlite3.Connection, paper_id: int, model: str, summary: d
     created_at = datetime.now(UTC).isoformat()
     keywords_json = json.dumps(summary.get("keywords", []))
     raw_json = json.dumps(summary)
+    columns = ("paper_id", "model", *SUMMARY_FIELDS, "raw_json", "created_at")
+    updates = ",\n            ".join(f"{c} = excluded.{c}" for c in columns if c != "paper_id")
+    values = {f: summary.get(f, "") for f in SUMMARY_TEXT_FIELDS}
+    values["keywords"] = keywords_json
     cursor.execute(
-        """
-        INSERT INTO summaries (paper_id, model, objective, method, results, limitations, keywords, raw_json, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        f"""
+        INSERT INTO summaries ({", ".join(columns)})
+        VALUES ({", ".join("?" * len(columns))})
         ON CONFLICT(paper_id) DO UPDATE SET
-            model = excluded.model,
-            objective = excluded.objective,
-            method = excluded.method,
-            results = excluded.results,
-            limitations = excluded.limitations,
-            keywords = excluded.keywords,
-            raw_json = excluded.raw_json,
-            created_at = excluded.created_at
+            {updates}
     """,
         (
             paper_id,
             model,
-            summary.get("objective", ""),
-            summary.get("method", ""),
-            summary.get("results", ""),
-            summary.get("limitations", ""),
-            keywords_json,
+            *(values[f] for f in SUMMARY_FIELDS),
             raw_json,
             created_at,
         ),
