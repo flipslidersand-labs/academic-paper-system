@@ -15,14 +15,13 @@ Exit codes:
 """
 
 import argparse
-import json
 import sys
 import time
 
 import defusedxml.ElementTree as ET  # noqa: N817 (matches stdlib ET convention)
 import httpx
-from _collect_common import download_pdf, ingest_pdf, run_collect
-from cli_utils import check_date_order, iso_date, positive_int
+from _collect_common import add_common_args, ingest_downloaded, run_collect, write_summary
+from cli_utils import check_date_order, positive_int
 
 ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
@@ -162,21 +161,19 @@ def ingest_paper(
     """Stream the PDF from PMC and submit it via the ingest API."""
     pmc_id = paper["pmc_id"]
     pdf_url = PMC_PDF_URL.format(pmc_id=pmc_id)
-    with download_pdf(client, pdf_url, pdf_timeout) as tmp_path:
-        result = ingest_pdf(
-            client,
-            api_url,
-            f"pmc_{pmc_id}.pdf",
-            tmp_path,
-            {
-                "title": paper["title"],
-                "authors": json.dumps(paper["authors"]),
-                "categories": json.dumps(paper["categories"]),
-                "published_date": paper["pub_date"] or "",
-                "source": "pubmed",
-            },
-            poll_timeout,
-        )
+    result = ingest_downloaded(
+        client,
+        api_url,
+        pdf_url=pdf_url,
+        file_name=f"pmc_{pmc_id}.pdf",
+        title=paper["title"],
+        authors=paper["authors"],
+        categories=paper["categories"],
+        published_date=paper["pub_date"],
+        source="pubmed",
+        pdf_timeout=pdf_timeout,
+        poll_timeout=poll_timeout,
+    )
     return {**result, "label": f"PMC{pmc_id}", "pmc_id": pmc_id}
 
 
@@ -196,41 +193,11 @@ def main() -> None:
         help="Max papers to ingest (default: 5)",
     )
     parser.add_argument(
-        "--api-url",
-        default="http://localhost:8020",
-        help="academic-paper-system API base URL",
-    )
-    parser.add_argument(
-        "--poll-timeout",
-        type=int,
-        default=300,
-        metavar="SEC",
-        help="Max seconds to wait for each ingest job to finish (default: 300)",
-    )
-    parser.add_argument(
         "--api-key",
         default="",
         help="NCBI API key (optional; raises rate limit to 10 req/sec)",
     )
-    parser.add_argument(
-        "--from-date",
-        type=iso_date,
-        default="",
-        metavar="YYYY-MM-DD",
-        help="Only return papers published on or after this date (pdat filter)",
-    )
-    parser.add_argument(
-        "--until-date",
-        type=iso_date,
-        default="",
-        metavar="YYYY-MM-DD",
-        help="Only return papers published on or before this date (pdat filter)",
-    )
-    parser.add_argument(
-        "--summary-file",
-        default=None,
-        help="Write run summary JSON to this path",
-    )
+    add_common_args(parser)
     args = parser.parse_args()
     check_date_order(parser, args.from_date, args.until_date)
 
@@ -254,9 +221,7 @@ def main() -> None:
 
         print(f"[pubmed] found {len(pmc_ids)} PMC IDs")
         if not pmc_ids:
-            if args.summary_file:
-                with open(args.summary_file, "w") as f:
-                    json.dump({"fetched": 0, "ingested": 0, "duplicate": 0, "failed": 0, "detail": []}, f)
+            write_summary(args.summary_file, fetched=0)
             sys.exit(0)
 
         time.sleep(0.34)  # respect 3 req/sec default rate limit
