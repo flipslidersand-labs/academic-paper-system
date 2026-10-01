@@ -56,23 +56,38 @@ uvicorn academic_paper.server:app --reload --port 8020
 
 | Method | Path | 説明 |
 |--------|------|------|
-| POST | `/papers/ingest` | PDF 論文をアップロード・インデックス化 |
-| GET | `/papers` | 論文一覧 (ページネーション対応) |
+| POST | `/papers/ingest` | PDF 論文をアップロード・インデックス化 (既定は非同期 202) |
+| GET | `/papers` | 論文一覧 (ページネーション・author/category フィルタ・sort 対応) |
 | GET | `/papers/{paper_id}` | 論文詳細 |
-| GET | `/papers/{paper_id}/summary` | 構造化要約取得 (LLM RAG) |
-| GET | `/search` | ハイブリッド検索 (`mode=hybrid/vector/keyword`) |
+| GET | `/papers/{paper_id}/summary` | 構造化要約取得 (キャッシュのみ。未生成は 404) |
+| GET | `/search` | 検索 (`mode=hybrid/vector/keyword/nugget`) |
 
 ### `/papers/ingest` (POST)
 
-PDF ファイルをアップロードしてインデックス化します。
+PDF ファイルをアップロードしてインデックス化します。既定ではファイルハッシュで重複チェックし、`pending` の論文行を保存したうえで
+バックグラウンド処理 (抽出 → チャンク化 → Embedding → Qdrant upsert) に回し、**202** を返します。
+完了は `GET /jobs/{job_id}` をポーリングして確認します (`done` 時、job の `result` に `paper_id`/`chunks`)。
 
 **Request**:
 ```
 Content-Type: multipart/form-data
 file: <PDF file>
+title / authors / categories / published_date / source: 任意のメタデータ (form)
 ```
 
-**Response** (200):
+- `title` (最大 1000 文字)、`authors` (最大 10000)、`categories` (最大 2000)、`published_date` (ISO 日付、最大 10)、`source` (最大 100)
+- Query `wait` (bool, デフォルト false): `true` で同期処理し、インデックス完了後に 200 を返す
+
+**Response** (202, 既定):
+```json
+{
+  "job_id": "...",
+  "paper_id": 1,
+  "status": "pending"
+}
+```
+
+**Response** (200, `wait=true` のときのみ):
 ```json
 {
   "paper_id": 1,
@@ -84,7 +99,10 @@ file: <PDF file>
 
 **Errors**:
 - 409: ファイルが既にインジェスト済み (ファイルハッシュで重複チェック)
-- 400: PDF抽出失敗 / チャンク生成失敗 / Embedding/Qdrant エラー
+- 413: ファイルサイズが上限 (`max_upload_mb`) 超過
+- 415: PDF ではない (`%PDF-` マジックバイト無し)
+- 422: メタデータ不正 (`published_date` が ISO 形式でない等)
+- 400: PDF抽出失敗 / チャンク生成失敗 / Embedding/Qdrant エラー (`wait=true` のみ。非同期時は job が failed になる)
 
 ### `/papers` (GET)
 
@@ -93,6 +111,11 @@ file: <PDF file>
 **Query params**:
 - `limit`: 返す件数 (1-100, デフォルト 20)
 - `offset`: スキップ件数 (デフォルト 0)
+- `author`: 著者名で絞り込み (部分一致, オプション)
+- `category`: カテゴリコードで絞り込み (完全一致, 例 `cs.AI`, オプション)
+- `sort`: `ingested_at` (デフォルト, 新しい順) / `score` (スコア降順, 未スコアは末尾)
+
+`total` はフィルタ適用後の件数です。
 
 **Response** (200):
 ```json
@@ -130,10 +153,8 @@ file: <PDF file>
 
 ### `/papers/{paper_id}/summary` (GET)
 
-論文の構造化要約を取得します。キャッシュ機能付き。
-
-**Query params**:
-- `force`: キャッシュを無視して再生成 (デフォルト false)
+保存済みの構造化要約をキャッシュから返します。GET は安全 (冪等) で、LLM 生成や DB 書き込みは行いません (#140)。
+要約の生成は `POST /papers/{paper_id}/summary` で行います (`force` クエリ引数はそちら。デフォルト false、`true` でキャッシュを無視して再生成)。
 
 **Response** (200):
 ```json
@@ -145,26 +166,29 @@ file: <PDF file>
   "results": "結果...",
   "limitations": "制限事項...",
   "keywords": ["keyword1", "keyword2"],
-  "cached": false
+  "cached": true
 }
 ```
 
 **Errors**:
-- 404: 論文が見つからない
-- 503: LLM未設定
+- 404: 論文が見つからない / 要約が未生成 (`POST /papers/{paper_id}/summary` で生成)
 
 ### `/search` (GET)
 
-論文をハイブリッド検索します。
+論文を検索します (ハイブリッド / ベクトル / キーワード / nugget)。
 
 **Query params**:
-- `q`: 検索クエリ (必須, 1文字以上)
+- `q`: 検索クエリ (必須, 1-1000 文字)
 - `mode`: 検索モード (デフォルト `hybrid`)
   - `hybrid`: FTS5 (BM25) + ベクトル検索を RRF で統合
   - `keyword`: FTS5 (BM25) のみ
   - `vector`: ベクトル検索のみ
+  - `nugget`: hybrid 検索後、各チャンクからクエリに最も関連する上位 N 文 (nugget) を抽出して返す (コンテキスト長削減用)
 - `limit`: 返す件数 (1-100, デフォルト 10)
 - `paper_id`: 特定の論文 ID に限定 (オプション)
+- `snippet_length`: スニペット最大長 (0 以上, デフォルト 200, 0=全文。keyword/vector/hybrid のみ有効)
+- `nuggets_per_chunk`: チャンクあたりの文数 (1-10, デフォルト 3。nugget モードのみ)
+- `nugget_embed_weight`: nugget スコアリングの Embedding 重み (0.0-1.0, デフォルト 0.7, 0=BM25 のみ / 1=Embedding のみ。nugget モードのみ)
 
 **Response** (200):
 ```json
