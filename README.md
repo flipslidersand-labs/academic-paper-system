@@ -8,7 +8,7 @@ Research paper knowledge base — PDF ingestion → hybrid search → structured
 PDF upload
   → pdfplumber extraction
   → text chunking (512 tokens / 64 overlap)
-  → e5-large-v2 embeddings (768-d) via embedding-svc
+  → multilingual-e5-base embeddings (768-d) via embedding-svc
   → Qdrant vector store  +  SQLite FTS5 (BM25)
   → RRF hybrid retrieval
   → Gemini / Ollama structured summarization
