@@ -237,8 +237,6 @@ def test_search_does_not_retry_on_4xx():
 
 def test_search_retries_on_5xx():
     """A 500 UnexpectedResponse is retried up to `attempts` times (#306)."""
-    from academic_paper.vector_store import _RetryableQdrantError
-
     with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
         mock_client = MagicMock()
         MockClient.return_value = mock_client
@@ -254,10 +252,11 @@ def test_search_retries_on_5xx():
             store = QdrantStore(url="http://test", collection="test-collection")
             try:
                 store.search([0.1] * 768, limit=10)
-            except _RetryableQdrantError:
-                pass
+            except UnexpectedResponse as exc:
+                # The internal retry marker must not leak; the original error surfaces (#472).
+                assert exc.status_code == 500
             else:
-                raise AssertionError("expected _RetryableQdrantError to propagate after retries")
+                raise AssertionError("expected UnexpectedResponse to propagate after retries")
 
         assert call_count[0] == 3
 

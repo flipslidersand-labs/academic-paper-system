@@ -28,6 +28,20 @@ def _reraise_qdrant_response(exc: UnexpectedResponse) -> None:
 
 
 _QDRANT_RETRYABLE = (_RetryableQdrantError, httpx.NetworkError, httpx.TimeoutException)
+
+
+def _qdrant_retry(fn):
+    """Run fn with retries; after the final attempt re-raise the original UnexpectedResponse.
+
+    _RetryableQdrantError is an internal retry marker. Callers (summarizer fallback,
+    server._http_exc_for) classify UnexpectedResponse, so it must not leak out (#472).
+    """
+    try:
+        return with_retry(fn, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
+    except _RetryableQdrantError as exc:
+        raise exc.__cause__ from None
+
+
 _UPSERT_BATCH_MAX = 200  # keep single requests well under qdrant_timeout (#236)
 
 
@@ -60,7 +74,7 @@ class QdrantStore:
             except UnexpectedResponse as exc:
                 _reraise_qdrant_response(exc)
 
-        with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
+        _qdrant_retry(_do)
 
     def upsert(self, points: list[dict]) -> None:
         """チャンクをQdrantにupsertする（失敗時3回リトライ、200件ずつバッチ分割 #236）
@@ -81,7 +95,7 @@ class QdrantStore:
                 except UnexpectedResponse as exc:
                     _reraise_qdrant_response(exc)
 
-            with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
+            _qdrant_retry(_do)
 
     def delete_by_paper_id(self, paper_id: int) -> None:
         """Qdrant から paper_id に属する全ポイントを削除（補償用、#145）。"""
@@ -96,7 +110,7 @@ class QdrantStore:
             except UnexpectedResponse as exc:
                 _reraise_qdrant_response(exc)
 
-        with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
+        _qdrant_retry(_do)
 
     def search(self, query_vector: list[float], limit: int = 10, paper_id_filter: int | None = None) -> list[dict]:
         """ベクトル類似検索（失敗時3回リトライ）
@@ -118,7 +132,7 @@ class QdrantStore:
             except UnexpectedResponse as exc:
                 _reraise_qdrant_response(exc)
 
-        results = with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
+        results = _qdrant_retry(_do)
         return [{"id": str(r.id), "score": r.score, "payload": r.payload} for r in results.points]
 
     # ------------------------------------------------------------------

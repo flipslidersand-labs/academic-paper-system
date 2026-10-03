@@ -953,6 +953,25 @@ def test_stats_unexpected_error_returns_500(client):
     assert "Internal error" in response.json()["detail"]
 
 
+def test_search_real_qdrant_store_5xx_returns_502(client):
+    """Regression (#472): a persistent Qdrant 5xx surfaces through the real QdrantStore
+    retry path as UnexpectedResponse, so /search maps it to 502 (not an opaque 500)."""
+    from qdrant_client.http.exceptions import UnexpectedResponse
+
+    from academic_paper.vector_store import QdrantStore
+
+    with patch("academic_paper.vector_store.QdrantClient") as mock_client_cls:
+        mock_client_cls.return_value.query_points.side_effect = UnexpectedResponse(
+            status_code=503, reason_phrase="Service Unavailable", content=b"", headers={}
+        )
+        client.app.state.vector_store = QdrantStore(url="http://test", collection="c")
+        client.app.state.embedder.embed_single = AsyncMock(return_value=[0.1] * 768)
+        with patch("academic_paper.retry.time.sleep"):
+            response = client.get("/search", params={"q": "x", "mode": "vector"})
+
+    assert response.status_code == 502
+
+
 def test_http_exc_for_maps_embedding_count_mismatch_to_502():
     """_http_exc_for maps EmbeddingCountMismatchError to 502, not the generic
     ValueError 400 branch — it is an upstream protocol failure, not bad client
