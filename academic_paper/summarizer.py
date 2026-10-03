@@ -115,6 +115,39 @@ class RAGSummarizer:
             timeout=settings.summarize_total_timeout,
         )
 
+    async def _search_or_fallback(self, query_vector: list[float], paper_id: int, top_k: int) -> list[dict]:
+        """Search Qdrant with query_vector, degrading to DB chunk order on outages.
+
+        Permanent 4xx errors propagate (#305); 5xx and unavailability fall back.
+        """
+        try:
+            # asyncio.TimeoutError is a TimeoutError, already covered by
+            # QDRANT_UNAVAILABLE_ERRORS below — bounds a hung Qdrant
+            # connection that never raises its own error (#237).
+            return await asyncio.wait_for(
+                self.qdrant.asearch(
+                    query_vector=query_vector,
+                    limit=top_k,
+                    paper_id_filter=paper_id,
+                ),
+                timeout=settings.qdrant_timeout,
+            )
+        except UnexpectedResponse as e:
+            if _is_permanent_client_error(e.status_code):
+                # A 4xx from Qdrant (bad API key, missing collection,
+                # dimension mismatch, ...) is a standing misconfiguration,
+                # not a transient outage — must propagate instead of silently
+                # degrading every summary (#305).
+                raise
+            logger.warning(
+                "Qdrant returned server error %s for paper_id=%s — falling back to DB chunk order",
+                e.status_code,
+                paper_id,
+            )
+        except QDRANT_UNAVAILABLE_ERRORS:
+            logger.warning("Qdrant unavailable for paper_id=%s — falling back to DB chunk order", paper_id)
+        return await asyncio.to_thread(self._chunks_from_db, paper_id, top_k)
+
     async def _summarize_impl(
         self,
         paper_id: int,
@@ -161,63 +194,11 @@ class RAGSummarizer:
                 )
                 chunks = await asyncio.to_thread(self._chunks_from_db, paper_id, top_k)
             else:
-                try:
-                    # asyncio.TimeoutError is a TimeoutError, already covered by
-                    # QDRANT_UNAVAILABLE_ERRORS below — bounds a hung Qdrant
-                    # connection that never raises its own error (#237).
-                    chunks = await asyncio.wait_for(
-                        self.qdrant.asearch(
-                            query_vector=query_vector,
-                            limit=top_k,
-                            paper_id_filter=paper_id,
-                        ),
-                        timeout=settings.qdrant_timeout,
-                    )
-                except UnexpectedResponse as e:
-                    if _is_permanent_client_error(e.status_code):
-                        # A 4xx from Qdrant (bad API key, missing collection,
-                        # dimension mismatch, ...) is a standing
-                        # misconfiguration, not a transient outage — must
-                        # propagate instead of silently degrading every
-                        # summary (#305).
-                        raise
-                    logger.warning(
-                        "Qdrant returned server error %s for paper_id=%s — falling back to DB chunk order",
-                        e.status_code,
-                        paper_id,
-                    )
-                    chunks = await asyncio.to_thread(self._chunks_from_db, paper_id, top_k)
-                except QDRANT_UNAVAILABLE_ERRORS:
-                    logger.warning("Qdrant unavailable for paper_id=%s — falling back to DB chunk order", paper_id)
-                    chunks = await asyncio.to_thread(self._chunks_from_db, paper_id, top_k)
+                chunks = await self._search_or_fallback(query_vector, paper_id, top_k)
         else:
             # No embedder configured (test convenience): degraded zero-vector search.
-            # Same QDRANT_UNAVAILABLE_ERRORS fallback as the embedder-present path
-            # above, so this branch degrades gracefully instead of propagating (#267).
-            try:
-                chunks = await asyncio.wait_for(
-                    self.qdrant.asearch(
-                        query_vector=[0.0] * self.qdrant.vector_size,
-                        limit=top_k,
-                        paper_id_filter=paper_id,
-                    ),
-                    timeout=settings.qdrant_timeout,
-                )
-            except UnexpectedResponse as e:
-                if _is_permanent_client_error(e.status_code):
-                    # See the embedder-present branch above (#305): a 4xx
-                    # from Qdrant is a standing misconfiguration and must
-                    # propagate rather than degrade silently.
-                    raise
-                logger.warning(
-                    "Qdrant returned server error %s for paper_id=%s — falling back to DB chunk order",
-                    e.status_code,
-                    paper_id,
-                )
-                chunks = await asyncio.to_thread(self._chunks_from_db, paper_id, top_k)
-            except QDRANT_UNAVAILABLE_ERRORS:
-                logger.warning("Qdrant unavailable for paper_id=%s — falling back to DB chunk order", paper_id)
-                chunks = await asyncio.to_thread(self._chunks_from_db, paper_id, top_k)
+            # Same Qdrant fallback handling as the embedder-present path (#267).
+            chunks = await self._search_or_fallback([0.0] * self.qdrant.vector_size, paper_id, top_k)
 
         if not chunks:
             raise ValueError(f"No chunks found for paper {paper_id}")
