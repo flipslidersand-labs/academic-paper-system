@@ -37,15 +37,22 @@ def make_qdrant_id(file_hash: str, chunk_index: int) -> str:
 
 
 class QdrantStore:
-    def __init__(self, url: str | None = None, api_key: str | None = None, collection: str | None = None):
+    def __init__(
+        self,
+        url: str | None = None,
+        api_key: str | None = None,
+        collection: str | None = None,
+        vector_size: int | None = None,
+    ):
         self.url = url or settings.qdrant_url
         self.api_key = api_key or settings.qdrant_api_key or None
         self.collection = collection or settings.qdrant_collection
+        self.vector_size = vector_size or settings.embedding_dim
         self.client = QdrantClient(url=self.url, api_key=self.api_key, timeout=settings.qdrant_timeout)
 
     def ensure_collection(self) -> None:
         """コレクションが存在しなければ作成（冪等、失敗時3回リトライ #266）
-        size=768, distance=Cosine
+        size=settings.embedding_dim, distance=Cosine。既存コレクションの次元が不一致なら ValueError。
         """
 
         def _do():
@@ -55,8 +62,16 @@ class QdrantStore:
                 if self.collection not in names:
                     self.client.create_collection(
                         collection_name=self.collection,
-                        vectors_config=VectorParams(size=768, distance=Distance.COSINE),
+                        vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE),
                     )
+                else:
+                    existing = self.client.get_collection(self.collection).config.params.vectors
+                    existing_size = getattr(existing, "size", None)
+                    if existing_size is not None and existing_size != self.vector_size:
+                        raise ValueError(
+                            f"Qdrant collection '{self.collection}' has vector size {existing_size}, "
+                            f"but embedding_dim is {self.vector_size}; recreate the collection or fix EMBEDDING_DIM"
+                        )
             except UnexpectedResponse as exc:
                 _reraise_qdrant_response(exc)
 
