@@ -393,35 +393,45 @@ async def _mark_paper_failed(paper_id: int) -> None:
         logger.error("Failed to mark paper_id=%s as failed (job status still updated)", paper_id, exc_info=True)
 
 
-async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str, file_name: str) -> None:
-    """Background task: run the ingest pipeline, updating job + paper status."""
-    job = job_store.get(job_id)
-    if job is None:
-        return
-    job.status = "running"
-    job.total = 1
-    await job_store.persist(job)
+def _unlink_quiet(path: str) -> None:
     try:
-        chunks = await _ingest_pipeline(tmp_path, paper_id, file_hash, file_name)
-        job.result = {"paper_id": paper_id, "file_name": file_name, "chunks": chunks, "status": "indexed"}
-        job.processed = 1
-        job.status = "done"
-    except Exception as e:
-        logger.exception("Background ingest failed for paper_id=%s", paper_id)
-        # _mark_paper_failed never raises (#421): it swallows and logs its own
-        # errors, so the job attributes below always run afterward instead of
-        # being skipped by an exception from the paper-status write.
-        await _mark_paper_failed(paper_id)
-        job.failed = 1
-        job.errors.append(f"paper_id={paper_id}: {str(e) or type(e).__name__}")
-        job.status = "failed"
-    finally:
-        job.finished_at = time.time()
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str, file_name: str) -> None:
+    """Background task: run the ingest pipeline, updating job + paper status.
+
+    Owns ``tmp_path`` cleanup on every path, including the early return when
+    the job is gone and a failure in the initial ``persist`` (#454).
+    """
+    try:
+        job = job_store.get(job_id)
+        if job is None:
+            return
+        job.status = "running"
+        job.total = 1
         await job_store.persist(job)
         try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+            chunks = await _ingest_pipeline(tmp_path, paper_id, file_hash, file_name)
+            job.result = {"paper_id": paper_id, "file_name": file_name, "chunks": chunks, "status": "indexed"}
+            job.processed = 1
+            job.status = "done"
+        except Exception as e:
+            logger.exception("Background ingest failed for paper_id=%s", paper_id)
+            # _mark_paper_failed never raises (#421): it swallows and logs its own
+            # errors, so the job attributes below always run afterward instead of
+            # being skipped by an exception from the paper-status write.
+            await _mark_paper_failed(paper_id)
+            job.failed = 1
+            job.errors.append(f"paper_id={paper_id}: {str(e) or type(e).__name__}")
+            job.status = "failed"
+        finally:
+            job.finished_at = time.time()
+            await job_store.persist(job)
+    finally:
+        _unlink_quiet(tmp_path)
 
 
 @app.post("/papers/ingest", dependencies=[Depends(verify_api_key)])
@@ -537,6 +547,9 @@ async def ingest_paper(
         job = await job_store.create(kind="ingest")
         keep_tmp = True  # background task now owns tmp cleanup
         task = asyncio.create_task(_run_ingest(job.id, tmp_path, paper_id, file_hash, file_name))
+        # A task cancelled before its first step (shutdown) never enters
+        # _run_ingest's try/finally, so also unlink when the task completes (#454).
+        task.add_done_callback(lambda _t, p=tmp_path: _unlink_quiet(p))
         active = getattr(app.state, "active_ingest_tasks", None)
         if active is not None:
             active.add(task)
@@ -553,10 +566,7 @@ async def ingest_paper(
         raise _http_exc_for(e, "Ingest failed unexpectedly")
     finally:
         if tmp_path is not None and not keep_tmp:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+            _unlink_quiet(tmp_path)
 
 
 @app.get("/papers", dependencies=[Depends(verify_api_key)])

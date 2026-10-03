@@ -1377,3 +1377,33 @@ def test_search_q_accepts_max_length(client, temp_db):
     """q at the max_length boundary (1000 chars) is still accepted."""
     resp = client.get("/search", params={"q": "a" * 1000, "mode": "keyword"})
     assert resp.status_code == 200
+
+
+def test_run_ingest_unlinks_tmpfile_when_job_missing(tmp_path):
+    """_run_ingest owns tmp cleanup even when the job is gone (early return) (#454)."""
+    import asyncio
+
+    from academic_paper.server import _run_ingest
+
+    pdf = tmp_path / "leak.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    asyncio.run(_run_ingest("no-such-job", str(pdf), 1, "h", "f.pdf"))
+    assert not pdf.exists()
+
+
+def test_run_ingest_unlinks_tmpfile_when_persist_fails(tmp_path):
+    """A failing initial job persist must not leak the temp PDF (#454)."""
+    import asyncio
+
+    from academic_paper.server import _run_ingest
+
+    pdf = tmp_path / "leak2.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    job = MagicMock()
+    with (
+        patch("academic_paper.server.job_store.get", return_value=job),
+        patch("academic_paper.server.job_store.persist", AsyncMock(side_effect=RuntimeError("db"))),
+        pytest.raises(RuntimeError),
+    ):
+        asyncio.run(_run_ingest("j", str(pdf), 1, "h", "f.pdf"))
+    assert not pdf.exists()
