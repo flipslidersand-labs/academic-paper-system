@@ -110,6 +110,14 @@ volumes:
 pytest
 ```
 
+### ruff version pin
+
+ruff is pinned in three places that must match: `pyproject.toml` (dev extra
+`ruff==X`), `.github/workflows/ci.yml` (`ruff-version`) and
+`.pre-commit-config.yaml` (`rev: vX`). `tests/test_ruff_pin_sync.py` fails when
+they drift (e.g. a Dependabot bump of only `pyproject.toml`), so bump all three
+in the same PR.
+
 ## License
 
 MIT
