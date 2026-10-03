@@ -122,3 +122,14 @@ in the same PR.
 
 MIT
 
+### Third-party licenses
+
+- Runtime dependencies (`requirements.lock`, what the Docker image ships) are all
+  permissive (MIT / BSD / Apache-2.0 / ISC / PSF; `certifi` is MPL-2.0).
+- **Dev-only exception:** `fpdf2` (LGPL-3.0, optional `dev` extra) is used only by
+  tests to generate sample PDFs. It is not in `requirements.lock`, not installed in
+  the Docker image, and not part of the built wheel, so it is never distributed.
+  `pip install academic-paper-system[dev]` does install it into your dev environment.
+- `.github/workflows/license-check.yml` enforces an SPDX-style allow-list with
+  `pip-licenses` for both runtime and dev installs; `fpdf2` is the sole listed exception.
+  Adding another copyleft package makes the check fail.
