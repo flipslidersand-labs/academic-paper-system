@@ -666,6 +666,35 @@ def test_ingest_async_job_failed_on_no_text(client):
     assert paper["status"] == "failed"
 
 
+def test_ingest_async_upsert_failure_compensates_qdrant(client):
+    """Regression (#471): a mid-way upsert failure in the background job deletes the
+    partially-upserted vectors, even when the compensation delete itself fails."""
+    pdf_content = create_minimal_pdf()
+
+    for delete_mock in (AsyncMock(return_value=None), AsyncMock(side_effect=RuntimeError("qdrant down"))):
+        client.app.state.vector_store.aupsert = AsyncMock(side_effect=RuntimeError("batch 2 failed"))
+        client.app.state.vector_store.adelete_by_paper_id = delete_mock
+        with patch("academic_paper.server.extract_text") as mock_extract:
+            mock_extract.return_value = [{"page": 1, "text": f"Doc {id(delete_mock)}"}]
+            response = client.post(
+                "/papers/ingest",
+                files={
+                    "file": (
+                        f"u{id(delete_mock)}.pdf",
+                        BytesIO(pdf_content + str(id(delete_mock)).encode()),
+                        "application/pdf",
+                    )
+                },
+            )
+            assert response.status_code == 202
+            body = response.json()
+            job = _wait_for_job(client, body["job_id"])
+
+        assert job["status"] == "failed"
+        delete_mock.assert_awaited_once_with(body["paper_id"])
+        assert client.get(f"/papers/{body['paper_id']}").json()["status"] == "failed"
+
+
 def test_ingest_async_job_failed_when_paper_status_update_raises(client):
     """Regression (#421): if update_paper_status raises (e.g. 'database is locked')
     while handling an ingest failure, the job must still end up 'failed' with
