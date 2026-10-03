@@ -309,6 +309,19 @@ ruff format academic_paper/ tests/
 - Target version: Python 3.12
 - Rules: E F W I N (import sort 含む)
 
+### requirements.lock の再生成
+
+Docker・CI・arxiv-daily は `requirements.lock` (ハッシュ付き) を正本として使う。
+`pyproject.toml` の依存を変えたとき、または依存を最新化したいときに再生成する (Python 3.12 + `pip install pip-tools` が必要)。
+
+```bash
+scripts/update-lock.sh             # 現在のピンを維持して再生成
+scripts/update-lock.sh --upgrade   # 全依存を最新版に更新して再生成
+pytest tests/test_requirements_lock_hashes.py   # 再生成後の検証
+```
+
+Python 3.12 以外では失敗する (lock ヘッダが 3.12 固定のため)。
+
 ### ディレクトリ構造
 
 ```
@@ -343,6 +356,7 @@ academic-paper-system/
 │   ├── openalex_collect.py   # OpenAlex 論文収集
 │   ├── pubmed_collect.py     # PubMed Central 論文収集
 │   ├── semantic_scholar_collect.py # Semantic Scholar 論文収集
+│   ├── update-lock.sh        # requirements.lock 再生成 (--upgrade で最新化)
 │   ├── fix_file_names.py     # 既存論文の file_name 不整合修正
 │   └── generate_portfolio.py # ポートフォリオ静的ページ生成
 ├── tests/                   # テストスイート
