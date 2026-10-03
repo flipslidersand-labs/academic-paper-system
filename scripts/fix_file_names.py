@@ -133,6 +133,17 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     return 1 if any(e["status"] == "unresolved" for e in entries) else 0
 
 
+def _set_qdrant_file_name(client: httpx.Client, args: argparse.Namespace, paper_id: int, file_name: str) -> None:
+    resp = client.post(
+        f"{args.qdrant_url}/collections/{args.collection}/points/payload?wait=true",
+        json={
+            "payload": {"file_name": file_name},
+            "filter": {"must": [{"key": "paper_id", "match": {"value": paper_id}}]},
+        },
+    )
+    resp.raise_for_status()
+
+
 def cmd_apply(args: argparse.Namespace) -> int:
     with open(args.mapping) as f:
         mapping = json.load(f)
@@ -178,19 +189,35 @@ def cmd_apply(args: argparse.Namespace) -> int:
     shutil.copy2(args.db, backup)
     print(f"[apply] DB backed up to {backup}")
 
-    with httpx.Client(timeout=30) as client:
-        for e in changes:
-            conn.execute("UPDATE papers SET file_name = ? WHERE id = ?", (e["new_file_name"], e["paper_id"]))
-            resp = client.post(
-                f"{args.qdrant_url}/collections/{args.collection}/points/payload?wait=true",
-                json={
-                    "payload": {"file_name": e["new_file_name"]},
-                    "filter": {"must": [{"key": "paper_id", "match": {"value": e["paper_id"]}}]},
-                },
-            )
-            resp.raise_for_status()
-    conn.commit()
-    conn.close()
+    # DB and Qdrant cannot be updated atomically. Strategy: stage every DB UPDATE
+    # in one uncommitted transaction, update Qdrant per paper, and commit the DB
+    # only after all Qdrant updates succeeded. On any failure roll the DB back
+    # and best-effort revert the Qdrant payloads already touched, so neither
+    # store is left half-renamed (#312).
+    attempted: list[dict] = []
+    try:
+        with httpx.Client(timeout=30) as client:
+            try:
+                for e in changes:
+                    conn.execute("UPDATE papers SET file_name = ? WHERE id = ?", (e["new_file_name"], e["paper_id"]))
+                    attempted.append(e)  # recorded before the POST: it may apply server-side even if the reply fails
+                    _set_qdrant_file_name(client, args, e["paper_id"], e["new_file_name"])
+                conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                print(f"[apply] ERROR: {exc!r} — DB rolled back, reverting Qdrant payloads", file=sys.stderr)
+                for done in attempted:
+                    try:
+                        _set_qdrant_file_name(client, args, done["paper_id"], done["db_file_name"])
+                    except Exception as revert_exc:
+                        print(
+                            f"[apply] WARNING: could not revert Qdrant payload for paper {done['paper_id']} "
+                            f"to {done['db_file_name']!r}: {revert_exc!r} — fix manually (DB backup: {backup})",
+                            file=sys.stderr,
+                        )
+                return 1
+    finally:
+        conn.close()
     print(f"[apply] updated {len(changes)} papers in DB and Qdrant")
     return 0
 
