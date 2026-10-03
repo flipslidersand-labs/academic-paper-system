@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from academic_paper.config import settings
 from academic_paper.db import get_chunks, get_connection, save_chunks, save_paper
+from academic_paper.embedder import EmbedderClient
 from academic_paper.jobs import job_store
 from academic_paper.server import _cleanup_orphaned_ingests, app
 
@@ -344,9 +345,8 @@ def test_ingest_stores_qdrant_id(client):
 def test_health_returns_ok(client):
     """Test GET /health returns ok when all services are healthy."""
     # Mock vector_store to have a working client
-    mock_client = MagicMock()
-    mock_client.get_collections.return_value = MagicMock(collections=[])
-    client.app.state.vector_store.client = mock_client
+    client.app.state.vector_store.aping = AsyncMock(return_value=None)
+    client.app.state.embedder = EmbedderClient(base_url="http://embed.test", api_key="k")
 
     # Mock httpx to return 200 status
     with patch("academic_paper.server.httpx.AsyncClient") as mock_httpx:
@@ -364,10 +364,8 @@ def test_health_returns_ok(client):
 
 def test_health_returns_degraded_on_qdrant_error(client):
     """Test GET /health returns 503 degraded when Qdrant is unavailable (#195)."""
-    # Mock vector_store to raise exception
-    mock_client = MagicMock()
-    mock_client.get_collections.side_effect = Exception("Connection failed")
-    client.app.state.vector_store.client = mock_client
+    client.app.state.vector_store.aping = AsyncMock(side_effect=Exception("Connection failed"))
+    client.app.state.embedder = EmbedderClient(base_url="http://embed.test", api_key="k")
 
     # Mock httpx to return 200 status
     with patch("academic_paper.server.httpx.AsyncClient") as mock_httpx:
@@ -399,12 +397,7 @@ def test_stats_returns_counts(client):
         )
         assert response_ingest.status_code == 200
 
-    # Mock vector_store client for stats call
-    mock_client = MagicMock()
-    mock_collection_info = MagicMock()
-    mock_collection_info.points_count = 1
-    mock_client.get_collection.return_value = mock_collection_info
-    client.app.state.vector_store.client = mock_client
+    client.app.state.vector_store.count_points = MagicMock(return_value=1)
 
     # Get stats
     response = client.get("/stats")
@@ -466,9 +459,8 @@ def _mock_embedding_response(status_code: int) -> MagicMock:
 
 def test_health_embedding_svc_degraded(client):
     """Test GET /health returns 503 degraded when embedding-svc returns 5xx (#195)."""
-    mock_client = MagicMock()
-    mock_client.get_collections.return_value = MagicMock(collections=[])
-    client.app.state.vector_store.client = mock_client
+    client.app.state.vector_store.aping = AsyncMock(return_value=None)
+    client.app.state.embedder = EmbedderClient(base_url="http://embed.test", api_key="k")
 
     with patch("academic_paper.server.httpx.AsyncClient") as mock_httpx:
         mock_httpx.return_value.__aenter__.return_value.get = AsyncMock(return_value=_mock_embedding_response(503))
@@ -483,9 +475,8 @@ def test_health_embedding_svc_degraded(client):
 
 def test_health_embedding_svc_auth_failure_degraded(client):
     """Regression (#142, #195): a 401 from embedding-svc must report degraded with HTTP 503."""
-    mock_client = MagicMock()
-    mock_client.get_collections.return_value = MagicMock(collections=[])
-    client.app.state.vector_store.client = mock_client
+    client.app.state.vector_store.aping = AsyncMock(return_value=None)
+    client.app.state.embedder = EmbedderClient(base_url="http://embed.test", api_key="k")
 
     with patch("academic_paper.server.httpx.AsyncClient") as mock_httpx:
         mock_httpx.return_value.__aenter__.return_value.get = AsyncMock(return_value=_mock_embedding_response(401))
@@ -499,9 +490,7 @@ def test_health_embedding_svc_auth_failure_degraded(client):
 
 def test_stats_qdrant_error(client):
     """Test GET /stats returns qdrant_points=-1 when Qdrant collection is unavailable."""
-    mock_client = MagicMock()
-    mock_client.get_collection.side_effect = Exception("Connection failed")
-    client.app.state.vector_store.client = mock_client
+    client.app.state.vector_store.count_points = MagicMock(side_effect=Exception("Connection failed"))
 
     response = client.get("/stats")
     assert response.status_code == 200
@@ -1307,7 +1296,8 @@ def _lifespan_client(temp_db):
     mock_qdrant.adelete_by_paper_id = AsyncMock(return_value=None)
     mock_qdrant.aensure_collection = AsyncMock(return_value=None)
     mock_qdrant.aclose = AsyncMock(return_value=None)
-    mock_qdrant.client.get_collections = MagicMock(return_value=None)
+    mock_qdrant.aping = AsyncMock(return_value=None)
+    mock_qdrant.count_points = MagicMock(return_value=0)
     return (
         patch.object(settings, "academic_db", temp_db),
         patch("academic_paper.server.EmbedderClient", return_value=mock_embedder),
