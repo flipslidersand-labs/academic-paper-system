@@ -301,6 +301,23 @@ async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-A
 Instrumentator().instrument(app).expose(app, dependencies=[Depends(verify_api_key)])
 
 
+def _safe_error_message(exc: Exception) -> str:
+    """Short, classified error text safe to expose in job/score errors (#474).
+
+    Never includes str(exc): httpx/Qdrant/Ollama exception strings embed internal
+    URLs, and the job errors reach public Actions logs/artifacts. Classification
+    reuses _http_exc_for (details go to the logger only). Builtin TimeoutError has
+    an empty str(), so it is reported by class name.
+    """
+    if isinstance(exc, TimeoutError):
+        return "TimeoutError"
+    http_exc = _http_exc_for(exc, "")
+    if http_exc.status_code == 400:
+        # Plain ValueError (input validation): the message may carry arbitrary content.
+        return type(exc).__name__
+    return str(http_exc.detail)
+
+
 async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_name: str) -> int:
     """Extract → chunk → embed → Qdrant upsert for a saved paper. Returns chunk count.
 
@@ -418,7 +435,7 @@ async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str,
             # being skipped by an exception from the paper-status write.
             await _mark_paper_failed(paper_id)
             job.failed = 1
-            job.errors.append(f"paper_id={paper_id}: {str(e) or type(e).__name__}")
+            job.errors.append(f"paper_id={paper_id}: {_safe_error_message(e)}")
             job.status = "failed"
         finally:
             job.finished_at = time.time()
@@ -732,7 +749,7 @@ def score_all_papers():
                 except Exception as e:
                     logger.exception("Scoring failed for paper_id=%s", paper.get("id"))
                     failed += 1
-                    errors.append(f"paper_id={paper.get('id')}: {str(e) or type(e).__name__}")
+                    errors.append(f"paper_id={paper.get('id')}: {_safe_error_message(e)}")
         return {
             "total": len(papers),
             "scored": scored,
@@ -825,13 +842,13 @@ async def _run_summarize_all(job_id: str) -> None:
             except Exception as e:
                 logger.exception("Background summarize failed for paper_id=%s", paper_id)
                 job.failed += 1
-                job.errors.append(f"paper_id={paper_id}: {e}")
+                job.errors.append(f"paper_id={paper_id}: {_safe_error_message(e)}")
 
         job.status = "done"
     except Exception as e:
         logger.exception("Background summarize-all job=%s failed", job_id)
         job.status = "failed"
-        job.errors.append(str(e))
+        job.errors.append(_safe_error_message(e))
     finally:
         job.finished_at = time.time()
         await job_store.persist(job)
