@@ -5,17 +5,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
+from academic_paper.embedder import EmbedderClient
 from academic_paper.server import _probe_startup_health
 
 
 def _make_app(*, qdrant_ok: bool, embed_ok: bool):
     """Build a minimal fake app with mocked vector_store for probe testing."""
     mock_qdrant = MagicMock()
-    if not qdrant_ok:
-        mock_qdrant.client.get_collections.side_effect = Exception("qdrant down")
+    mock_qdrant.aping = AsyncMock(side_effect=None if qdrant_ok else Exception("qdrant down"))
 
     app = MagicMock()
     app.state.vector_store = mock_qdrant
+    app.state.embedder = EmbedderClient(base_url="http://embed.test", api_key="k")
     return app
 
 
