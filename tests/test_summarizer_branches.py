@@ -86,6 +86,7 @@ async def test_summarize_no_embedder_qdrant_404_propagates():
 @pytest.mark.anyio
 async def test_summarize_no_embedder_qdrant_500_falls_back_to_db(caplog):
     qdrant = MagicMock()
+    qdrant.vector_size = 768
     qdrant.asearch = AsyncMock(side_effect=_qdrant_error(500))
     summarizer = RAGSummarizer(_llm(), qdrant)
 
