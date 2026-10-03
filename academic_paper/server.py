@@ -20,6 +20,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPE
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
+from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
 from academic_paper.chunker import chunk_pages
 from academic_paper.config import settings
@@ -258,13 +259,8 @@ def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
         # Checked before the generic ValueError branch below (#336): this is an
         # upstream protocol failure, not bad client input, so it maps to 502.
         return HTTPException(status_code=502, detail="Embedding service returned a mismatched vector count")
-    try:
-        from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
-
-        if isinstance(exc, (UnexpectedResponse, ResponseHandlingException)):
-            return HTTPException(status_code=502, detail="Vector store returned an unexpected response")
-    except ImportError:
-        pass
+    if isinstance(exc, (UnexpectedResponse, ResponseHandlingException)):
+        return HTTPException(status_code=502, detail="Vector store returned an unexpected response")
     if isinstance(exc, sqlite3.IntegrityError):
         return HTTPException(status_code=409, detail="Conflict: duplicate record")
     if isinstance(exc, ValueError):
@@ -331,9 +327,6 @@ async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_na
     chunk_texts = [chunk["text"] for chunk in chunks_list]
     with tracer.start_as_current_span("embed.batch"):
         embeddings = await app.state.embedder.embed(chunk_texts, mode="index")
-
-    if len(embeddings) != len(chunk_texts):
-        raise ValueError(f"Embedding count mismatch: expected {len(chunk_texts)} embeddings, got {len(embeddings)}")
 
     await app.state.vector_store.aensure_collection()
 
@@ -820,8 +813,8 @@ async def _run_summarize_all(job_id: str) -> None:
         for row in rows:
             paper_id = row[0]
             file_hash = row[1]
-            row_title = row[2] if len(row) > 2 else None
-            row_file_name = row[3] if len(row) > 3 else None
+            row_title = row["title"]
+            row_file_name = row["file_name"]
             try:
                 summary = await app.state.summarizer.summarize(
                     paper_id, file_hash, title=row_title, file_name=row_file_name
