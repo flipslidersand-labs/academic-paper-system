@@ -1,0 +1,67 @@
+name: License Check
+
+# #385: pyproject.toml declares MIT, so copyleft packages must not slip into the
+# runtime dependency set unnoticed. Separate workflow (not ci.yml) to stay out of
+# the way of concurrent edits to ci.yml.
+#
+# - runtime: requirements.lock (what the Docker image ships) is checked against a
+#   permissive allow-list with NO exceptions.
+# - dev: `.[dev]` is checked against the same list; the only exception is fpdf2
+#   (LGPL-3.0, test-PDF generation only, never shipped — see README "License").
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - pyproject.toml
+      - requirements.lock
+      - .github/workflows/license-check.yml
+
+concurrency:
+  group: license-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  licenses:
+    # Pure-Python job (no docker socket needed), so follow the org-wide runner var
+    # with an ubuntu-latest fallback, same resolution as qa-workflows python-test.yml.
+    runs-on: ${{ vars.GATE_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    env:
+      # Substring match (pip-licenses --partial-match) against the License field /
+      # classifiers, which are free-form (e.g. "BSD License", "Apache Software License").
+      # Weak-copyleft MPL-2.0 is allowed only for certifi (unmodified data file).
+      ALLOWED: "MIT;BSD;Apache;ISC;0BSD;Zlib;CC0;Unlicense;Python Software Foundation;PSF;Mozilla Public License 2.0"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-licenses
+        run: python -m pip install --quiet pip-licenses
+
+      - name: Runtime dependencies (requirements.lock) — no exceptions
+        run: |
+          python -m venv "$RUNNER_TEMP/rt"
+          "$RUNNER_TEMP/rt/bin/pip" install --quiet --require-hashes -r requirements.lock
+          pip-licenses --python "$RUNNER_TEMP/rt/bin/python" --format=markdown
+          pip-licenses --python "$RUNNER_TEMP/rt/bin/python" --partial-match \
+            --allow-only="$ALLOWED"
+
+      - name: Dev extras (.[dev]) — fpdf2 LGPL exception only
+        run: |
+          python -m venv "$RUNNER_TEMP/dev"
+          "$RUNNER_TEMP/dev/bin/pip" install --quiet --require-hashes -r requirements.lock
+          "$RUNNER_TEMP/dev/bin/pip" install --quiet -e ".[dev]"
+          pip-licenses --python "$RUNNER_TEMP/dev/bin/python" --format=markdown
+          pip-licenses --python "$RUNNER_TEMP/dev/bin/python" --partial-match \
+            --ignore-packages fpdf2 academic-paper-system \
+            --allow-only="$ALLOWED"
