@@ -21,6 +21,8 @@ PDF → pdfplumber抽出 → テキストチャンク分割(512/64)
 - **要約LLM**: Google Generative AI (Gemini) / Ollama (Mistral)
 - **テレメトリ**: OpenTelemetry SDK + FastAPI instrumentation
 
+**運用前提（単一プロセス）**: 現状は単一プロセス・単一ワーカー前提。`JobStore` はプロセスローカルの dict をジョブ読み取り（`get()` / `list_all()` / `has_running()`）の正本にしており、SQLite は永続化のみ。`uvicorn --workers>1` やレプリカ増設ではジョブ作成と照会が別プロセスになり `get()` が None（404）になるため未対応（#387）。Dockerfile の CMD は `--workers` 未指定（=1）。
+
 ## セットアップ
 
 ### 環境変数設定
