@@ -162,6 +162,7 @@ def test_get_llm_client_returns_gemini_when_api_key_set(monkeypatch):
     mock_settings = MagicMock()
     mock_settings.google_api_key = "test-api-key"
     mock_settings.ollama_url = ""
+    mock_settings.llm_provider = "auto"
 
     with patch("academic_paper.llm.settings", mock_settings):
         with patch("google.genai.Client"):
@@ -175,6 +176,7 @@ def test_get_llm_client_returns_ollama_when_url_set(monkeypatch):
     mock_settings = MagicMock()
     mock_settings.google_api_key = ""
     mock_settings.ollama_url = "http://localhost:11434"
+    mock_settings.llm_provider = "auto"
     mock_settings.ollama_model = "mistral"
 
     with patch("academic_paper.llm.settings", mock_settings):
@@ -231,7 +233,74 @@ def test_get_llm_client_returns_none_when_no_config(monkeypatch):
     mock_settings = MagicMock()
     mock_settings.google_api_key = ""
     mock_settings.ollama_url = ""
+    mock_settings.llm_provider = "auto"
 
     with patch("academic_paper.llm.settings", mock_settings):
         client = get_llm_client()
         assert client is None
+
+
+def _provider_settings(provider, google_api_key="", gemini_model="gemini-2.0-flash"):
+    s = MagicMock()
+    s.llm_provider = provider
+    s.google_api_key = google_api_key
+    s.gemini_model = gemini_model
+    s.ollama_url = "http://localhost:11434"
+    s.ollama_model = "mistral"
+    return s
+
+
+def test_get_llm_client_provider_gemini_explicit():
+    """llm_provider=gemini returns GeminiClient even when Ollama URL is set (#511)."""
+    with patch("academic_paper.llm.settings", _provider_settings("gemini", "k")), patch("google.genai.Client"):
+        assert isinstance(get_llm_client(), GeminiClient)
+
+
+def test_get_llm_client_provider_gemini_without_key_raises():
+    """llm_provider=gemini with an empty key is a configuration error (#511)."""
+    with patch("academic_paper.llm.settings", _provider_settings("gemini", "")):
+        with pytest.raises(ValueError, match="GOOGLE_API_KEY"):
+            get_llm_client()
+
+
+def test_get_llm_client_provider_ollama_explicit_ignores_google_key():
+    """llm_provider=ollama returns OllamaClient even when a Google key is set (#511)."""
+    with patch("academic_paper.llm.settings", _provider_settings("ollama", "k")):
+        assert isinstance(get_llm_client(), OllamaClient)
+
+
+def test_get_llm_client_provider_none_returns_none():
+    """llm_provider=none disables the LLM even when keys/URLs are configured (#511)."""
+    with patch("academic_paper.llm.settings", _provider_settings("none", "k")):
+        assert get_llm_client() is None
+
+
+def test_get_llm_client_auto_prefers_gemini_over_ollama():
+    """auto keeps the legacy priority: Google key wins over Ollama URL (#511)."""
+    with patch("academic_paper.llm.settings", _provider_settings("auto", "k")), patch("google.genai.Client"):
+        assert isinstance(get_llm_client(), GeminiClient)
+
+
+@pytest.mark.anyio
+async def test_gemini_model_setting_reflected_in_generate_and_display_name():
+    """settings.gemini_model drives generate(model=...) and display_name (#511)."""
+    with (
+        patch("academic_paper.llm.settings", _provider_settings("gemini", "k", "gemini-custom")),
+        patch("google.genai.Client") as mock_genai_client,
+    ):
+        instance = MagicMock()
+        instance.models.generate_content.return_value = MagicMock(text="ok")
+        mock_genai_client.return_value = instance
+        client = GeminiClient()
+        await client.generate("p")
+        assert instance.models.generate_content.call_args.kwargs["model"] == "gemini-custom"
+        assert client.display_name == "gemini-custom"
+
+
+def test_settings_llm_provider_defaults():
+    """Defaults preserve existing behavior (#511)."""
+    from academic_paper.config import Settings
+
+    s = Settings(_env_file=None)
+    assert s.llm_provider == "auto"
+    assert s.gemini_model == "gemini-2.0-flash"
