@@ -1,5 +1,6 @@
 """Tests for FastAPI server endpoints."""
 
+import asyncio
 import logging
 import sqlite3
 import tempfile
@@ -1268,6 +1269,49 @@ def test_startup_no_warning_when_api_key_set(capsys, temp_db):
             pass
 
     assert "API_KEY is not set" not in capsys.readouterr().out
+
+
+# --- lifespan graceful shutdown tests (#502) ---
+
+
+def _run_shutdown_with_task(temp_db, coro_factory, monkeypatch):
+    """Start the app, register a task built by coro_factory on the app loop, close the client."""
+    monkeypatch.setattr("academic_paper.server.INGEST_SHUTDOWN_TIMEOUT_S", 0.1)
+    p1, p2, p3 = _lifespan_client(temp_db)
+    holder = {}
+    with patch.object(settings, "api_key", "secret-key"), p1, p2, p3:
+        with TestClient(app) as client:
+
+            async def _register():
+                task = asyncio.get_running_loop().create_task(coro_factory())
+                app.state.active_ingest_tasks.add(task)
+                holder["task"] = task
+
+            client.portal.call(_register)
+    return holder["task"]
+
+
+def test_shutdown_cancels_unfinished_ingest_task(capsys, temp_db, monkeypatch):
+    """A task that never finishes is cancelled once the shutdown timeout elapses."""
+    start = time.monotonic()
+    task = _run_shutdown_with_task(temp_db, asyncio.Event().wait, monkeypatch)
+
+    assert task.cancelled()
+    assert "did not finish in 30s; cancelling" in capsys.readouterr().out
+    assert time.monotonic() - start < 5
+
+
+def test_shutdown_lets_fast_ingest_task_finish(capsys, temp_db, monkeypatch):
+    """A task that completes in time is not cancelled and no timeout warning is logged."""
+
+    async def _quick():
+        return "done"
+
+    task = _run_shutdown_with_task(temp_db, _quick, monkeypatch)
+
+    assert task.done() and not task.cancelled()
+    assert task.result() == "done"
+    assert "did not finish in 30s" not in capsys.readouterr().out
 
 
 # --- _cleanup_orphaned_ingests tests (#194) ---
