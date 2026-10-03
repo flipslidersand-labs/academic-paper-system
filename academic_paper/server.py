@@ -444,7 +444,8 @@ async def ingest_paper(
     Set `wait=true` to process synchronously and receive the indexed result (200).
 
     Raises:
-        HTTPException 409: File already ingested.
+        HTTPException 409: File already ingested, or the same file is currently
+            being ingested (existing row is 'indexed' or 'pending').
         HTTPException 413: File exceeds the max upload size.
         HTTPException 415: File is not a PDF (missing %PDF- magic bytes).
         HTTPException 422: Invalid metadata (non-ISO published_date, non-string list elements).
@@ -487,14 +488,19 @@ async def ingest_paper(
 
         with db_connection(settings.academic_db) as conn:
             cursor = conn.cursor()
-            # Only 409 when already successfully indexed; failed rows are removed
-            # so the same PDF can be re-uploaded after a partial failure (#145).
+            # 409 when already indexed or still being ingested ('pending'); failed rows
+            # are removed so the same PDF can be re-uploaded after a partial failure (#145).
+            # Deleting a 'pending' row would pull it out from under the running job and
+            # its compensating Qdrant delete could wipe the new paper's shared points (#496).
+            # Stale 'pending' rows from a killed server are turned 'failed' at startup.
             cursor.execute("SELECT id, status FROM papers WHERE file_hash = ?", (file_hash,))
             existing = cursor.fetchone()
             if existing:
                 if existing["status"] == "indexed":
                     raise HTTPException(status_code=409, detail="File already ingested")
-                # 'failed' / 'pending' row — purge and re-ingest
+                if existing["status"] == "pending":
+                    raise HTTPException(status_code=409, detail="File is already being ingested")
+                # 'failed' row — purge and re-ingest
                 delete_paper(conn, existing["id"])
 
             paper_id = save_paper(

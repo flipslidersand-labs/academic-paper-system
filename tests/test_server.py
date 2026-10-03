@@ -1,5 +1,6 @@
 """Tests for FastAPI server endpoints."""
 
+import asyncio
 import sqlite3
 import tempfile
 import time
@@ -1112,6 +1113,50 @@ def test_ingest_indexed_paper_still_409(client):
             files={"file": ("dup.pdf", BytesIO(pdf_content), "application/pdf")},
         )
         assert r2.status_code == 409
+
+
+def test_ingest_concurrent_same_pdf_pending_returns_409(client):
+    """Regression (#496): a 2nd upload of a PDF whose ingest is still running gets 409
+    and must not delete the pending row or trigger a compensating Qdrant delete."""
+    import threading
+
+    pdf_content = create_minimal_pdf()
+    embed_started = threading.Event()
+    release = threading.Event()
+
+    async def slow_embed(*args, **kwargs):
+        embed_started.set()
+        await asyncio.to_thread(release.wait, 10)
+        return [[0.1] * 768]
+
+    with patch("academic_paper.server.extract_text") as mock_extract:
+        mock_extract.return_value = [{"page": 1, "text": "Concurrent content"}]
+        client.app.state.embedder.embed = slow_embed
+
+        first = client.post(
+            "/papers/ingest",
+            files={"file": ("same.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert first.status_code == 202
+        paper_id = first.json()["paper_id"]
+        assert embed_started.wait(10), "first ingest never reached embedding"
+
+        try:
+            second = client.post(
+                "/papers/ingest",
+                files={"file": ("same.pdf", BytesIO(pdf_content), "application/pdf")},
+            )
+            assert second.status_code == 409
+            assert "being ingested" in second.json()["detail"].lower()
+            assert client.get(f"/papers/{paper_id}").json()["status"] == "pending"
+        finally:
+            release.set()
+
+        job = _wait_for_job(client, first.json()["job_id"])
+
+    assert job["status"] == "done"
+    assert client.get(f"/papers/{paper_id}").json()["status"] == "indexed"
+    client.app.state.vector_store.adelete_by_paper_id.assert_not_called()
 
 
 def test_write_endpoints_require_api_key_when_configured(client, temp_db):
