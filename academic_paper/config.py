@@ -67,6 +67,13 @@ class Settings(BaseSettings):
     )
     max_upload_mb: int = Field(default=50, gt=0, description="Maximum PDF upload size in megabytes")
     api_key: str = Field(default="", description="X-API-Key for write and read endpoints; empty = no auth (#241)")
+    api_keys: str = Field(
+        default="",
+        description=(
+            "Comma-separated additional X-API-Keys accepted alongside api_key (key rotation, #601); "
+            "empty elements are dropped; api_key and api_keys both empty = no auth"
+        ),
+    )
     pdf_extract_timeout: int = Field(
         default=120,
         description=(
@@ -123,6 +130,18 @@ class Settings(BaseSettings):
             )
         return v
 
+    @field_validator("api_keys")
+    @classmethod
+    def reject_placeholder_api_keys(cls, v: str) -> str:
+        # Same whole-"<...>" placeholder rule as api_key, applied per element (#601).
+        for item in v.split(","):
+            if _PLACEHOLDER_RE.match(item.strip()):
+                raise ValueError(
+                    f"Invalid value {item.strip()!r}: contains placeholder. "
+                    "Set the corresponding environment variable before starting."
+                )
+        return v
+
     @model_validator(mode="after")
     def check_chunk_overlap(self) -> "Settings":
         if self.chunk_overlap >= self.chunk_size:
@@ -132,6 +151,16 @@ class Settings(BaseSettings):
                 "can loop forever. Set CHUNK_OVERLAP and CHUNK_SIZE environment variables consistently."
             )
         return self
+
+    @property
+    def api_keys_list(self) -> list[str]:
+        """Parse api_keys CSV into a list, dropping empty / whitespace-only elements (#601)."""
+        return [k.strip() for k in self.api_keys.split(",") if k.strip()]
+
+    @property
+    def accepted_api_keys(self) -> list[str]:
+        """All keys that authenticate a request: api_key plus api_keys. Empty = auth disabled (#601)."""
+        return ([self.api_key] if self.api_key else []) + self.api_keys_list
 
     @property
     def preferred_categories_list(self) -> list[str]:
