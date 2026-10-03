@@ -40,6 +40,18 @@ class EmbedderClient:
         # Injected persistent client (managed by lifespan); None → per-call client.
         self._client = client
 
+    async def health(self, timeout: float = 3.0) -> None:
+        """Probe embedding-svc /health with the API key; raise on any error status.
+
+        Shared by the startup probe and /health so both use the same criteria —
+        a 401/403 means ingest/search are down just as surely as a 5xx (#142).
+        A dedicated short-timeout client is used rather than the injected one,
+        whose timeout is sized for large embedding batches.
+        """
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(f"{self.base_url}/health", headers={"X-API-Key": self.api_key})
+            resp.raise_for_status()
+
     async def embed(self, texts: list[str], mode: str = "index", collection: str = "facts") -> list[list[float]]:
         """Embed texts using /embed/batch, splitting into chunks of at most 256.
 

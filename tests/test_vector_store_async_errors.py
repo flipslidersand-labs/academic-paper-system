@@ -117,6 +117,7 @@ def test_5xx_then_success_recovers(op, store, client):
     if op == "ensure_collection":
         ok = MagicMock(collections=[MagicMock()])
         ok.collections[0].name = "test-collection"
+        client.get_collection.return_value.config.params.vectors.size = store.vector_size
     else:
         ok = MagicMock()
     m.side_effect = [_unexpected(503), ok]

@@ -1,12 +1,36 @@
 """SQLite database module for academic paper system."""
 
+import functools
 import json
+import logging
 import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
 from academic_paper.arxiv_ids import ARXIV_ID_PATTERN
+
+logger = logging.getLogger(__name__)
+
+
+def _rollback_on_error(func):
+    """Roll back the connection's open transaction if a write function raises (#309).
+
+    The save_*/upsert_job writers only commit on success; without this a failed
+    statement (UNIQUE/FK violation, ...) leaves the implicit transaction open,
+    pinning the WAL write lock until the connection is closed. conn is always
+    the first positional argument.
+    """
+
+    @functools.wraps(func)
+    def wrapper(conn, *args, **kwargs):
+        try:
+            return func(conn, *args, **kwargs)
+        except BaseException:
+            conn.rollback()
+            raise
+
+    return wrapper
 
 
 def get_connection(db_path: str) -> sqlite3.Connection:
@@ -158,6 +182,7 @@ def _migrate_add_columns(cursor: sqlite3.Cursor, table: str, columns: list[tuple
                 raise  # not a "column already exists" error — surface real failures
 
 
+@_rollback_on_error
 def save_paper(
     conn: sqlite3.Connection,
     file_name: str,
@@ -244,6 +269,7 @@ def update_paper_score(conn: sqlite3.Connection, paper_id: int, score: float) ->
     conn.commit()
 
 
+@_rollback_on_error
 def save_chunks(conn: sqlite3.Connection, paper_id: int, chunks: list[dict]) -> None:
     """Save chunks to database and FTS5 index."""
     cursor = conn.cursor()
@@ -330,6 +356,10 @@ def list_papers_filtered(
     started_transaction = not conn.in_transaction
     if started_transaction:
         cursor.execute("BEGIN DEFERRED")
+    else:
+        # Not ours to close, but a leaked failed-write transaction would also
+        # land here and pin the write lock (#309) — make it visible.
+        logger.warning("list_papers_filtered called inside an existing transaction; assuming caller-managed")
     try:
         cursor.execute(f"SELECT COUNT(*) FROM papers {where}", params)
         total = cursor.fetchone()[0]
@@ -487,6 +517,7 @@ def list_summaries(
     return total, items
 
 
+@_rollback_on_error
 def save_summary(conn: sqlite3.Connection, paper_id: int, model: str, summary: dict) -> None:
     """Save or update summary for a paper (upsert)."""
     cursor = conn.cursor()
@@ -522,6 +553,7 @@ def save_summary(conn: sqlite3.Connection, paper_id: int, model: str, summary: d
     conn.commit()
 
 
+@_rollback_on_error
 def upsert_job(
     conn: sqlite3.Connection,
     job_id: str,

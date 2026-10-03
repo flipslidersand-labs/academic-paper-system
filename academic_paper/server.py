@@ -122,24 +122,10 @@ def _validate_published_date(value: str | None, field: str = "published_date") -
         )
 
 
-async def _check_embedding_svc(timeout: float = 3.0) -> None:
-    """Probe embedding-svc /health with the API key; raise on any error status.
-
-    Shared by the startup probe and /health so both use the same criteria —
-    a 401/403 means ingest/search are down just as surely as a 5xx (#142).
-    """
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.get(
-            f"{settings.embedding_svc_url}/health",
-            headers={"X-API-Key": settings.embedding_api_key},
-        )
-        resp.raise_for_status()
-
-
 async def _probe_startup_health(app: FastAPI) -> None:
     """Probe Qdrant and embedding-svc at startup; log warnings on failure."""
     try:
-        await asyncio.to_thread(app.state.vector_store.client.get_collections)
+        await app.state.vector_store.aping()
         logger.info("Startup probe OK: Qdrant")
     except Exception:
         logger.warning(
@@ -148,12 +134,12 @@ async def _probe_startup_health(app: FastAPI) -> None:
         )
 
     try:
-        await _check_embedding_svc(timeout=2.0)
+        await app.state.embedder.health(timeout=2.0)
         logger.info("Startup probe OK: embedding-svc")
     except Exception:
         logger.warning(
             "Startup probe: embedding-svc unreachable at %s — ingest/search will fail until available",
-            settings.embedding_svc_url,
+            app.state.embedder.base_url,
         )
 
 
@@ -927,13 +913,13 @@ async def health():
     overall = "ok"
 
     try:
-        await asyncio.to_thread(app.state.vector_store.client.get_collections)
+        await app.state.vector_store.aping()
     except Exception:
         status["qdrant"] = "error"
         overall = "degraded"
 
     try:
-        await _check_embedding_svc()
+        await app.state.embedder.health()
     except Exception:
         status["embedding_svc"] = "error"
         overall = "degraded"
@@ -950,8 +936,7 @@ def stats():
             papers = conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
             chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
             try:
-                info = app.state.vector_store.client.get_collection(settings.qdrant_collection)
-                qdrant_points = info.points_count
+                qdrant_points = app.state.vector_store.count_points()
             except Exception:
                 qdrant_points = -1
         return {"papers": papers, "chunks": chunks, "qdrant_points": qdrant_points}
