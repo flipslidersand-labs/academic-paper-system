@@ -1,4 +1,5 @@
 import re
+from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
@@ -141,4 +142,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env")
 
 
-settings = Settings()
+@lru_cache
+def get_settings() -> Settings:
+    """Return the process-wide Settings instance (cached, #389)."""
+    return Settings()
+
+
+# Backward-compatible alias: existing ``from academic_paper.config import settings``
+# keeps working and is the same object as ``get_settings()``.
+settings = get_settings()

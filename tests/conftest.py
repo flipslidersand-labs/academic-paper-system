@@ -22,7 +22,8 @@ _orig_cwd = os.getcwd()
 with tempfile.TemporaryDirectory() as _empty_dir:
     os.chdir(_empty_dir)
     try:
-        from academic_paper.config import Settings
+        from academic_paper import config as _config
+        from academic_paper.config import Settings, get_settings
 
         Settings.model_config["env_file"] = None
         from academic_paper.db import init_db
@@ -59,3 +60,38 @@ def _reset_job_store():
     yield
     job_store._jobs.clear()
     job_store._db_path = None
+
+
+@pytest.fixture(autouse=True)
+def _restore_settings_cache(monkeypatch):
+    """Keep ``get_settings() is settings`` true after tests that cache_clear() (#604).
+
+    After ``get_settings.cache_clear()`` the next call would build a fresh
+    Settings that differs from the module-level ``settings`` alias, so re-prime
+    the cache with the original instance on teardown.
+    """
+    original = _config.settings
+    yield
+    if get_settings() is not original:
+        get_settings.cache_clear()
+        with monkeypatch.context() as m:
+            m.setattr(_config, "Settings", lambda: original)
+            get_settings()
+
+
+@pytest.fixture
+def override_settings(monkeypatch):
+    """Temporarily override Settings fields; restored automatically.
+
+    Usage: ``override_settings(max_upload_mb=1)``. Patches the shared instance
+    returned by get_settings() (== the ``settings`` alias), so both access
+    styles see the override and no test assigns ``settings.x = ...`` directly.
+    """
+
+    def _override(**values):
+        target = get_settings()
+        for name, value in values.items():
+            monkeypatch.setattr(target, name, value)
+        return target
+
+    return _override
