@@ -153,6 +153,34 @@ def test_pubmed_fetch_pmc_ids():
         assert pubmed_collect.fetch_pmc_ids(["ai"], max_results=5, client=client) == ["111", "222"]
 
 
+@respx.mock
+def test_pubmed_error_message_does_not_leak_api_key():
+    respx.get(url__startswith=pubmed_collect.ESEARCH_URL).mock(return_value=httpx.Response(429))
+    with httpx.Client() as client:
+        with pytest.raises(httpx.HTTPStatusError) as ei:
+            pubmed_collect.fetch_pmc_ids(["ai"], max_results=5, client=client, api_key="SECRETKEY123")
+    assert "SECRETKEY123" in str(ei.value)  # precondition: raw str leaks
+    msg = pubmed_collect._safe_error(ei.value)
+    assert "SECRETKEY123" not in msg
+    assert "429" in msg
+
+
+def test_pubmed_main_uses_ncbi_api_key_env(monkeypatch):
+    seen = {}
+
+    def fake_fetch(terms, max_results, *, client, api_key="", **kw):
+        seen["api_key"] = api_key
+        return []
+
+    monkeypatch.setattr(pubmed_collect, "fetch_pmc_ids", fake_fetch)
+    monkeypatch.setenv("NCBI_API_KEY", "ENVKEY")
+    monkeypatch.setattr("sys.argv", ["pubmed_collect.py"])
+    with pytest.raises(SystemExit) as ei:
+        pubmed_collect.main()
+    assert ei.value.code == 0
+    assert seen["api_key"] == "ENVKEY"
+
+
 def test_pubmed_parse_article():
     xml = """
     <article>
