@@ -62,15 +62,11 @@ async def run_search(
 
     if mode == "keyword":
         fts_results = search_fts(conn, query=q, limit=limit, paper_id=paper_id)
-        kw_ids = [r["chunk_id"] for r in fts_results]
-        kw_meta_map = _fetch_chunk_meta(cursor, kw_ids, "id", "id, page_start, chunk_index")
         results = []
         for rank, result in enumerate(fts_results, start=1):
-            chunk_id = result["chunk_id"]
             paper_id_res = result["paper_id"]
-            meta = kw_meta_map.get(chunk_id)
-            page_start = meta["page_start"] if meta else None
-            chunk_index = meta["chunk_index"] if meta else 0
+            page_start = result["page_start"]
+            chunk_index = result["chunk_index"]
             full_text = result["text"]
             snippet = full_text[:snippet_length] if snippet_length > 0 else full_text
             results.append(
@@ -117,13 +113,6 @@ async def run_search(
 
     # hybrid or nugget (same retrieval, different snippet)
     fts_results = search_fts(conn, query=q, limit=limit, paper_id=paper_id)
-    fts_ids = [r["chunk_id"] for r in fts_results]
-    ci_map = {k: v["chunk_index"] for k, v in _fetch_chunk_meta(cursor, fts_ids, "id", "id, chunk_index").items()}
-    if ci_map:
-        for fts_result in fts_results:
-            if fts_result["chunk_id"] in ci_map:
-                fts_result["chunk_index"] = ci_map[fts_result["chunk_id"]]
-
     with tracer.start_as_current_span("embed.query"):
         query_vector = await embedder.embed_single(q, mode="search")
     vector_results = await vector_store.asearch(query_vector=query_vector, limit=limit, paper_id_filter=paper_id)
