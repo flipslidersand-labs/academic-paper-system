@@ -1,6 +1,7 @@
 """Tests for FastAPI server endpoints."""
 
 import asyncio
+import logging
 import sqlite3
 import tempfile
 import time
@@ -1397,6 +1398,33 @@ async def test_cleanup_orphaned_ingests_cleans_stuck_paper(temp_db):
 
     updated = get_connection(temp_db).execute("SELECT status FROM papers WHERE id = ?", (paper_id,)).fetchone()
     assert updated["status"] == "failed"
+
+
+@pytest.mark.anyio
+async def test_cleanup_orphaned_ingests_marks_failed_when_qdrant_delete_raises(temp_db, caplog):
+    """Qdrant delete failure is logged but every pending paper still becomes 'failed' (#502)."""
+    conn = get_connection(temp_db)
+    paper_ids = [save_paper(conn, f"stuck{i}.pdf", f"hash_stuck_{i}") for i in range(2)]
+    conn.execute("UPDATE papers SET status = 'pending'")
+    conn.commit()
+    conn.close()
+
+    mock_app = MagicMock()
+    mock_qdrant = MagicMock()
+    mock_qdrant.adelete_by_paper_id = AsyncMock(side_effect=RuntimeError("qdrant down"))
+    mock_app.state.vector_store = mock_qdrant
+
+    with patch.object(settings, "academic_db", temp_db), caplog.at_level(logging.WARNING):
+        await _cleanup_orphaned_ingests(mock_app)  # must not raise
+
+    assert mock_qdrant.adelete_by_paper_id.await_count == len(paper_ids)
+    check = get_connection(temp_db)
+    statuses = [
+        check.execute("SELECT status FROM papers WHERE id = ?", (pid,)).fetchone()["status"] for pid in paper_ids
+    ]
+    check.close()
+    assert statuses == ["failed", "failed"]
+    assert caplog.text.count("Qdrant delete failed") == len(paper_ids)
 
 
 @pytest.mark.anyio
