@@ -567,8 +567,11 @@ def test_ingest_extract_value_error_returns_400(client):
         assert response.status_code == 400
 
 
-def test_ingest_embedding_count_mismatch_returns_400(client):
-    """embedder returns fewer vectors than chunks (#227) → 400, not silently truncated by zip()."""
+def test_ingest_embedding_count_mismatch_returns_502(client):
+    """embedding-svc returns a mismatched vector count (#227/#336): EmbedderClient.embed
+    raises EmbeddingCountMismatchError, which maps to 502 (upstream failure), not 400."""
+    from academic_paper.embedder import EmbeddingCountMismatchError
+
     pdf_content = create_minimal_pdf()
 
     with (
@@ -580,14 +583,15 @@ def test_ingest_embedding_count_mismatch_returns_400(client):
             {"text": "chunk one", "page_start": 1},
             {"text": "chunk two", "page_start": 1},
         ]
-        # Simulate a partial/degraded embedding-svc batch response (#227).
-        client.app.state.embedder.embed = AsyncMock(return_value=[[0.1] * 768])
+        client.app.state.embedder.embed = AsyncMock(
+            side_effect=EmbeddingCountMismatchError("embedding-svc returned 1 vectors for 2 input texts")
+        )
 
         response = client.post(
             "/papers/ingest?wait=true",
             files={"file": ("mismatch.pdf", BytesIO(pdf_content), "application/pdf")},
         )
-        assert response.status_code == 400
+        assert response.status_code == 502
 
 
 def test_ingest_async_returns_202_and_completes_job(client):
