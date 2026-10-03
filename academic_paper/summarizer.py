@@ -192,7 +192,7 @@ class RAGSummarizer:
             try:
                 chunks = await asyncio.wait_for(
                     self.qdrant.asearch(
-                        query_vector=[0.0] * 768,
+                        query_vector=[0.0] * self.qdrant.vector_size,
                         limit=top_k,
                         paper_id_filter=paper_id,
                     ),
