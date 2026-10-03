@@ -86,6 +86,10 @@ jobs:
           echo "API is healthy"
 
       - name: Collect arXiv papers
+        # continue-on-error so one transient PDF failure does not skip the other
+        # collectors / summarize / score (#482). "Verify collector results"
+        # below re-fails the job when arXiv fully failed or crashed.
+        continue-on-error: true
         run: |
           # Validate $CATEGORIES to prevent argparse injection via word splitting
           # (#193). Only allow alphanumeric, dots, commas, and spaces.
@@ -156,6 +160,7 @@ jobs:
 
           problems = []
           for name, path in [
+              ("arxiv", "summary-arxiv.json"),
               ("semantic-scholar", "summary-s2.json"),
               ("pubmed", "summary-pubmed.json"),
               ("openalex", "summary-openalex.json"),
@@ -172,6 +177,8 @@ jobs:
                   print(f"WARN {name}: search API failed ({s['fetch_error']}) — no papers this run")
               elif fetched > 0 and ok == 0 and s.get("failed", 0) > 0:
                   problems.append(f"{name}: all {fetched} fetched papers failed to ingest")
+              elif s.get("failed", 0) > 0:
+                  print(f"::warning::{name}: {s['failed']} of {fetched} fetched papers failed to ingest")
 
           if problems:
               print("Collector health check failed:")
@@ -182,7 +189,9 @@ jobs:
           EOF
 
       - name: Trigger bulk summarization
-        if: ${{ github.event.inputs.summarize != 'false' }}
+        # !cancelled(): still run when "Verify collector results" failed (#482);
+        # the job stays red through that failed step.
+        if: ${{ !cancelled() && github.event.inputs.summarize != 'false' }}
         run: |
           set -euo pipefail
 
@@ -257,6 +266,7 @@ jobs:
           fi
 
       - name: Score papers
+        if: ${{ !cancelled() }}
         run: |
           HTTP_CODE=$(curl -s -o /tmp/score_response.json -w "%{http_code}" \
             ${PAPER_API_KEY:+-H "X-API-Key: $PAPER_API_KEY"} \
