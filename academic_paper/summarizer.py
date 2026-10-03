@@ -105,6 +105,11 @@ class RAGSummarizer:
         # The embedding/Qdrant/LLM wait_for calls below are awaited sequentially,
         # so their individual timeouts stack in the worst case (#269). Wrap the
         # whole call in one overall deadline instead of relying on their sum.
+        # NOTE (#313): this deadline is a cut-off guideline, not a hard stop. Cancelling
+        # abandons the await but cannot stop threads already started via asyncio.to_thread
+        # (Qdrant/Gemini request, SQLite fallback read); those run until their own
+        # client timeouts (qdrant_timeout / gemini_timeout_ms / SQLite busy_timeout=5s).
+        # Qdrant wrappers use to_thread_cancellable so retries/batches stop on cancel.
         return await asyncio.wait_for(
             self._summarize_impl(paper_id, file_hash, top_k=top_k, title=title, file_name=file_name),
             timeout=settings.summarize_total_timeout,

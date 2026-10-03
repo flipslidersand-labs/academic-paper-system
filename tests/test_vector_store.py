@@ -312,3 +312,46 @@ def test_aclose_closes_underlying_qdrant_client():
         asyncio.run(store.aclose())
 
         mock_client.close.assert_called_once()
+
+
+def test_aupsert_cancel_skips_remaining_batches():
+    """#313: once the awaiting task is cancelled, the worker thread stops after the
+    in-flight batch instead of upserting every remaining batch."""
+    import threading
+
+    from academic_paper.vector_store import _UPSERT_BATCH_MAX
+
+    in_first = threading.Event()
+    release = threading.Event()
+    done = threading.Event()
+    upserts = []
+
+    def slow_upsert(**kwargs):
+        upserts.append(1)
+        in_first.set()
+        release.wait(5)
+
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        mock_client.upsert.side_effect = slow_upsert
+        MockClient.return_value = mock_client
+        store = QdrantStore(url="http://test", collection="c")
+
+        points = [{"id": str(i), "vector": [0.0], "payload": {}} for i in range(_UPSERT_BATCH_MAX * 3)]
+
+        async def scenario():
+            task = asyncio.create_task(store.aupsert(points))
+            await asyncio.to_thread(in_first.wait, 5)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            release.set()
+            await asyncio.sleep(0.3)
+            done.set()
+
+        asyncio.run(scenario())
+
+    assert done.is_set()
+    assert len(upserts) == 1
