@@ -34,8 +34,6 @@ jobs:
     # Pure-Python job: follow the org runner var, same resolution as qa-workflows python-test.yml.
     runs-on: ${{ vars.GATE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
-    # Warn-only unless VULN_SCAN_ENFORCE=true (see header).
-    continue-on-error: ${{ vars.VULN_SCAN_ENFORCE != 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -44,6 +42,11 @@ jobs:
       - name: Install pip-audit
         run: python -m pip install --quiet "pip-audit==${PIP_AUDIT_VERSION}"
       - name: Audit requirements.lock
+        # Step-level continue-on-error (NOT job-level): a job-level one keeps the
+        # job's check run red even though the workflow run passes. At step level
+        # the job concludes success; findings stay in the log. Enforced when
+        # VULN_SCAN_ENFORCE=true.
+        continue-on-error: ${{ vars.VULN_SCAN_ENFORCE != 'true' }}
         # requirements.lock is fully hash-pinned, so pip-audit does not need to
         # resolve anything (no install, no network except the vuln DB).
         run: pip-audit --require-hashes --disable-pip -r requirements.lock
@@ -53,12 +56,13 @@ jobs:
     # keep ubuntu-latest, same constraint as ci.yml's docker-build job.
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    continue-on-error: ${{ vars.VULN_SCAN_ENFORCE != 'true' }}
     steps:
       - uses: actions/checkout@v7
       - name: Build Docker image
         run: docker build -t academic-paper-system:scan .
       - name: Trivy image scan (CRITICAL/HIGH, fixable only)
+        # Step-level warn-only, see pip-audit job.
+        continue-on-error: ${{ vars.VULN_SCAN_ENFORCE != 'true' }}
         # Trivy is run from its pinned official image instead of a third-party
         # action. --ignore-unfixed skips CVEs with no available fix.
         run: |
