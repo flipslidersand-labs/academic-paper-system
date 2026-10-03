@@ -215,7 +215,7 @@ async def lifespan(app: FastAPI):
     # (documented asyncio pitfall), and cancel it on shutdown.
     app.state.probe_task = asyncio.create_task(_probe_startup_health(app))
     await _cleanup_orphaned_ingests(app)
-    if not settings.api_key:
+    if not settings.accepted_api_keys:
         logger.warning("API_KEY is not set — all endpoints (including write endpoints) are unauthenticated (#241)")
     yield
     # Graceful shutdown: wait up to 30 s for in-flight ingest tasks (#194).
@@ -284,13 +284,17 @@ async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-A
     Uses hmac.compare_digest for constant-time comparison to prevent
     timing attacks that could leak key length / prefix (#190).
     """
-    configured = settings.api_key
+    configured = settings.accepted_api_keys  # api_key + api_keys (#601)
     if not configured:
         return  # auth disabled
     # hmac.compare_digest raises TypeError on str with non-ASCII characters;
     # comparing as UTF-8 bytes accepts any header value and just fails the
     # comparison instead of turning an unauthenticated request into a 500 (#425).
-    if not hmac.compare_digest((x_api_key or "").encode("utf-8"), configured.encode("utf-8")):
+    provided = (x_api_key or "").encode("utf-8")
+    # Compare against every candidate without short-circuiting so timing does not
+    # reveal which configured key (if any) matched (#601).
+    matches = [hmac.compare_digest(provided, key.encode("utf-8")) for key in configured]
+    if not any(matches):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
