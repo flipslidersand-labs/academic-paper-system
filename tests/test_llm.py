@@ -31,6 +31,22 @@ async def test_gemini_client_generate():
 
 
 @pytest.mark.anyio
+async def test_gemini_client_generate_raises_when_text_is_none():
+    """Regression (#473): response.text is None on safety blocks → descriptive ValueError."""
+    with patch("google.genai.Client") as mock_genai_client:
+        mock_client_instance = MagicMock()
+        mock_genai_client.return_value = mock_client_instance
+        mock_response = MagicMock()
+        mock_response.text = None
+        mock_response.candidates = [MagicMock(finish_reason="SAFETY")]
+        mock_client_instance.models.generate_content.return_value = mock_response
+
+        client = GeminiClient(api_key="test-key")
+        with pytest.raises(ValueError, match="finish_reason=SAFETY"):
+            await client.generate("Test prompt")
+
+
+@pytest.mark.anyio
 async def test_gemini_client_retries_on_server_error(monkeypatch):
     """A transient ServerError from generate_content is retried and succeeds (#234)."""
     monkeypatch.setattr("academic_paper.retry.asyncio.sleep", AsyncMock())

@@ -88,7 +88,14 @@ class GeminiClient(BaseLLMClient):
             base_delay=1.0,
             exceptions=_GEMINI_RETRYABLE,
         )
-        return response.text
+        text = response.text
+        if text is None:
+            # text is None when candidates/parts are empty (safety/recitation block, etc.);
+            # BaseLLMClient.generate promises str, so fail with a descriptive error (#473).
+            candidates = getattr(response, "candidates", None) or []
+            finish_reason = getattr(candidates[0], "finish_reason", None) if candidates else None
+            raise ValueError(f"Gemini returned no text (finish_reason={finish_reason})")
+        return text
 
     @property
     def display_name(self) -> str:
