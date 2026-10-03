@@ -85,6 +85,22 @@ async def test_summarize_raises_on_invalid_json():
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("empty", [None, ""])
+async def test_summarize_raises_valueerror_on_empty_llm_response(empty):
+    """Regression (#473): None/empty LLM output is a ValueError, not a TypeError from re.search."""
+    mock_llm = AsyncMock()
+    mock_llm.generate.return_value = empty
+    mock_qdrant = MagicMock()
+    chunks = [{"id": "1", "score": 0.9, "payload": {"paper_id": 1, "page_start": 1, "text": "Sample chunk text"}}]
+    mock_qdrant.asearch = AsyncMock(return_value=chunks)
+
+    summarizer = RAGSummarizer(mock_llm, mock_qdrant)
+
+    with pytest.raises(ValueError, match="LLM returned empty response"):
+        await summarizer.summarize(paper_id=1, file_hash="abc123")
+
+
+@pytest.mark.anyio
 async def test_summarize_calls_llm_with_context():
     """Test that generate() is called with SYSTEM_PROMPT."""
     # Setup mocks

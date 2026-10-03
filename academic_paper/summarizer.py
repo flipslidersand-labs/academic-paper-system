@@ -248,6 +248,9 @@ Please respond ONLY with valid JSON in this exact format:
             self.llm.generate(prompt, system=SYSTEM_PROMPT), timeout=settings.llm_generate_timeout
         )
 
+        if not response:
+            raise ValueError("LLM returned empty response")
+
         # Parse JSON response
         try:
             # Try to extract JSON from response
