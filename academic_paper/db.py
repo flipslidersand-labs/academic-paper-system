@@ -122,14 +122,10 @@ def init_db(db_path: str) -> None:
             )
         """)
 
-        # Migration for databases created before the kind column existed.
-        cursor.execute("PRAGMA table_info(jobs)")
-        if "kind" not in [row[1] for row in cursor.fetchall()]:
-            cursor.execute("ALTER TABLE jobs ADD COLUMN kind TEXT NOT NULL DEFAULT ''")
-
-        # Migration: persist Job.result (paper_id/chunks/status for completed
-        # ingest jobs) so a restart doesn't null it out (#416).
-        _migrate_add_columns(cursor, "jobs", [("result", "TEXT")])
+        # Migrations: kind for databases created before it existed; result
+        # persists Job.result (paper_id/chunks/status for completed ingest
+        # jobs) so a restart doesn't null it out (#416).
+        _migrate_add_columns(cursor, "jobs", [("kind", "TEXT NOT NULL DEFAULT ''"), ("result", "TEXT")])
 
         cursor.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
@@ -272,14 +268,18 @@ def save_chunks(conn: sqlite3.Connection, paper_id: int, chunks: list[dict]) -> 
     conn.commit()
 
 
+def _decode_json_fields(row, fields: tuple[str, ...]) -> dict:
+    """Convert a row to a dict, json.loads-ing the given non-empty fields."""
+    d = dict(row)
+    for field in fields:
+        if d.get(field):
+            d[field] = json.loads(d[field])
+    return d
+
+
 def _deserialize_paper(row) -> dict:
     """Convert a papers row to a dict, deserializing JSON list fields."""
-    paper = dict(row)
-    if paper.get("authors"):
-        paper["authors"] = json.loads(paper["authors"])
-    if paper.get("categories"):
-        paper["categories"] = json.loads(paper["categories"])
-    return paper
+    return _decode_json_fields(row, ("authors", "categories"))
 
 
 def list_papers_filtered(
@@ -350,13 +350,7 @@ def get_all_papers_for_scoring(conn: sqlite3.Connection) -> list[dict]:
     """Fetch minimal paper data needed for score computation."""
     cursor = conn.cursor()
     cursor.execute("SELECT id, categories, published_date FROM papers")
-    rows = []
-    for row in cursor.fetchall():
-        d = dict(row)
-        if d.get("categories"):
-            d["categories"] = json.loads(d["categories"])
-        rows.append(d)
-    return rows
+    return [_decode_json_fields(row, ("categories",)) for row in cursor.fetchall()]
 
 
 def get_paper(conn: sqlite3.Connection, paper_id: int) -> dict | None:
@@ -442,12 +436,7 @@ def get_summary(conn: sqlite3.Connection, paper_id: int) -> dict | None:
     row = cursor.fetchone()
     if row is None:
         return None
-    summary = dict(row)
-    if summary["keywords"]:
-        summary["keywords"] = json.loads(summary["keywords"])
-    if summary["raw_json"]:
-        summary["raw_json"] = json.loads(summary["raw_json"])
-    return summary
+    return _decode_json_fields(row, ("keywords", "raw_json"))
 
 
 def list_summaries(
@@ -494,16 +483,7 @@ def list_summaries(
         (limit, offset),
     )
 
-    items = []
-    for row in cursor.fetchall():
-        item = dict(row)
-        if item.get("keywords"):
-            item["keywords"] = json.loads(item["keywords"])
-        if item.get("authors"):
-            item["authors"] = json.loads(item["authors"])
-        if item.get("categories"):
-            item["categories"] = json.loads(item["categories"])
-        items.append(item)
+    items = [_decode_json_fields(row, ("keywords", "authors", "categories")) for row in cursor.fetchall()]
     return total, items
 
 
