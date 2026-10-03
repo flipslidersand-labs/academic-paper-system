@@ -198,6 +198,8 @@ file: <PDF file>
 | `CHUNK_SIZE` | テキストチャンクサイズ | `512` |
 | `CHUNK_OVERLAP` | チャンク間のオーバーラップ | `64` |
 | `GOOGLE_API_KEY` | Gemini APIキー (要約用) | (空) |
+| `GEMINI_MODEL` | Gemini モデル名 | `gemini-2.0-flash` |
+| `LLM_PROVIDER` | LLM プロバイダ `auto`/`gemini`/`ollama`/`none`。auto は Google キーがあれば Gemini、なければ Ollama。gemini 明示でキー空はエラー。none は LLM 無効(要約 API は 503) | `auto` |
 | `OLLAMA_URL` | Ollama URL (フォールバック) | `http://localhost:11434` |
 | `OLLAMA_MODEL` | Ollama モデル | `mistral` |
 | `OTEL_ENDPOINT` | OpenTelemetry コレクタエンドポイント | (空) |
