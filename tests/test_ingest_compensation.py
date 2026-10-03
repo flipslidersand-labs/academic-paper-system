@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from academic_paper.config import settings
+from academic_paper.jobs import job_store
 from academic_paper.server import app
 
 PDF = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n"
@@ -36,6 +37,8 @@ def client(temp_db):
             c.portal = portal
             c.app.state.embedder = mock_embedder
             c.app.state.vector_store = mock_qdrant
+            # Lifespan (which awaits job_store.init) is patched out (#477).
+            job_store._db_path = temp_db
             yield c
 
 

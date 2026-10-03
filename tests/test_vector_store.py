@@ -355,3 +355,18 @@ def test_aupsert_cancel_skips_remaining_batches():
 
     assert done.is_set()
     assert len(upserts) == 1
+
+
+def test_ping_and_count_points_use_store_collection():
+    """ping/count_points は自身の client と self.collection を使う (#495)"""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+        mock_client.get_collection.return_value.points_count = 7
+
+        store = QdrantStore(url="http://test", collection="my-coll")
+        store.ping()
+        assert store.count_points() == 7
+
+        mock_client.get_collections.assert_called_once()
+        mock_client.get_collection.assert_called_once_with("my-coll")
