@@ -407,6 +407,40 @@ async def test_summarize_qdrant_500_still_falls_back_to_db():
 
 
 @pytest.mark.anyio
+async def test_summarize_real_qdrant_store_503_falls_back_to_db():
+    """Regression (#472): drive the real QdrantStore.search through its retry/translation
+    path with a 503 mock client — the summarizer must still fall back to DB chunks."""
+    from unittest.mock import patch
+
+    from qdrant_client.http.exceptions import UnexpectedResponse
+
+    from academic_paper.vector_store import QdrantStore
+
+    mock_llm = AsyncMock()
+    mock_llm.generate.return_value = json.dumps(
+        {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
+    )
+    with patch("academic_paper.vector_store.QdrantClient") as mock_client_cls:
+        mock_client_cls.return_value.query_points.side_effect = UnexpectedResponse(
+            status_code=503, reason_phrase="Service Unavailable", content=b"", headers={}
+        )
+        store = QdrantStore(url="http://test", collection="c")
+        mock_embedder = AsyncMock()
+        mock_embedder.embed_single.return_value = [0.1] * 768
+        summarizer = RAGSummarizer(mock_llm, store, embedder=mock_embedder)
+        with (
+            patch("academic_paper.retry.time.sleep"),
+            patch.object(
+                summarizer, "_chunks_from_db", return_value=[{"payload": {"page_start": 1, "text": "db text"}}]
+            ) as mock_db,
+        ):
+            result = await summarizer.summarize(paper_id=1, file_hash="abc", title="Test")
+
+    assert "objective" in result
+    mock_db.assert_called_once_with(1, 5)
+
+
+@pytest.mark.anyio
 async def test_summarize_embed_runtime_error_propagates():
     """Non-httpx exceptions from embed_single (e.g. RuntimeError) must propagate (#187).
 
