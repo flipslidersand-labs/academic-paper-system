@@ -226,7 +226,28 @@ def test_summarize_all_records_per_paper_errors(client, temp_db, mock_summarizer
     assert job["processed"] == 0
     assert job["failed"] == 2
     assert len(job["errors"]) == 2
-    assert "LLM timeout" in job["errors"][0]
+    # Raw str(exc) must not reach job errors (#474); an opaque error-id is reported instead.
+    assert "LLM timeout" not in job["errors"][0]
+    assert "Internal error" in job["errors"][0]
+
+
+def test_summarize_all_timeout_error_is_named(client, temp_db, mock_summarizer):
+    """Regression (#474): an empty-str TimeoutError yields 'TimeoutError', not 'paper_id=N: '."""
+    conn = get_connection(temp_db)
+    pid = save_paper(conn, "t.pdf", "h_timeout")
+    save_chunks(
+        conn,
+        pid,
+        [{"text": "t", "page_start": 1, "page_end": 1, "chunk_index": 0, "qdrant_id": "qt", "token_count": 1}],
+    )
+    update_paper_status(conn, pid, "indexed")
+    conn.close()
+
+    mock_summarizer.summarize = AsyncMock(side_effect=TimeoutError())
+
+    job_id = client.post("/jobs/summarize-all").json()["job_id"]
+    job = client.get(f"/jobs/{job_id}").json()
+    assert job["errors"] == [f"paper_id={pid}: TimeoutError"]
 
 
 # --- Persistence tests ---
