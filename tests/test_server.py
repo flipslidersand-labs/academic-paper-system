@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from academic_paper.config import settings
 from academic_paper.db import get_chunks, get_connection, save_chunks, save_paper
+from academic_paper.jobs import job_store
 from academic_paper.server import _cleanup_orphaned_ingests, app
 
 
@@ -65,6 +66,8 @@ def client(temp_db):
             # Manually set the mocked services since lifespan is patched
             client.app.state.embedder = mock_embedder
             client.app.state.vector_store = mock_qdrant
+            # Lifespan (which awaits job_store.init) is patched out too (#477).
+            job_store._db_path = temp_db
             yield client
 
 
