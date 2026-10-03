@@ -115,8 +115,7 @@ jobs:
             --query "machine learning deep learning natural language processing" \
             --max "$MAX_RESULTS" \
             --api-url "$API_URL" \
-            --summary-file summary-s2.json \
-            ${SEMANTIC_SCHOLAR_API_KEY:+--api-key "$SEMANTIC_SCHOLAR_API_KEY"}
+            --summary-file summary-s2.json
 
       - name: Collect PubMed papers
         continue-on-error: true
@@ -136,8 +135,7 @@ jobs:
             --api-url "$API_URL" \
             --from-date "$FROM_DATE" \
             --until-date "$UNTIL_DATE" \
-            --summary-file summary-pubmed.json \
-            ${NCBI_API_KEY:+--api-key "$NCBI_API_KEY"}
+            --summary-file summary-pubmed.json
 
       - name: Collect OpenAlex papers
         continue-on-error: true
