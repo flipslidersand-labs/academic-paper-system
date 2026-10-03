@@ -366,6 +366,18 @@ async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_na
     return len(chunks_list)
 
 
+async def _compensate_qdrant(paper_id: int) -> None:
+    """Best-effort: delete a paper's Qdrant vectors after a failed ingest (#471).
+
+    Upsert is sent in batches, so a mid-way failure leaves earlier batches behind.
+    A failure here is logged and swallowed so it never masks the original error.
+    """
+    try:
+        await app.state.vector_store.adelete_by_paper_id(paper_id)
+    except Exception as exc:
+        logger.error("Qdrant compensation delete failed for paper_id=%s: %s", paper_id, exc)
+
+
 async def _mark_paper_failed(paper_id: int) -> None:
     """Best-effort: set a paper's status to 'failed' without blocking the event loop.
 
@@ -417,6 +429,9 @@ async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str,
             # errors, so the job attributes below always run afterward instead of
             # being skipped by an exception from the paper-status write.
             await _mark_paper_failed(paper_id)
+            # Upsert may have partially succeeded (batched); remove leftover vectors
+            # so a failed paper is not returned by vector search (#471).
+            await _compensate_qdrant(paper_id)
             job.failed = 1
             job.errors.append(f"paper_id={paper_id}: {str(e) or type(e).__name__}")
             job.status = "failed"
@@ -525,10 +540,7 @@ async def ingest_paper(
                 await _mark_paper_failed(paper_id)
                 # _ingest_pipeline already compensates Qdrant on save_chunks failure;
                 # compensate here for embed/upsert errors that leave no Qdrant data.
-                try:
-                    await app.state.vector_store.adelete_by_paper_id(paper_id)
-                except Exception:
-                    pass
+                await _compensate_qdrant(paper_id)
                 raise _http_exc_for(e, "Ingest failed: check PDF content and try again")
             return {
                 "paper_id": paper_id,
