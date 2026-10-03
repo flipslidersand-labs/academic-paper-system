@@ -257,3 +257,41 @@ def test_init_db_backfills_arxiv_id(temp_db):
     row = conn.execute("SELECT arxiv_id FROM papers WHERE file_hash = 'h-legacy'").fetchone()
     assert row[0] == "2410.10071"
     conn.close()
+
+
+def _jobs_columns(db_path):
+    conn = get_connection(db_path)
+    try:
+        return {r[1]: r for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    finally:
+        conn.close()
+
+
+def test_init_db_migrates_legacy_jobs_table_without_kind(tmp_path):
+    """A pre-kind jobs table gains kind (NOT NULL DEFAULT '') and result (#476)."""
+    temp_db = str(tmp_path / "legacy.db")
+    conn = get_connection(temp_db)
+    conn.execute(
+        "CREATE TABLE jobs (id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending', "
+        "total INTEGER NOT NULL DEFAULT 0, processed INTEGER NOT NULL DEFAULT 0, "
+        "failed INTEGER NOT NULL DEFAULT 0, errors TEXT NOT NULL DEFAULT '[]', "
+        "started_at REAL NOT NULL, finished_at REAL)"
+    )
+    conn.execute("INSERT INTO jobs (id, started_at) VALUES ('old', 1.0)")
+    conn.commit()
+    conn.close()
+
+    init_db(temp_db)
+
+    cols = _jobs_columns(temp_db)
+    assert "kind" in cols and "result" in cols
+    conn = get_connection(temp_db)
+    assert conn.execute("SELECT kind FROM jobs WHERE id='old'").fetchone()[0] == ""
+    conn.close()
+
+
+def test_init_db_keeps_existing_jobs_kind_column_idempotent(temp_db):
+    """init_db twice on a DB that already has kind must not fail or duplicate (#476)."""
+    init_db(temp_db)
+    init_db(temp_db)
+    assert {"kind", "result"} <= set(_jobs_columns(temp_db))
