@@ -51,6 +51,9 @@ from academic_paper.telemetry import get_tracer, setup_telemetry
 from academic_paper.vector_store import QdrantStore, make_qdrant_id
 
 logger = logging.getLogger(__name__)
+
+# Max seconds shutdown waits for in-flight ingest tasks before cancelling them (#194).
+INGEST_SHUTDOWN_TIMEOUT_S = 30.0
 tracer = get_tracer()
 
 
@@ -223,7 +226,7 @@ async def lifespan(app: FastAPI):
     if active:
         logger.info("Shutdown: waiting for %d active ingest task(s) (timeout 30s)", len(active))
         try:
-            await asyncio.wait_for(asyncio.gather(*active, return_exceptions=True), timeout=30.0)
+            await asyncio.wait_for(asyncio.gather(*active, return_exceptions=True), timeout=INGEST_SHUTDOWN_TIMEOUT_S)
         except asyncio.TimeoutError:
             logger.warning("Shutdown: ingest tasks did not finish in 30s; cancelling")
             for t in active:
