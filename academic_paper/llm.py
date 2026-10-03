@@ -79,6 +79,9 @@ class GeminiClient(BaseLLMClient):
         # event loop remains responsive during multi-second LLM generation (#149).
         # Retries transient server-side errors and timeout/network errors (#234, #264);
         # ClientError (4xx) is not retried.
+        # NOTE (#313): cancelling (e.g. summarize_total_timeout) stops further retry
+        # attempts, but an in-flight generate_content thread cannot be interrupted;
+        # it ends at the genai HTTP timeout (gemini_timeout_ms).
         response = await async_with_retry(
             asyncio.to_thread,
             self.client.models.generate_content,
