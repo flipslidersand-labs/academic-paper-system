@@ -13,6 +13,7 @@ import re
 import socket
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
@@ -78,6 +79,11 @@ def _split_safe_url(url: str) -> tuple[str, int]:
     return host, port
 
 
+# Guards the process-wide socket.getaddrinfo patch: only one pin may be active at a
+# time. A nested or concurrent entry raises instead of silently cross-polluting (#314).
+_pin_lock = threading.Lock()
+
+
 @contextlib.contextmanager
 def _pin_resolution(host: str, addrinfos: list):
     """Force ``socket.getaddrinfo(host, ...)`` to return the already-validated
@@ -91,12 +97,26 @@ def _pin_resolution(host: str, addrinfos: list):
 
     Collector scripts process papers strictly sequentially in a single
     thread (see ``run_collect``), so process-wide monkeypatching here is
-    safe; this must not be used from concurrent/async code paths.
+    safe; this must not be used from concurrent/async code paths. That
+    contract is enforced: a nested or concurrent entry raises RuntimeError (#314).
+
+    A lookup for *host* on a port other than the validated one is refused
+    (RuntimeError) rather than answered with the wrong addresses (#314).
     """
+    if not _pin_lock.acquire(blocking=False):
+        raise RuntimeError("_pin_resolution is already active; nested/concurrent use is not supported")
     real_getaddrinfo = socket.getaddrinfo
+    pinned_ports = {int(info[4][1]) for info in addrinfos}
 
     def _patched(node, *args, **kwargs):
         if node == host:
+            port = args[0] if args else kwargs.get("port")
+            try:
+                port_ok = port is not None and int(port) in pinned_ports
+            except (TypeError, ValueError):
+                port_ok = False
+            if not port_ok:
+                raise RuntimeError(f"getaddrinfo({host!r}, port={port!r}) does not match the pinned resolution")
             return addrinfos
         return real_getaddrinfo(node, *args, **kwargs)
 
@@ -105,6 +125,7 @@ def _pin_resolution(host: str, addrinfos: list):
         yield
     finally:
         socket.getaddrinfo = real_getaddrinfo
+        _pin_lock.release()
 
 
 @contextlib.contextmanager

@@ -293,6 +293,44 @@ def test_pin_resolution_forces_getaddrinfo_to_validated_result():
     assert socket.getaddrinfo is real_getaddrinfo
 
 
+def test_pin_resolution_rejects_nested_use_and_releases_afterwards():
+    """#314: a second pin while one is active raises, and the state is restored."""
+    import socket
+
+    from _collect_common import _pin_resolution
+
+    real_getaddrinfo = socket.getaddrinfo
+    ai = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("203.0.113.1", 443))]
+    with _pin_resolution("a.example", ai):
+        patched = socket.getaddrinfo
+        with pytest.raises(RuntimeError, match="already active"):
+            with _pin_resolution("b.example", ai):
+                pass
+        # The failed inner entry must not have disturbed the outer pin.
+        assert socket.getaddrinfo is patched
+    assert socket.getaddrinfo is real_getaddrinfo
+    # Lock released: a fresh pin works again.
+    with _pin_resolution("a.example", ai):
+        pass
+
+
+def test_pin_resolution_rejects_mismatched_port():
+    """#314: the pinned addrinfos are only valid for the validated port."""
+    import socket
+
+    from _collect_common import _pin_resolution
+
+    ai = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("203.0.113.1", 443))]
+    with _pin_resolution("example.com", ai):
+        assert socket.getaddrinfo("example.com", 443) == ai
+        assert socket.getaddrinfo("example.com", "443") == ai
+        assert socket.getaddrinfo("example.com", port=443) == ai
+        with pytest.raises(RuntimeError, match="pinned"):
+            socket.getaddrinfo("example.com", 8080)
+        with pytest.raises(RuntimeError, match="pinned"):
+            socket.getaddrinfo("example.com", None)
+
+
 def test_download_pdf_pins_resolution_during_fetch():
     """download_pdf must pin socket.getaddrinfo so the client's own connect
     can't re-resolve a rebinding domain to a different (private) address."""
