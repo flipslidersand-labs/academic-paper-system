@@ -13,10 +13,6 @@ on:
         description: "Max papers to fetch per source"
         default: "20"
         required: false
-      api_url:
-        description: "API base URL"
-        default: "http://localhost:8020"
-        required: false
       summarize:
         description: "Run bulk summarization after collection (true/false)"
         default: "true"
@@ -42,7 +38,9 @@ jobs:
     # values never get template-expanded into run scripts (script injection
     # on the self-hosted runner, #135). Defaults live here, in one place.
     env:
-      API_URL: ${{ github.event.inputs.api_url || 'http://localhost:8020' }}
+      # Fixed on purpose (#480): a dispatch-supplied URL would receive
+      # X-API-Key and let the runner POST to arbitrary LAN hosts (SSRF).
+      API_URL: http://localhost:8020
       CATEGORIES: ${{ github.event.inputs.categories || 'cs.AI cs.LG cs.CL' }}
       MAX_RESULTS: ${{ github.event.inputs.max_results || '20' }}
       # Write-endpoint auth (#183). ingest_client reads this env; curl steps
