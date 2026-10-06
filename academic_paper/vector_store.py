@@ -174,6 +174,17 @@ class QdrantStore:
     async def aensure_collection(self) -> None:
         await to_thread_cancellable(self.ensure_collection)
 
+    def ping(self) -> None:
+        """Qdrant への疎通確認。到達不能なら例外を送出する（/health・起動プローブ用）。"""
+        self.client.get_collections()
+
+    async def aping(self) -> None:
+        await asyncio.to_thread(self.ping)
+
+    def count_points(self) -> int | None:
+        """このストアのコレクションのポイント数を返す（/stats 用）。"""
+        return self.client.get_collection(self.collection).points_count
+
     def close(self) -> None:
         """QdrantClient のコネクションプールを解放する（#228）。"""
         self.client.close()
