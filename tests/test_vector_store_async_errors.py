@@ -39,20 +39,20 @@ def _unexpected(status: int) -> UnexpectedResponse:
 
 
 def test_aupsert_delegates_to_upsert(store):
-    with patch.object(store, "upsert") as m:
+    with patch.object(store, "_upsert") as m:
         asyncio.run(store.aupsert(_POINTS))
     m.assert_called_once_with(_POINTS)
 
 
 def test_adelete_by_paper_id_delegates(store):
-    with patch.object(store, "delete_by_paper_id") as m:
+    with patch.object(store, "_delete_by_paper_id") as m:
         asyncio.run(store.adelete_by_paper_id(42))
     m.assert_called_once_with(42)
 
 
 def test_asearch_delegates_with_positional_order(store):
     vec = [0.5] * 768
-    with patch.object(store, "search", return_value=[{"id": "1"}]) as m:
+    with patch.object(store, "_search", return_value=[{"id": "1"}]) as m:
         result = asyncio.run(store.asearch(vec, 5, 9))
     assert result == [{"id": "1"}]
     m.assert_called_once_with(vec, 5, 9)  # (query_vector, limit, paper_id_filter)
@@ -60,28 +60,28 @@ def test_asearch_delegates_with_positional_order(store):
 
 def test_asearch_defaults(store):
     vec = [0.5] * 768
-    with patch.object(store, "search", return_value=[]) as m:
+    with patch.object(store, "_search", return_value=[]) as m:
         asyncio.run(store.asearch(vec))
     m.assert_called_once_with(vec, 10, None)
 
 
 def test_aensure_collection_delegates(store):
-    with patch.object(store, "ensure_collection") as m:
+    with patch.object(store, "_ensure_collection") as m:
         asyncio.run(store.aensure_collection())
     m.assert_called_once_with()
 
 
 def test_async_wrappers_propagate_exceptions(store):
-    with patch.object(store, "upsert", side_effect=ValueError("boom")), pytest.raises(ValueError, match="boom"):
+    with patch.object(store, "_upsert", side_effect=ValueError("boom")), pytest.raises(ValueError, match="boom"):
         asyncio.run(store.aupsert(_POINTS))
 
 
 # --- 4xx is not retried, 5xx is retried attempts=3 times ------------------------------------
 
 _OPERATIONS = {
-    "ensure_collection": (lambda s: s.ensure_collection(), "get_collections"),
-    "upsert": (lambda s: s.upsert(_POINTS), "upsert"),
-    "delete_by_paper_id": (lambda s: s.delete_by_paper_id(1), "delete"),
+    "ensure_collection": (lambda s: s._ensure_collection(), "get_collections"),
+    "upsert": (lambda s: s._upsert(_POINTS), "upsert"),
+    "delete_by_paper_id": (lambda s: s._delete_by_paper_id(1), "delete"),
 }
 
 
