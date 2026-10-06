@@ -16,6 +16,7 @@ Exit codes:
 
 import argparse
 import json
+import os
 import sys
 import time
 
@@ -27,6 +28,19 @@ from cli_utils import check_date_order, iso_date, positive_int
 ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 PMC_PDF_URL = "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{pmc_id}/pdf/"
+
+
+def _safe_error(exc: Exception) -> str:
+    """Describe an error without leaking the api_key query parameter.
+
+    httpx.HTTPStatusError's str() embeds the full request URL (including
+    ?api_key=...), so report only status code + endpoint path (#479).
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code} from {exc.request.url.path}"
+    if isinstance(exc, httpx.RequestError):
+        return f"{type(exc).__name__} requesting {exc.request.url.path}"
+    return type(exc).__name__
 
 
 def fetch_pmc_ids(
@@ -210,7 +224,7 @@ def main() -> None:
     parser.add_argument(
         "--api-key",
         default="",
-        help="NCBI API key (optional; raises rate limit to 10 req/sec)",
+        help="NCBI API key (optional; prefer env NCBI_API_KEY — argv is visible in ps)",
     )
     parser.add_argument(
         "--from-date",
@@ -233,6 +247,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     check_date_order(parser, args.from_date, args.until_date)
+    api_key = args.api_key or os.environ.get("NCBI_API_KEY", "")
 
     print(f"[pubmed] terms={args.terms} max={args.max_results} api={args.api_url}")
 
@@ -244,12 +259,12 @@ def main() -> None:
                 args.terms,
                 args.max_results,
                 client=shared_client,
-                api_key=args.api_key,
+                api_key=api_key,
                 from_date=args.from_date,
                 until_date=args.until_date,
             )
         except Exception as exc:
-            print(f"[pubmed] ERROR fetching PMC IDs: {exc}", file=sys.stderr)
+            print(f"[pubmed] ERROR fetching PMC IDs: {_safe_error(exc)}", file=sys.stderr)
             sys.exit(1)
 
         print(f"[pubmed] found {len(pmc_ids)} PMC IDs")
@@ -261,9 +276,9 @@ def main() -> None:
 
         time.sleep(0.34)  # respect 3 req/sec default rate limit
         try:
-            papers = fetch_paper_metadata(pmc_ids, client=shared_client, api_key=args.api_key)
+            papers = fetch_paper_metadata(pmc_ids, client=shared_client, api_key=api_key)
         except Exception as exc:
-            print(f"[pubmed] ERROR fetching metadata: {exc}", file=sys.stderr)
+            print(f"[pubmed] ERROR fetching metadata: {_safe_error(exc)}", file=sys.stderr)
             sys.exit(1)
 
         print(f"[pubmed] parsed {len(papers)} articles")

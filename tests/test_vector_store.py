@@ -1,6 +1,7 @@
 import asyncio
 from unittest.mock import MagicMock, patch
 
+import pytest
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from academic_paper.vector_store import _QDRANT_RETRYABLE, QdrantStore, make_qdrant_id
@@ -41,11 +42,39 @@ def test_ensure_collection_skips_when_exists():
         mock_collection = MagicMock()
         mock_collection.name = "test-collection"
         mock_client.get_collections.return_value.collections = [mock_collection]
+        mock_client.get_collection.return_value.config.params.vectors.size = 768
 
         store = QdrantStore(url="http://test", collection="test-collection")
         store.ensure_collection()
 
         mock_client.create_collection.assert_not_called()
+
+
+def test_ensure_collection_uses_configured_vector_size():
+    """vector_size 指定がコレクション作成に反映される (#494)"""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+        mock_client.get_collections.return_value.collections = []
+
+        QdrantStore(url="http://test", collection="c", vector_size=1024).ensure_collection()
+
+        assert mock_client.create_collection.call_args[1]["vectors_config"].size == 1024
+
+
+def test_ensure_collection_raises_on_dimension_mismatch():
+    """既存コレクションの次元が不一致なら ValueError (#494)"""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+        mock_collection = MagicMock()
+        mock_collection.name = "c"
+        mock_client.get_collections.return_value.collections = [mock_collection]
+        mock_client.get_collection.return_value.config.params.vectors.size = 384
+
+        store = QdrantStore(url="http://test", collection="c", vector_size=768)
+        with pytest.raises(ValueError, match="vector size 384"):
+            store.ensure_collection()
 
 
 def test_ensure_collection_passes_retry_params():
@@ -237,8 +266,6 @@ def test_search_does_not_retry_on_4xx():
 
 def test_search_retries_on_5xx():
     """A 500 UnexpectedResponse is retried up to `attempts` times (#306)."""
-    from academic_paper.vector_store import _RetryableQdrantError
-
     with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
         mock_client = MagicMock()
         MockClient.return_value = mock_client
@@ -254,10 +281,11 @@ def test_search_retries_on_5xx():
             store = QdrantStore(url="http://test", collection="test-collection")
             try:
                 store.search([0.1] * 768, limit=10)
-            except _RetryableQdrantError:
-                pass
+            except UnexpectedResponse as exc:
+                # The internal retry marker must not leak; the original error surfaces (#472).
+                assert exc.status_code == 500
             else:
-                raise AssertionError("expected _RetryableQdrantError to propagate after retries")
+                raise AssertionError("expected UnexpectedResponse to propagate after retries")
 
         assert call_count[0] == 3
 
@@ -284,3 +312,61 @@ def test_aclose_closes_underlying_qdrant_client():
         asyncio.run(store.aclose())
 
         mock_client.close.assert_called_once()
+
+
+def test_aupsert_cancel_skips_remaining_batches():
+    """#313: once the awaiting task is cancelled, the worker thread stops after the
+    in-flight batch instead of upserting every remaining batch."""
+    import threading
+
+    from academic_paper.vector_store import _UPSERT_BATCH_MAX
+
+    in_first = threading.Event()
+    release = threading.Event()
+    done = threading.Event()
+    upserts = []
+
+    def slow_upsert(**kwargs):
+        upserts.append(1)
+        in_first.set()
+        release.wait(5)
+
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        mock_client.upsert.side_effect = slow_upsert
+        MockClient.return_value = mock_client
+        store = QdrantStore(url="http://test", collection="c")
+
+        points = [{"id": str(i), "vector": [0.0], "payload": {}} for i in range(_UPSERT_BATCH_MAX * 3)]
+
+        async def scenario():
+            task = asyncio.create_task(store.aupsert(points))
+            await asyncio.to_thread(in_first.wait, 5)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            release.set()
+            await asyncio.sleep(0.3)
+            done.set()
+
+        asyncio.run(scenario())
+
+    assert done.is_set()
+    assert len(upserts) == 1
+
+
+def test_ping_and_count_points_use_store_collection():
+    """ping/count_points は自身の client と self.collection を使う (#495)"""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+        mock_client.get_collection.return_value.points_count = 7
+
+        store = QdrantStore(url="http://test", collection="my-coll")
+        store.ping()
+        assert store.count_points() == 7
+
+        mock_client.get_collections.assert_called_once()
+        mock_client.get_collection.assert_called_once_with("my-coll")
