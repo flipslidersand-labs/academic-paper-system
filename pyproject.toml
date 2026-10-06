@@ -87,3 +87,7 @@ omit = ["tests/*", ".venv/*", "htmlcov/*", "frontend/*"]
 precision = 2
 show_missing = true
 skip_covered = false
+
+[tool.black]
+line-length = 120
+target-version = ["py312"]
