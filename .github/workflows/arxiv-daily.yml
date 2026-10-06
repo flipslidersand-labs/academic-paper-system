@@ -82,6 +82,7 @@ jobs:
           echo "Checking $API_URL/health ..."
           # Single-quoted so the inner bash expands $API_URL itself — the outer
           # shell never splices the value into the command string.
+          # shellcheck disable=SC2016
           timeout 30 bash -c 'until curl -sf "$API_URL/health" > /dev/null; do sleep 3; done'
           echo "API is healthy"
 
@@ -314,7 +315,15 @@ jobs:
 
           webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "")
           if not webhook_url:
-              print("DISCORD_WEBHOOK_URL not set, skipping")
+              print("::warning::DISCORD_WEBHOOK_URL not set — failure notifications are disabled")
+              # A scheduled run that already failed must not end up silent
+              # (#481): fail this step too so the failure is visible even
+              # without a webhook. Manual runs / successful runs only warn.
+              if (
+                  os.environ.get("GITHUB_EVENT_NAME") == "schedule"
+                  and os.environ.get("JOB_STATUS", "success") != "success"
+              ):
+                  sys.exit(1)
               sys.exit(0)
 
           def load_summary(path):
@@ -382,6 +391,9 @@ jobs:
               headers={"Content-Type": "application/json"},
               method="POST",
           )
-          with urllib.request.urlopen(req, timeout=10) as resp:
-              print(f"Discord notified: HTTP {resp.status}")
+          try:
+              with urllib.request.urlopen(req, timeout=10) as resp:
+                  print(f"Discord notified: HTTP {resp.status}")
+          except Exception as e:  # noqa: BLE001 — notification must never mask the job result
+              print(f"::warning::Discord notification failed: {e}")
           EOF

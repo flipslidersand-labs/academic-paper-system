@@ -241,6 +241,7 @@ title / authors / categories / published_date / source: 任意のメタデータ
 | `API_KEY` | `/health` 以外の全エンドポイントの X-API-Key（読み取り系含む。空=認証無効） | (空) |
 | `PAPER_API_KEY` | コレクタ側が送る X-API-Key（cron は repo secret 経由） | (空) |
 | `SEMANTIC_SCHOLAR_API_KEY` | `scripts/semantic_scholar_collect.py` 用 API キー（`--api-key` でも指定可。サーバー設定ではない） | (空) |
+| `DISCORD_WEBHOOK_URL` | arxiv-daily.yml の失敗/結果通知先（**repo secret 必須**。未設定だと通知が無効化され、schedule 実行の失敗は Notify ステップが exit 1 で表面化する。登録はオペレーター手動作業 #481） | (未設定) |
 
 **タイムアウトの連動制約** (`academic_paper/config.py`):
 - `OLLAMA_TIMEOUT` × 3 + 3 ≤ `LLM_GENERATE_TIMEOUT`（Ollama は最大3回リトライ + backoff 1s+2s。既定 300×3+3=903）
