@@ -82,6 +82,7 @@ jobs:
           echo "Checking $API_URL/health ..."
           # Single-quoted so the inner bash expands $API_URL itself — the outer
           # shell never splices the value into the command string.
+          # shellcheck disable=SC2016
           timeout 30 bash -c 'until curl -sf "$API_URL/health" > /dev/null; do sleep 3; done'
           echo "API is healthy"
 
