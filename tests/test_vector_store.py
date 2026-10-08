@@ -24,7 +24,7 @@ def test_ensure_collection_creates_when_missing():
         mock_client.get_collections.return_value.collections = []
 
         store = QdrantStore(url="http://test", collection="test-collection")
-        store.ensure_collection()
+        store._ensure_collection()
 
         mock_client.create_collection.assert_called_once()
         call_kwargs = mock_client.create_collection.call_args[1]
@@ -45,7 +45,7 @@ def test_ensure_collection_skips_when_exists():
         mock_client.get_collection.return_value.config.params.vectors.size = 768
 
         store = QdrantStore(url="http://test", collection="test-collection")
-        store.ensure_collection()
+        store._ensure_collection()
 
         mock_client.create_collection.assert_not_called()
 
@@ -57,7 +57,7 @@ def test_ensure_collection_uses_configured_vector_size():
         MockClient.return_value = mock_client
         mock_client.get_collections.return_value.collections = []
 
-        QdrantStore(url="http://test", collection="c", vector_size=1024).ensure_collection()
+        QdrantStore(url="http://test", collection="c", vector_size=1024)._ensure_collection()
 
         assert mock_client.create_collection.call_args[1]["vectors_config"].size == 1024
 
@@ -74,7 +74,7 @@ def test_ensure_collection_raises_on_dimension_mismatch():
 
         store = QdrantStore(url="http://test", collection="c", vector_size=768)
         with pytest.raises(ValueError, match="vector size 384"):
-            store.ensure_collection()
+            store._ensure_collection()
 
 
 def test_ensure_collection_passes_retry_params():
@@ -87,7 +87,7 @@ def test_ensure_collection_passes_retry_params():
             mock_retry.return_value = None
 
             store = QdrantStore(url="http://test", collection="test-collection")
-            store.ensure_collection()
+            store._ensure_collection()
 
         mock_retry.assert_called_once()
         _, kw = mock_retry.call_args
@@ -111,7 +111,7 @@ def test_search_with_paper_id_filter():
         mock_client.query_points.return_value = mock_query_response
 
         store = QdrantStore(url="http://test", collection="test-collection")
-        results = store.search([0.1] * 768, limit=10, paper_id_filter=1)
+        results = store._search([0.1] * 768, limit=10, paper_id_filter=1)
 
         # Verify query_points was called with filter
         assert mock_client.query_points.called
@@ -135,7 +135,7 @@ def test_upsert_calls_qdrant_client():
                 "payload": {"paper_id": 1, "chunk_index": 0, "text": "hello"},
             }
         ]
-        store.upsert(points)
+        store._upsert(points)
 
         mock_client.upsert.assert_called_once()
         call_kwargs = mock_client.upsert.call_args[1]
@@ -158,7 +158,7 @@ def test_upsert_splits_into_batches():
             }
             for i in range(450)
         ]
-        store.upsert(points)
+        store._upsert(points)
 
         # 200件ずつ: 200, 200, 50 の3回に分割される
         assert mock_client.upsert.call_count == 3
@@ -183,7 +183,7 @@ def test_upsert_single_batch_when_under_limit():
             }
             for i in range(50)
         ]
-        store.upsert(points)
+        store._upsert(points)
 
         mock_client.upsert.assert_called_once()
         assert len(mock_client.upsert.call_args.kwargs["points"]) == 50
@@ -200,7 +200,7 @@ def test_upsert_passes_retry_params():
 
             store = QdrantStore(url="http://test", collection="test-collection")
             points = [{"id": "aaa", "vector": [0.1] * 768, "payload": {}}]
-            store.upsert(points)
+            store._upsert(points)
 
         mock_retry.assert_called_once()
         _, kw = mock_retry.call_args
@@ -214,7 +214,7 @@ def test_delete_by_paper_id_calls_qdrant_client():
         MockClient.return_value = mock_client
 
         store = QdrantStore(url="http://test", collection="test-collection")
-        store.delete_by_paper_id(42)
+        store._delete_by_paper_id(42)
 
         mock_client.delete.assert_called_once()
         call_kwargs = mock_client.delete.call_args[1]
@@ -233,7 +233,7 @@ def test_delete_by_paper_id_retries_on_network_error():
             mock_retry.return_value = None
 
             store = QdrantStore(url="http://test", collection="test-collection")
-            store.delete_by_paper_id(7)
+            store._delete_by_paper_id(7)
 
         mock_retry.assert_called_once()
         _, kw = mock_retry.call_args
@@ -255,7 +255,7 @@ def test_search_does_not_retry_on_4xx():
 
         store = QdrantStore(url="http://test", collection="test-collection")
         try:
-            store.search([0.1] * 768, limit=10)
+            store._search([0.1] * 768, limit=10)
         except UnexpectedResponse:
             pass
         else:
@@ -280,7 +280,7 @@ def test_search_retries_on_5xx():
         with patch("academic_paper.retry.time.sleep"):
             store = QdrantStore(url="http://test", collection="test-collection")
             try:
-                store.search([0.1] * 768, limit=10)
+                store._search([0.1] * 768, limit=10)
             except UnexpectedResponse as exc:
                 # The internal retry marker must not leak; the original error surfaces (#472).
                 assert exc.status_code == 500
