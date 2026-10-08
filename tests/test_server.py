@@ -157,7 +157,7 @@ def test_ingest_cleans_up_tmpfile(client):
         return ctx
 
     with (
-        patch("academic_paper.server.tempfile.NamedTemporaryFile", side_effect=fake_ntf),
+        patch("academic_paper.services.ingest_service.tempfile.NamedTemporaryFile", side_effect=fake_ntf),
         patch("academic_paper.services.ingest_service.extract_text") as mock_extract,
     ):
         mock_extract.return_value = [{"page": 1, "text": "Test Document content"}]
@@ -186,7 +186,7 @@ def test_ingest_cleans_up_tmpfile_on_error(client):
         return ctx
 
     with (
-        patch("academic_paper.server.tempfile.NamedTemporaryFile", side_effect=fake_ntf),
+        patch("academic_paper.services.ingest_service.tempfile.NamedTemporaryFile", side_effect=fake_ntf),
         patch("academic_paper.services.ingest_service.extract_text", side_effect=RuntimeError("boom")),
     ):
         response = client.post(
@@ -228,7 +228,7 @@ def test_ingest_extract_timeout_fails_job_and_cleans_tmpfile(client):
 
     with (
         patch.object(settings, "pdf_extract_timeout", 0.05),
-        patch("academic_paper.server.tempfile.NamedTemporaryFile", side_effect=fake_ntf),
+        patch("academic_paper.services.ingest_service.tempfile.NamedTemporaryFile", side_effect=fake_ntf),
         patch("academic_paper.services.ingest_service.extract_text", side_effect=slow_extract),
     ):
         response = client.post(

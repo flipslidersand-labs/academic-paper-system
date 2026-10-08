@@ -2,8 +2,6 @@
 
 import asyncio
 import logging
-import re
-import tempfile
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,13 +17,11 @@ from academic_paper.auth import require_scope
 from academic_paper.config import settings
 from academic_paper.db import (
     db_connection,
-    delete_paper,
     get_all_papers_for_scoring,
     get_paper,
     init_db,
     list_papers_filtered,
     list_summaries,
-    save_paper,
     save_summary,
     update_paper_score,
     update_paper_status,
@@ -226,6 +222,9 @@ async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str,
     )
 
 
+_DUPLICATE_DETAIL = {"indexed": "File already ingested", "pending": "File is already being ingested"}
+
+
 @app.post("/papers/ingest", dependencies=[Depends(verify_api_key)])
 async def ingest_paper(
     file: UploadFile = File(...),
@@ -258,63 +257,30 @@ async def ingest_paper(
     try:
         _validate_published_date(published_date)
         max_bytes = settings.max_upload_mb * 1024 * 1024
-        size_detail = f"File too large (max {settings.max_upload_mb} MB)"
-        # Reject early when the multipart part already declares an oversized length,
-        # before buffering anything.
-        if file.size is not None and file.size > max_bytes:
-            raise HTTPException(status_code=413, detail=size_detail)
-
-        # Stream to disk in 1 MiB chunks, enforcing the size cap as bytes arrive
-        # so an oversized body is cut off mid-transfer instead of being fully
-        # buffered in memory first.
-        header = b""
-        received = 0
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp_path = tmp.name
-            while chunk := await file.read(1 << 20):
-                received += len(chunk)
-                if received > max_bytes:
-                    raise HTTPException(status_code=413, detail=size_detail)
-                if len(header) < 5:
-                    header += chunk[: 5 - len(header)]
-                tmp.write(chunk)
-
-        if not header.startswith(b"%PDF-"):
+        try:
+            tmp_path = await ingest_service.stream_upload_to_tmp(file, max_bytes)
+        except ingest_service.UploadTooLargeError:
+            raise HTTPException(status_code=413, detail=f"File too large (max {settings.max_upload_mb} MB)")
+        except ingest_service.NotAPdfError:
             raise HTTPException(status_code=415, detail="Not a PDF file (missing %PDF- header)")
 
         file_hash = hash_file(tmp_path)
-        # Sanitize filename to prevent log injection and stored XSS (#189).
-        # Allow only word chars, dots, hyphens, spaces; replace everything else with '_'.
-        raw_name = file.filename or "unknown.pdf"
-        file_name = re.sub(r"[^\w.\- ]", "_", raw_name)[:255]
+        file_name = ingest_service.sanitize_file_name(file.filename)
 
-        with db_connection(settings.academic_db) as conn:
-            cursor = conn.cursor()
-            # 409 when already indexed or still being ingested ('pending'); failed rows
-            # are removed so the same PDF can be re-uploaded after a partial failure (#145).
-            # Deleting a 'pending' row would pull it out from under the running job and
-            # its compensating Qdrant delete could wipe the new paper's shared points (#496).
-            # Stale 'pending' rows from a killed server are turned 'failed' at startup.
-            cursor.execute("SELECT id, status FROM papers WHERE file_hash = ?", (file_hash,))
-            existing = cursor.fetchone()
-            if existing:
-                if existing["status"] == "indexed":
-                    raise HTTPException(status_code=409, detail="File already ingested")
-                if existing["status"] == "pending":
-                    raise HTTPException(status_code=409, detail="File is already being ingested")
-                # 'failed' row — purge and re-ingest
-                delete_paper(conn, existing["id"])
-
-            paper_id = save_paper(
-                conn,
+        try:
+            paper_id = ingest_service.register_paper(
                 file_name,
                 file_hash,
-                title=_sanitize_text(title),
-                authors=_parse_list_field(authors, "authors"),
-                categories=_parse_list_field(categories, "categories"),
-                published_date=published_date or None,
-                source=_sanitize_text(source),
+                lambda: {
+                    "title": _sanitize_text(title),
+                    "authors": _parse_list_field(authors, "authors"),
+                    "categories": _parse_list_field(categories, "categories"),
+                    "published_date": published_date or None,
+                    "source": _sanitize_text(source),
+                },
             )
+        except ingest_service.DuplicatePaperError as dup:
+            raise HTTPException(status_code=409, detail=_DUPLICATE_DETAIL[dup.status])
 
         if wait:
             try:
