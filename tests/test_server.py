@@ -963,7 +963,7 @@ def test_list_papers_unexpected_error_returns_500(client):
 
 def test_get_paper_unexpected_error_returns_500(client):
     """GET /papers/{paper_id}: unclassified errors must map through _http_exc_for (#276)."""
-    with patch("academic_paper.services.summary_service.get_paper", side_effect=RuntimeError("disk error")):
+    with patch("academic_paper.server.get_paper", side_effect=RuntimeError("disk error")):
         response = client.get("/papers/1")
     assert response.status_code == 500
     assert "disk error" not in response.json()["detail"]
