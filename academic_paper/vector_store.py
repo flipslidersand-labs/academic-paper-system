@@ -6,7 +6,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.models import Distance, FieldCondition, Filter, FilterSelector, MatchValue, PointStruct, VectorParams
 
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.retry import raise_if_cancelled, to_thread_cancellable, with_retry
 
 PAPER_NS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
@@ -64,11 +64,12 @@ class QdrantStore:
         collection: str | None = None,
         vector_size: int | None = None,
     ):
-        self.url = url or settings.qdrant_url
-        self.api_key = api_key or settings.qdrant_api_key or None
-        self.collection = collection or settings.qdrant_collection
-        self.vector_size = vector_size or settings.embedding_dim
-        self.client = QdrantClient(url=self.url, api_key=self.api_key, timeout=settings.qdrant_timeout)
+        s = get_settings()
+        self.url = url or s.qdrant_url
+        self.api_key = api_key or s.qdrant_api_key or None
+        self.collection = collection or s.qdrant_collection
+        self.vector_size = vector_size or s.embedding_dim
+        self.client = QdrantClient(url=self.url, api_key=self.api_key, timeout=s.qdrant_timeout)
 
     def _ensure_collection(self) -> None:
         """コレクションが存在しなければ作成（冪等、失敗時3回リトライ #266）
