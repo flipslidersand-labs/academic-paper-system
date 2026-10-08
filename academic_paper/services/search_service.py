@@ -117,17 +117,22 @@ async def run_search(
         query_vector = await embedder.embed_single(q, mode="search")
     vector_results = await vector_store.asearch(query_vector=query_vector, limit=limit, paper_id_filter=paper_id)
 
-    missing_qids = [v["id"] for v in vector_results if "chunk_id" not in v["payload"]]
-    qid_to_cid = {k: v["id"] for k, v in _fetch_chunk_meta(cursor, missing_qids, "qdrant_id", "id, qdrant_id").items()}
-    if qid_to_cid:
-        for vec_result in vector_results:
-            if "chunk_id" not in vec_result["payload"] and vec_result["id"] in qid_to_cid:
-                vec_result["payload"]["chunk_id"] = qid_to_cid[vec_result["id"]]
+    # Ingest never stores chunk_id in the Qdrant payload, so resolve every point's
+    # chunk_id from the chunks table. Points with no chunks row (partial ingest, #145)
+    # are orphans and are dropped here, in one place.
+    vec_qids = [v["id"] for v in vector_results]
+    qid_to_cid = {k: v["id"] for k, v in _fetch_chunk_meta(cursor, vec_qids, "qdrant_id", "id, qdrant_id").items()}
+    resolved_vector_results = []
+    for vec_result in vector_results:
+        chunk_id = qid_to_cid.get(vec_result["id"])
+        if chunk_id is None:
+            logger.warning("search mode=%s: skipping orphan point %s (no chunks row)", mode, vec_result["id"])
+            continue
+        resolved_vector_results.append(
+            {**vec_result, "payload": {**(vec_result.get("payload") or {}), "chunk_id": chunk_id}}
+        )
 
-    merged = rrf_merge(fts_results, vector_results)
-    # Drop orphaned Qdrant results that have no chunk_id — these can arise
-    # from a partial ingest failure before compensation runs (#145).
-    merged_slice = [r for r in merged[:limit] if "chunk_id" in r]
+    merged_slice = rrf_merge(fts_results, resolved_vector_results)[:limit]
     merged_ids = [r["chunk_id"] for r in merged_slice]
     merged_meta = _fetch_chunk_meta(cursor, merged_ids, "id", "id, page_start")
     merged_page_map = {k: v["page_start"] for k, v in merged_meta.items()}

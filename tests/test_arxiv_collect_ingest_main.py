@@ -9,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
+import _collect_common  # noqa: E402
 import arxiv_collect  # noqa: E402
 
 
@@ -37,8 +38,8 @@ def ingest_calls(monkeypatch):
         calls["ingest"] = (api_url, file_name, tmp_path, meta, poll_timeout)
         return {"status": "indexed", "paper_id": 7}
 
-    monkeypatch.setattr(arxiv_collect, "download_pdf", fake_download)
-    monkeypatch.setattr(arxiv_collect, "ingest_pdf", fake_ingest_pdf)
+    monkeypatch.setattr(_collect_common, "download_pdf", fake_download)
+    monkeypatch.setattr(_collect_common, "ingest_pdf", fake_ingest_pdf)
     return calls
 
 

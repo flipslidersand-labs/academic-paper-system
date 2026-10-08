@@ -46,7 +46,6 @@ def test_search_returns_results(client):
             "payload": {
                 "paper_id": 1,
                 "chunk_index": 0,
-                "chunk_id": 1,
                 "text": "This is a test document about machine learning and AI systems.",
             },
         },
@@ -56,7 +55,6 @@ def test_search_returns_results(client):
             "payload": {
                 "paper_id": 1,
                 "chunk_index": 1,
-                "chunk_id": 2,
                 "text": "Deep learning models require significant computational resources.",
             },
         },
@@ -222,7 +220,6 @@ def test_search_hybrid_mode(client):
             "payload": {
                 "paper_id": 1,
                 "chunk_index": 1,
-                "chunk_id": 2,
                 "text": "Neural networks",
             },
         },
@@ -232,7 +229,6 @@ def test_search_hybrid_mode(client):
             "payload": {
                 "paper_id": 1,
                 "chunk_index": 2,
-                "chunk_id": 3,
                 "text": "Deep learning",
             },
         },
@@ -253,13 +249,10 @@ def test_search_hybrid_mode(client):
         mock_conn.cursor.return_value = mock_cursor
         mock_get_conn.return_value = mock_conn
 
-        # Mock cursor.execute calls for page_start lookups
-        mock_cursor.fetchone.side_effect = [
-            {"chunk_index": 0},  # For FTS chunk_id enrichment for chunk_id=1
-            {"chunk_index": 1},  # For FTS chunk_id enrichment for chunk_id=2
-            {"page_start": 1},  # For final result lookup
-            {"page_start": 2},  # For final result lookup
-            {"page_start": 3},  # For final result lookup
+        # fetchall: qdrant_id -> chunk_id map, then page_start lookup for merged results
+        mock_cursor.execute.return_value.fetchall.side_effect = [
+            [{"id": 2, "qdrant_id": "qdrant-id-2"}, {"id": 3, "qdrant_id": "qdrant-id-3"}],
+            [{"id": 1, "page_start": 1}, {"id": 2, "page_start": 2}, {"id": 3, "page_start": 3}],
         ]
 
         response = client.get("/search?q=machine learning&mode=hybrid")
@@ -336,7 +329,6 @@ def test_search_nugget_mode_returns_results(client):
             "payload": {
                 "paper_id": 1,
                 "chunk_index": 0,
-                "chunk_id": 1,
                 "text": "Deep learning is a subset of machine learning. It uses neural networks. Results are impressive.",
             },
         }
@@ -358,7 +350,7 @@ def test_search_nugget_mode_returns_results(client):
         mock_get_conn.return_value = mock_conn
         # fetchall is called twice: qdrant_id -> chunk_id map, then page_start lookup
         mock_cursor.execute.return_value.fetchall.side_effect = [
-            [],  # missing qdrant_id → chunk_id map
+            [{"id": 1, "qdrant_id": "qdrant-id-1"}],  # qdrant_id → chunk_id map
             [{"id": 1, "page_start": 2}],  # page_start lookup for merged results
         ]
 
@@ -392,7 +384,6 @@ def test_search_nugget_mode_calls_embed_single_and_embed(client):
             "payload": {
                 "paper_id": 1,
                 "chunk_index": 0,
-                "chunk_id": 1,
                 "text": "Sentence one. Sentence two. Sentence three.",
             },
         }
@@ -412,7 +403,7 @@ def test_search_nugget_mode_calls_embed_single_and_embed(client):
         mock_conn.cursor.return_value = mock_cursor
         mock_get_conn.return_value = mock_conn
         mock_cursor.execute.return_value.fetchall.side_effect = [
-            [],
+            [{"id": 1, "qdrant_id": "qdrant-id-1"}],
             [{"id": 1, "page_start": 1}],
         ]
 
@@ -444,7 +435,6 @@ def test_search_nugget_mode_embed_weight_zero_skips_batch_embed(client):
             "payload": {
                 "paper_id": 1,
                 "chunk_index": 0,
-                "chunk_id": 1,
                 "text": "Sentence one. Sentence two.",
             },
         }
@@ -464,7 +454,7 @@ def test_search_nugget_mode_embed_weight_zero_skips_batch_embed(client):
         mock_conn.cursor.return_value = mock_cursor
         mock_get_conn.return_value = mock_conn
         mock_cursor.execute.return_value.fetchall.side_effect = [
-            [],
+            [{"id": 1, "qdrant_id": "qdrant-id-1"}],
             [{"id": 1, "page_start": 1}],
         ]
 
@@ -473,3 +463,54 @@ def test_search_nugget_mode_embed_weight_zero_skips_batch_embed(client):
         assert response.status_code == 200
         # embed (batch) must NOT be called when embed_weight=0.0
         client.app.state.embedder.embed.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", ["hybrid", "nugget"])
+def test_search_hybrid_nugget_tolerate_none_payload_and_orphan_points(client, mode, caplog):
+    """payload=None and points absent from chunks must not 500; orphans are dropped with a warning (#497)."""
+    mock_fts_results = [
+        {
+            "chunk_id": 1,
+            "paper_id": 1,
+            "text": "Machine learning basics.",
+            "rank": -5.0,
+            "chunk_index": 0,
+            "page_start": 1,
+        },
+    ]
+    # Real ingest payloads carry no chunk_id; one point has no payload at all.
+    mock_vector_results = [
+        {"id": "q-none", "score": 0.9, "payload": None},
+        {"id": "q-orphan", "score": 0.8, "payload": {"paper_id": 1, "chunk_index": 7, "text": "orphan"}},
+        {
+            "id": "q-ok",
+            "score": 0.7,
+            "payload": {"paper_id": 1, "chunk_index": 1, "text": "Neural networks.", "file_name": "a.pdf"},
+        },
+    ]
+    client.app.state.vector_store.asearch = AsyncMock(return_value=mock_vector_results)
+    client.app.state.embedder.embed = AsyncMock(return_value=[[0.1] * 768])
+
+    with (
+        patch("academic_paper.services.search_service.search_fts") as mock_search_fts,
+        patch("academic_paper.server.db_connection") as mock_get_conn,
+        caplog.at_level("WARNING"),
+    ):
+        mock_search_fts.return_value = mock_fts_results
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.cursor.return_value = mock_cursor
+        mock_get_conn.return_value = mock_conn
+        mock_cursor.execute.return_value.fetchall.side_effect = [
+            [{"id": 2, "qdrant_id": "q-ok"}],  # qdrant_id -> chunk_id map (q-none/q-orphan absent)
+            [{"id": 1, "page_start": 1}, {"id": 2, "page_start": 2}],  # page_start lookup
+        ]
+
+        response = client.get(f"/search?q=machine&mode={mode}")
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert [r["chunk_index"] for r in results] == [0, 1]  # FTS hit + the resolvable vector point only
+    assert "q-none" in caplog.text
+    assert "q-orphan" in caplog.text

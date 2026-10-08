@@ -27,7 +27,7 @@ jobs:
       # 動く際も、この差を割らないよう閾値を追随させること。
       coverage-threshold: 71
       # Pin ruff so an upstream ruff release can't break lint mid-PR.
-      ruff-version: "0.16.2"
+      ruff-version: "0.16.8"
       # requirements.lock (Dockerイメージが実際に使うピン留め版) を先に
       # インストールしてから -e ".[dev]" することで、pyproject.toml の
       # 緩い範囲指定でランタイム依存が最新にドリフトするのを防ぐ (#338)。
