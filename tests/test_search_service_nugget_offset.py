@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from academic_paper.db import get_connection
+from academic_paper.db import get_connection, save_chunks, save_paper
 from academic_paper.services.search_service import run_search
 
 
@@ -19,6 +19,24 @@ def _hit(qid, chunk_id, text):
 async def _search(temp_db, hits, embed_return):
     conn = get_connection(temp_db)
     try:
+        # Production payloads carry no chunk_id; run_search resolves chunks via chunks.qdrant_id
+        # and drops points with no chunks row as orphans (#497), so seed a row per hit.
+        paper_id = save_paper(conn, "t.pdf", "h")
+        save_chunks(
+            conn,
+            paper_id,
+            [
+                {
+                    "chunk_index": i,
+                    "page_start": 1,
+                    "page_end": 1,
+                    "text": h["payload"]["text"],
+                    "token_count": 1,
+                    "qdrant_id": h["id"],
+                }
+                for i, h in enumerate(hits)
+            ],
+        )
         embedder = MagicMock()
         embedder.embed_single = AsyncMock(return_value=[9.0])
         embedder.embed = AsyncMock(return_value=embed_return)
