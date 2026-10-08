@@ -1446,6 +1446,7 @@ def test_lifespan_injected_ollama_client_closed_exactly_once(temp_db):
     # one close each (embed + ollama) = 2, never 3 (no extra close from llm.aclose()).
     assert http.aclose.await_count == 2
 
+
 # --- lifespan graceful shutdown tests (#502) ---
 
 
