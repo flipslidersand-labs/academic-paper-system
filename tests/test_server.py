@@ -1360,6 +1360,55 @@ def test_startup_no_warning_when_api_key_set(capsys, temp_db):
     assert "API_KEY is not set" not in capsys.readouterr().out
 
 
+def test_lifespan_awaits_llm_aclose_on_shutdown(temp_db):
+    """Shutdown awaits app.state.llm.aclose() (#498)."""
+    mock_llm = MagicMock()
+    mock_llm.aclose = AsyncMock()
+    p1, p2, p3 = _lifespan_client(temp_db)
+    with (
+        patch.object(settings, "llm_provider", "gemini"),
+        patch("academic_paper.server.get_llm_client", return_value=mock_llm),
+        patch("academic_paper.server.RAGSummarizer"),
+        p1,
+        p2,
+        p3,
+    ):
+        with TestClient(app):
+            pass
+
+    mock_llm.aclose.assert_awaited_once()
+
+
+def test_lifespan_llm_provider_none(temp_db):
+    """LLM_PROVIDER=none starts and stops cleanly with no LLM/summarizer (#498)."""
+    p1, p2, p3 = _lifespan_client(temp_db)
+    with patch.object(settings, "llm_provider", "none"), p1, p2, p3:
+        with TestClient(app) as c:
+            assert c.app.state.llm is None
+            assert c.app.state.summarizer is None
+
+
+def test_lifespan_injected_ollama_client_closed_exactly_once(temp_db):
+    """The lifespan-created ollama client is injected, closed once by the lifespan, not by llm.aclose() (#498)."""
+    http = MagicMock(spec=httpx.AsyncClient)
+    http.aclose = AsyncMock()
+    p1, p2, p3 = _lifespan_client(temp_db)
+    with (
+        patch.object(settings, "llm_provider", "ollama"),
+        patch("academic_paper.server.httpx.AsyncClient", return_value=http),
+        p1,
+        p2,
+        p3,
+    ):
+        with TestClient(app) as c:
+            assert c.app.state.llm._client is http
+            assert c.app.state.llm._owns_client is False
+
+    # embed_client is also created via the patched AsyncClient, so it shares this mock;
+    # one close each (embed + ollama) = 2, never 3 (no extra close from llm.aclose()).
+    assert http.aclose.await_count == 2
+
+
 # --- _cleanup_orphaned_ingests tests (#194) ---
 
 
