@@ -56,13 +56,35 @@ uvicorn academic_paper.server:app --reload --port 8020
 
 ## API 一覧
 
-| Method | Path | 説明 |
-|--------|------|------|
-| POST | `/papers/ingest` | PDF 論文をアップロード・インデックス化 (既定は非同期 202) |
-| GET | `/papers` | 論文一覧 (ページネーション・author/category フィルタ・sort 対応) |
-| GET | `/papers/{paper_id}` | 論文詳細 |
-| GET | `/papers/{paper_id}/summary` | 構造化要約取得 (キャッシュのみ。未生成は 404) |
-| GET | `/search` | 検索 (`mode=hybrid/vector/keyword/nugget`) |
+詳細なスキーマ (リクエスト/レスポンスの全フィールド) は起動中サーバーの `/docs` (OpenAPI) を参照。正本は `academic_paper/server.py`。
+以下の表は全エンドポイントの一覧、続く節は注意点のみを記す。
+
+認証: `API_KEY` 環境変数が設定されている場合、「要」のエンドポイントは `X-API-Key` ヘッダーが必須 (不一致は 401)。空なら認証無効。
+
+| Method | Path | 認証 | 概要 |
+|--------|------|------|------|
+| POST | `/papers/ingest` | 要 | PDF 論文をアップロード・インデックス化 (既定は非同期 202、`wait=true` で同期 200) |
+| GET | `/papers` | 要 | 論文一覧 (limit/offset・author/category フィルタ・sort) |
+| GET | `/papers/{paper_id}` | 要 | 論文詳細 |
+| GET | `/papers/{paper_id}/summary` | 要 | 保存済み要約の取得 (キャッシュのみ。未生成は 404) |
+| POST | `/papers/{paper_id}/summary` | 要 | 要約の生成 (キャッシュがあればそれを返す。`force=true` で再生成。LLM 未設定は 503) |
+| POST | `/papers/score-all` | 要 | 全論文の関連度スコアを計算・保存 (論文単位の失敗は `failed`/`errors` に集計) |
+| POST | `/papers/{paper_id}/score` | 要 | 1 論文の関連度スコアを計算・保存 (`{paper_id, score}`) |
+| GET | `/summaries` | 要 | 要約一覧 (論文メタデータ付き、limit 1-100 / offset) |
+| POST | `/jobs/summarize-all` | 要 | 要約未生成の indexed 論文を一括要約するバックグラウンドジョブ開始 (202 `{job_id, status}`) |
+| GET | `/jobs/{job_id}` | 要 | ジョブ状態取得 |
+| GET | `/jobs` | 要 | ジョブ一覧 |
+| GET | `/search` | 要 | 検索 (`mode=hybrid/vector/keyword/nugget`) |
+| GET | `/health` | 不要 | Qdrant / embedding-svc 疎通確認 (両方正常で 200、障害時 503) |
+| GET | `/stats` | 要 | DB 統計 (`papers`/`chunks`/`qdrant_points`) |
+| (mount) | `/ui` | 不要 | `frontend/` の静的 UI (`frontend/` ディレクトリが存在する場合のみ、全 API ルートの後に mount) |
+
+### 非同期処理・エラーコードの注意点
+
+- 非同期: `POST /papers/ingest` (既定) と `POST /jobs/summarize-all` は 202 + `job_id` を返す。`GET /jobs/{job_id}` で `status` (pending/running/done/failed)・`processed`/`failed`/`errors`・`result` を確認する。
+- `POST /jobs/summarize-all`: 実行中の同種ジョブがあれば 409、LLM 未設定なら 503。
+- `POST /papers/{paper_id}/summary`: 論文が無ければ 404、LLM / summarizer 未設定は 503、生成失敗は上流障害 502/503 または 500。
+- `/health` のみ認証不要。`/ui` も認証対象外 (静的ファイル)。
 
 ### `/papers/ingest` (POST)
 
