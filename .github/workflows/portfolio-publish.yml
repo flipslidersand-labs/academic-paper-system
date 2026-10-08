@@ -27,7 +27,7 @@ jobs:
       # can run (#428 — 6 consecutive weekly runs failed with "python:
       # command not found" here without ever reaching Generate portfolio).
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
