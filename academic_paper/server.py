@@ -24,7 +24,6 @@ from academic_paper.db import (
     init_db,
     list_papers_filtered,
     save_paper,
-    save_summary,
     update_paper_status,
 )
 from academic_paper.embedder import EmbedderClient
@@ -40,6 +39,7 @@ from academic_paper.services.summary_service import (  # noqa: F401  (_summary_r
     generate_summary,
     get_cached_summary,
     list_all_summaries,
+    run_summarize_all,
     score_all,
     score_one,
 )
@@ -437,57 +437,8 @@ def list_summaries_endpoint(
 
 
 async def _run_summarize_all(job_id: str) -> None:
-    """Background task: summarize all indexed papers without a cached summary."""
-    job = job_store.get(job_id)
-    if job is None:
-        return
-
-    job.status = "running"
-    await job_store.persist(job)
-    try:
-        if app.state.summarizer is None:
-            job.status = "failed"
-            job.errors.append("Summarizer not initialized (LLM unavailable at job start)")
-            return
-        with db_connection(settings.academic_db) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT p.id, p.file_hash, p.title, p.file_name
-                FROM papers p
-                LEFT JOIN summaries s ON p.id = s.paper_id
-                WHERE s.paper_id IS NULL AND p.status = 'indexed'
-            """)
-            rows = cursor.fetchall()
-
-        job.total = len(rows)
-
-        model = app.state.llm.display_name
-
-        for row in rows:
-            paper_id = row[0]
-            file_hash = row[1]
-            row_title = row["title"]
-            row_file_name = row["file_name"]
-            try:
-                summary = await app.state.summarizer.summarize(
-                    paper_id, file_hash, title=row_title, file_name=row_file_name
-                )
-                with db_connection(settings.academic_db) as conn:
-                    save_summary(conn, paper_id, model, summary)
-                job.processed += 1
-            except Exception as e:
-                logger.exception("Background summarize failed for paper_id=%s", paper_id)
-                job.failed += 1
-                job.errors.append(f"paper_id={paper_id}: {_safe_error_message(e)}")
-
-        job.status = "done"
-    except Exception as e:
-        logger.exception("Background summarize-all job=%s failed", job_id)
-        job.status = "failed"
-        job.errors.append(_safe_error_message(e))
-    finally:
-        job.finished_at = time.time()
-        await job_store.persist(job)
+    """Background task: summarize all indexed papers without a cached summary (#620)."""
+    await run_summarize_all(job_id, app.state.summarizer, app.state.llm, job_store)
 
 
 @app.post("/jobs/summarize-all", status_code=202, dependencies=[Depends(verify_api_key)])
