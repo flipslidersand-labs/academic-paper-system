@@ -1,0 +1,71 @@
+name: Vulnerability Scan
+
+# #350: dependency CVE scan (pip-audit) + Docker image scan (Trivy).
+# Separate workflow (not ci.yml) so it doesn't collide with concurrent ci.yml edits.
+#
+# Mode: WARN-ONLY by default. The existing tree already has known findings
+# (pip-audit: urllib3 2.7.0 x3; Trivy HIGH: 7 Debian pkgs + urllib3 x2), so a
+# blocking gate would turn every PR red on day one. Flip to blocking without a
+# code change by setting the repo/org variable VULN_SCAN_ENFORCE=true once the
+# baseline is cleaned up (e.g. after the weekly lock update lands urllib3>=2.8.0).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * 1" # weekly: new CVEs appear without any commit
+  workflow_dispatch:
+
+concurrency:
+  group: vuln-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PIP_AUDIT_VERSION: "2.10.1"
+  TRIVY_IMAGE: aquasec/trivy:0.75.0
+
+jobs:
+  pip-audit:
+    # Pure-Python job: follow the org runner var, same resolution as qa-workflows python-test.yml.
+    runs-on: ${{ vars.GATE_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install pip-audit
+        run: python -m pip install --quiet "pip-audit==${PIP_AUDIT_VERSION}"
+      - name: Audit requirements.lock
+        # Step-level continue-on-error (NOT job-level): a job-level one keeps the
+        # job's check run red even though the workflow run passes. At step level
+        # the job concludes success; findings stay in the log. Enforced when
+        # VULN_SCAN_ENFORCE=true.
+        continue-on-error: ${{ vars.VULN_SCAN_ENFORCE != 'true' }}
+        # requirements.lock is fully hash-pinned, so pip-audit does not need to
+        # resolve anything (no install, no network except the vuln DB).
+        run: pip-audit --require-hashes --disable-pip -r requirements.lock
+
+  trivy-image:
+    # `docker build` needs a docker socket, which linux-general (ARC) lacks —
+    # keep ubuntu-latest, same constraint as ci.yml's docker-build job.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build Docker image
+        run: docker build -t academic-paper-system:scan .
+      - name: Trivy image scan (CRITICAL/HIGH, fixable only)
+        # Step-level warn-only, see pip-audit job.
+        continue-on-error: ${{ vars.VULN_SCAN_ENFORCE != 'true' }}
+        # Trivy is run from its pinned official image instead of a third-party
+        # action. --ignore-unfixed skips CVEs with no available fix.
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" \
+            image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
+            --exit-code 1 academic-paper-system:scan
