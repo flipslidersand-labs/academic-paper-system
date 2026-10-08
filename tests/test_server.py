@@ -923,7 +923,7 @@ def test_score_all_partial_failure_continues(client, temp_db):
             raise RuntimeError("boom")
         return real_compute_score(paper, preferred)
 
-    with patch("academic_paper.server.compute_score", side_effect=flaky_compute_score):
+    with patch("academic_paper.services.summary_service.compute_score", side_effect=flaky_compute_score):
         response = client.post("/papers/score-all")
 
     assert response.status_code == 200
@@ -943,7 +943,9 @@ def test_score_all_unexpected_db_error_returns_500(client):
     scoring) is an unclassified error and must be wrapped by _http_exc_for
     with an opaque error-id, not surfaced as a raw framework 500 (#276).
     """
-    with patch("academic_paper.server.get_all_papers_for_scoring", side_effect=RuntimeError("db down")):
+    with patch(
+        "academic_paper.services.summary_service.get_all_papers_for_scoring", side_effect=RuntimeError("db down")
+    ):
         response = client.post("/papers/score-all")
     assert response.status_code == 500
     assert "db down" not in response.json()["detail"]
@@ -961,7 +963,7 @@ def test_list_papers_unexpected_error_returns_500(client):
 
 def test_get_paper_unexpected_error_returns_500(client):
     """GET /papers/{paper_id}: unclassified errors must map through _http_exc_for (#276)."""
-    with patch("academic_paper.server.get_paper", side_effect=RuntimeError("disk error")):
+    with patch("academic_paper.services.summary_service.get_paper", side_effect=RuntimeError("disk error")):
         response = client.get("/papers/1")
     assert response.status_code == 500
     assert "disk error" not in response.json()["detail"]
@@ -974,7 +976,7 @@ def test_score_paper_unexpected_error_returns_500(client, temp_db):
     paper_id = save_paper(conn, "paper.pdf", "hash_sc_err")
     conn.close()
 
-    with patch("academic_paper.server.compute_score", side_effect=RuntimeError("boom")):
+    with patch("academic_paper.services.summary_service.compute_score", side_effect=RuntimeError("boom")):
         response = client.post(f"/papers/{paper_id}/score")
     assert response.status_code == 500
     assert "boom" not in response.json()["detail"]
@@ -983,7 +985,7 @@ def test_score_paper_unexpected_error_returns_500(client, temp_db):
 
 def test_list_summaries_unexpected_error_returns_500(client):
     """GET /summaries: unclassified errors must map through _http_exc_for (#276)."""
-    with patch("academic_paper.server.list_summaries", side_effect=RuntimeError("disk error")):
+    with patch("academic_paper.services.summary_service.list_summaries", side_effect=RuntimeError("disk error")):
         response = client.get("/summaries")
     assert response.status_code == 500
     assert "disk error" not in response.json()["detail"]
