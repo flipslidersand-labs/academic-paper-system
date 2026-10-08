@@ -1,0 +1,70 @@
+name: Lock Update
+
+# requirements.lock を週次で --upgrade し、差分があれば PR を作る (#521)。
+# GITHUB_TOKEN で作った PR / push は CI を起動しないため、PR 作成後に
+# `gh workflow run ci.yml` (workflow_dispatch) で CI を明示起動する。
+
+on:
+  schedule:
+    - cron: "0 18 * * 0" # 月曜 03:00 JST
+  workflow_dispatch:
+
+concurrency:
+  group: lock-update
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+env:
+  BRANCH: chore/update-requirements-lock
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-tools
+        run: pip install pip-tools
+
+      - name: Regenerate requirements.lock
+        run: scripts/update-lock.sh --upgrade
+
+      - name: Detect changes
+        id: diff
+        run: |
+          if git diff --quiet -- requirements.lock; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "requirements.lock is up to date; no PR."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit, push and open PR
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add requirements.lock
+          git commit -m "chore(deps): update requirements.lock"
+          git push --force origin "$BRANCH"
+
+          if [ -z "$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number')" ]; then
+            gh pr create --base main --head "$BRANCH" \
+              --title "chore(deps): update requirements.lock" \
+              --body "Weekly \`scripts/update-lock.sh --upgrade\` result (lock-update workflow). CI is started explicitly via workflow_dispatch because GITHUB_TOKEN-created PRs do not trigger workflows."
+          fi
+
+          # GITHUB_TOKEN の push は CI を起動しない。workflow_dispatch は例外的に起動できる。
+          gh workflow run ci.yml --ref "$BRANCH"
