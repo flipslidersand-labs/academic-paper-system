@@ -25,7 +25,7 @@ import httpx
 from cli_utils import iso_date
 from ingest_client import submit_and_wait
 
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 _ALLOWED_SCHEMES = {"http", "https"}
@@ -145,7 +145,7 @@ def download_pdf(client: httpx.Client, url: str, timeout: int = 60, max_mb: int 
     the content-type doesn't match), when the downloaded body doesn't start
     with the "%PDF-" magic number (guards against a server that spoofs the
     content-type header), or when the cumulative downloaded size exceeds
-    *max_mb* (defaults to ``settings.max_upload_mb``, the same limit the
+    *max_mb* (defaults to ``get_settings().max_upload_mb``, the same limit the
     server enforces on ``/papers/ingest``), aborting the stream immediately
     to avoid exhausting disk on an oversized or unbounded response.
 
@@ -155,7 +155,7 @@ def download_pdf(client: httpx.Client, url: str, timeout: int = 60, max_mb: int 
     which previously let a third-party API's URL redirect straight past the
     guard into internal infrastructure (#278).
     """
-    max_bytes = (max_mb if max_mb is not None else settings.max_upload_mb) * 1024 * 1024
+    max_bytes = (max_mb if max_mb is not None else get_settings().max_upload_mb) * 1024 * 1024
     tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
     tmp_path = tmp.name
     tmp.close()
