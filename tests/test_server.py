@@ -720,6 +720,44 @@ def test_ingest_async_job_failed_when_paper_status_update_raises(client):
     assert job["errors"]
 
 
+def test_safe_error_message_hides_internal_url_and_names_timeouts():
+    """Regression (#474): job/score errors must not carry str(exc) (internal URLs),
+    and an empty-str TimeoutError is still reported by name."""
+    from academic_paper.server import _safe_error_message
+
+    req = httpx.Request("POST", "http://10.0.0.5:9092/embed/batch")
+    http_err = httpx.HTTPStatusError(
+        "500 for url 'http://10.0.0.5:9092/embed/batch'", request=req, response=httpx.Response(500, request=req)
+    )
+    # HTTPStatusError is not a connect/timeout error → unclassified, opaque error-id
+    msg = _safe_error_message(http_err)
+    assert "10.0.0.5" not in msg and "9092" not in msg and "http" not in msg
+    conn_msg = _safe_error_message(httpx.ConnectError("conn refused http://10.0.0.5:9092"))
+    assert "10.0.0.5" not in conn_msg and conn_msg
+    assert _safe_error_message(TimeoutError()) == "TimeoutError"
+    assert _safe_error_message(ValueError("secret http://10.0.0.5")) == "ValueError"
+
+
+def test_ingest_async_job_errors_do_not_leak_internal_url(client):
+    """Regression (#474): GET /jobs errors for a failed background ingest omit the upstream URL."""
+    pdf_content = create_minimal_pdf()
+    client.app.state.embedder.embed = AsyncMock(
+        side_effect=httpx.ConnectError("All connection attempts failed for http://10.0.0.5:9092/embed/batch")
+    )
+    with patch("academic_paper.server.extract_text") as mock_extract:
+        mock_extract.return_value = [{"page": 1, "text": "Some text"}]
+        response = client.post(
+            "/papers/ingest",
+            files={"file": ("leak.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert response.status_code == 202
+        job = _wait_for_job(client, response.json()["job_id"])
+
+    assert job["status"] == "failed"
+    assert job["errors"]
+    assert all("10.0.0.5" not in err and "9092" not in err for err in job["errors"])
+
+
 def test_list_papers_pagination(client, temp_db):
     """Test GET /papers pagination with limit and offset."""
     conn = get_connection(temp_db)
@@ -1401,6 +1439,55 @@ def test_shutdown_lets_fast_ingest_task_finish(capsys, temp_db, monkeypatch):
     assert task.done() and not task.cancelled()
     assert task.result() == "done"
     assert "did not finish in 30s" not in capsys.readouterr().out
+
+
+def test_lifespan_awaits_llm_aclose_on_shutdown(temp_db):
+    """Shutdown awaits app.state.llm.aclose() (#498)."""
+    mock_llm = MagicMock()
+    mock_llm.aclose = AsyncMock()
+    p1, p2, p3 = _lifespan_client(temp_db)
+    with (
+        patch.object(settings, "llm_provider", "gemini"),
+        patch("academic_paper.server.get_llm_client", return_value=mock_llm),
+        patch("academic_paper.server.RAGSummarizer"),
+        p1,
+        p2,
+        p3,
+    ):
+        with TestClient(app):
+            pass
+
+    mock_llm.aclose.assert_awaited_once()
+
+
+def test_lifespan_llm_provider_none(temp_db):
+    """LLM_PROVIDER=none starts and stops cleanly with no LLM/summarizer (#498)."""
+    p1, p2, p3 = _lifespan_client(temp_db)
+    with patch.object(settings, "llm_provider", "none"), p1, p2, p3:
+        with TestClient(app) as c:
+            assert c.app.state.llm is None
+            assert c.app.state.summarizer is None
+
+
+def test_lifespan_injected_ollama_client_closed_exactly_once(temp_db):
+    """The lifespan-created ollama client is injected, closed once by the lifespan, not by llm.aclose() (#498)."""
+    http = MagicMock(spec=httpx.AsyncClient)
+    http.aclose = AsyncMock()
+    p1, p2, p3 = _lifespan_client(temp_db)
+    with (
+        patch.object(settings, "llm_provider", "ollama"),
+        patch("academic_paper.server.httpx.AsyncClient", return_value=http),
+        p1,
+        p2,
+        p3,
+    ):
+        with TestClient(app) as c:
+            assert c.app.state.llm._client is http
+            assert c.app.state.llm._owns_client is False
+
+    # embed_client is also created via the patched AsyncClient, so it shares this mock;
+    # one close each (embed + ollama) = 2, never 3 (no extra close from llm.aclose()).
+    assert http.aclose.await_count == 2
 
 
 # --- _cleanup_orphaned_ingests tests (#194) ---

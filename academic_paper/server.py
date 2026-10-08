@@ -1,7 +1,6 @@
 """FastAPI server for academic paper ingestion and retrieval."""
 
 import asyncio
-import hmac
 import logging
 import os
 import re
@@ -17,6 +16,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from academic_paper.auth import require_scope
 from academic_paper.chunker import chunk_pages
 from academic_paper.config import settings
 from academic_paper.db import (
@@ -38,7 +38,7 @@ from academic_paper.embedder import EmbedderClient
 from academic_paper.errors import _http_exc_for  # noqa: F401  (re-exported for backward compat, #614)
 from academic_paper.extractor import extract_text, hash_file
 from academic_paper.jobs import job_store
-from academic_paper.llm import OllamaClient, get_llm_client
+from academic_paper.llm import get_llm_client
 from academic_paper.logging_config import configure_logging
 from academic_paper.models import PaperSummary
 from academic_paper.scorer import compute_score
@@ -120,13 +120,14 @@ async def lifespan(app: FastAPI):
     embed_client = httpx.AsyncClient(timeout=settings.embedding_timeout)
     app.state.embedder = EmbedderClient(client=embed_client)
     app.state.vector_store = QdrantStore()
-    # Build OllamaClient with a lifespan-managed persistent AsyncClient so TCP
-    # connections are reused across summarize-all iterations (#192).
+    # Ollama gets a lifespan-managed persistent AsyncClient so TCP connections are
+    # reused across summarize-all iterations (#192). The client is injected (not
+    # owned by the LLM client), so this lifespan closes it.
     ollama_http_client: httpx.AsyncClient | None = None
-    llm_client = get_llm_client()
-    if isinstance(llm_client, OllamaClient):
+    provider = settings.llm_provider
+    if provider == "ollama" or (provider == "auto" and not settings.google_api_key and settings.ollama_url):
         ollama_http_client = httpx.AsyncClient(timeout=settings.ollama_timeout)
-        llm_client._client = ollama_http_client
+    llm_client = get_llm_client(http_client=ollama_http_client)
     app.state.llm = llm_client
     if llm_client is not None:
         app.state.summarizer = RAGSummarizer(llm_client, app.state.vector_store, app.state.embedder)
@@ -153,12 +154,17 @@ async def lifespan(app: FastAPI):
                 t.cancel()
     app.state.probe_task.cancel()
     await embed_client.aclose()
+    if app.state.llm is not None:
+        await app.state.llm.aclose()
     if ollama_http_client is not None:
         await ollama_http_client.aclose()
     await app.state.vector_store.aclose()
 
 
 app = FastAPI(title="Academic Paper System", lifespan=lifespan)
+
+
+_require_authenticated = require_scope()  # any valid key, no scope required (#602)
 
 
 async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
@@ -171,18 +177,7 @@ async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-A
     Uses hmac.compare_digest for constant-time comparison to prevent
     timing attacks that could leak key length / prefix (#190).
     """
-    configured = settings.accepted_api_keys  # api_key + api_keys (#601)
-    if not configured:
-        return  # auth disabled
-    # hmac.compare_digest raises TypeError on str with non-ASCII characters;
-    # comparing as UTF-8 bytes accepts any header value and just fails the
-    # comparison instead of turning an unauthenticated request into a 500 (#425).
-    provided = (x_api_key or "").encode("utf-8")
-    # Compare against every candidate without short-circuiting so timing does not
-    # reveal which configured key (if any) matched (#601).
-    matches = [hmac.compare_digest(provided, key.encode("utf-8")) for key in configured]
-    if not any(matches):
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    await _require_authenticated(x_api_key)
 
 
 # /metrics is added by Instrumentator.expose() rather than manually registered, so it
@@ -190,6 +185,23 @@ async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-A
 # dependency (#299 — request-path counters and latency histograms are otherwise
 # readable without auth whenever API_KEY is set).
 Instrumentator().instrument(app).expose(app, dependencies=[Depends(verify_api_key)])
+
+
+def _safe_error_message(exc: Exception) -> str:
+    """Short, classified error text safe to expose in job/score errors (#474).
+
+    Never includes str(exc): httpx/Qdrant/Ollama exception strings embed internal
+    URLs, and the job errors reach public Actions logs/artifacts. Classification
+    reuses _http_exc_for (details go to the logger only). Builtin TimeoutError has
+    an empty str(), so it is reported by class name.
+    """
+    if isinstance(exc, TimeoutError):
+        return "TimeoutError"
+    http_exc = _http_exc_for(exc, "")
+    if http_exc.status_code == 400:
+        # Plain ValueError (input validation): the message may carry arbitrary content.
+        return type(exc).__name__
+    return str(http_exc.detail)
 
 
 async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_name: str) -> int:
@@ -324,7 +336,7 @@ async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str,
             # so a failed paper is not returned by vector search (#471).
             await _compensate_qdrant(paper_id)
             job.failed = 1
-            job.errors.append(f"paper_id={paper_id}: {str(e) or type(e).__name__}")
+            job.errors.append(f"paper_id={paper_id}: {_safe_error_message(e)}")
             job.status = "failed"
         finally:
             job.finished_at = time.time()
@@ -619,7 +631,7 @@ def score_all_papers():
                 except Exception as e:
                     logger.exception("Scoring failed for paper_id=%s", paper.get("id"))
                     failed += 1
-                    errors.append(f"paper_id={paper.get('id')}: {str(e) or type(e).__name__}")
+                    errors.append(f"paper_id={paper.get('id')}: {_safe_error_message(e)}")
         return {
             "total": len(papers),
             "scored": scored,
@@ -712,13 +724,13 @@ async def _run_summarize_all(job_id: str) -> None:
             except Exception as e:
                 logger.exception("Background summarize failed for paper_id=%s", paper_id)
                 job.failed += 1
-                job.errors.append(f"paper_id={paper_id}: {e}")
+                job.errors.append(f"paper_id={paper_id}: {_safe_error_message(e)}")
 
         job.status = "done"
     except Exception as e:
         logger.exception("Background summarize-all job=%s failed", job_id)
         job.status = "failed"
-        job.errors.append(str(e))
+        job.errors.append(_safe_error_message(e))
     finally:
         job.finished_at = time.time()
         await job_store.persist(job)

@@ -3,6 +3,11 @@
 from academic_paper.hybrid import rrf_merge
 
 
+def _resolved(points, qid_to_cid):
+    """Mirror search_service: Qdrant payloads carry no chunk_id; it is resolved via chunks.qdrant_id."""
+    return [{**p, "payload": {**p["payload"], "chunk_id": qid_to_cid[p["id"]]}} for p in points]
+
+
 def test_rrf_merge_combines_results():
     """Test that RRF merge combines FTS and vector results with rrf_score."""
     fts_results = [
@@ -13,16 +18,16 @@ def test_rrf_merge_combines_results():
         {
             "id": "vec-1",
             "score": 0.95,
-            "payload": {"chunk_id": 2, "paper_id": 1, "chunk_index": 1, "text": "Neural networks"},
+            "payload": {"paper_id": 1, "chunk_index": 1, "text": "Neural networks"},
         },
         {
             "id": "vec-2",
             "score": 0.80,
-            "payload": {"chunk_id": 3, "paper_id": 1, "chunk_index": 2, "text": "Deep learning models"},
+            "payload": {"paper_id": 1, "chunk_index": 2, "text": "Deep learning models"},
         },
     ]
 
-    result = rrf_merge(fts_results, vector_results, k=60)
+    result = rrf_merge(fts_results, _resolved(vector_results, {"vec-1": 2, "vec-2": 3}), k=60)
 
     assert len(result) == 3
     assert result[0]["chunk_id"] == 2  # chunk 2 appears in both, should be ranked first
@@ -39,16 +44,16 @@ def test_rrf_merge_both_sources_boost_score():
         {
             "id": "vec-1",
             "score": 0.95,
-            "payload": {"chunk_id": 1, "paper_id": 1, "chunk_index": 0, "text": "Test chunk"},
+            "payload": {"paper_id": 1, "chunk_index": 0, "text": "Test chunk"},
         },
         {
             "id": "vec-2",
             "score": 0.80,
-            "payload": {"chunk_id": 2, "paper_id": 1, "chunk_index": 1, "text": "Other chunk"},
+            "payload": {"paper_id": 1, "chunk_index": 1, "text": "Other chunk"},
         },
     ]
 
-    result = rrf_merge(fts_results, vector_results, k=60)
+    result = rrf_merge(fts_results, _resolved(vector_results, {"vec-1": 1, "vec-2": 2}), k=60)
 
     # Find scores for chunk 1 (in both) and chunk 2 (in vector only)
     chunk_1_score = next(r["rrf_score"] for r in result if r["chunk_id"] == 1)
@@ -62,10 +67,10 @@ def test_rrf_merge_empty_inputs():
     # Empty FTS, non-empty vector
     fts_results = []
     vector_results = [
-        {"id": "vec-1", "score": 0.95, "payload": {"chunk_id": 1, "paper_id": 1, "chunk_index": 0, "text": "Test"}},
+        {"id": "vec-1", "score": 0.95, "payload": {"paper_id": 1, "chunk_index": 0, "text": "Test"}},
     ]
 
-    result = rrf_merge(fts_results, vector_results)
+    result = rrf_merge(fts_results, _resolved(vector_results, {"vec-1": 1}))
     assert len(result) == 1
     assert result[0]["chunk_id"] == 1
 
@@ -91,10 +96,10 @@ def test_rrf_merge_skips_vector_result_without_chunk_id():
     ]
     vector_results = [
         {"id": "vec-no-id", "score": 0.9, "payload": {"paper_id": 1}},  # no chunk_id
-        {"id": "vec-ok", "score": 0.8, "payload": {"chunk_id": 2, "paper_id": 1, "chunk_index": 1, "text": "Other"}},
+        {"id": "vec-ok", "score": 0.8, "payload": {"paper_id": 1, "chunk_index": 1, "text": "Other"}},
     ]
 
-    result = rrf_merge(fts_results, vector_results)
+    result = rrf_merge(fts_results, [vector_results[0], *_resolved(vector_results[1:], {"vec-ok": 2})])
 
     ids = [r["chunk_id"] for r in result]
     assert 2 in ids
@@ -120,3 +125,15 @@ def test_rrf_merge_sorted_by_score():
     assert result[0]["chunk_id"] == 1
     assert result[1]["chunk_id"] == 2
     assert result[2]["chunk_id"] == 3
+
+
+def test_rrf_merge_tolerates_none_payload():
+    """A vector point with payload=None is skipped instead of raising (#497)."""
+    fts_results = [
+        {"chunk_id": 1, "paper_id": 1, "chunk_index": 0, "text": "Test", "rank": -5.0},
+    ]
+    vector_results = [{"id": "vec-none", "score": 0.9, "payload": None}]
+
+    result = rrf_merge(fts_results, vector_results)
+
+    assert [r["chunk_id"] for r in result] == [1]
