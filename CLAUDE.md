@@ -59,7 +59,7 @@ uvicorn academic_paper.server:app --reload --port 8020
 詳細なスキーマ (リクエスト/レスポンスの全フィールド) は起動中サーバーの `/docs` (OpenAPI) を参照。正本は `academic_paper/server.py`。
 以下の表は全エンドポイントの一覧、続く節は注意点のみを記す。
 
-認証: `API_KEY` 環境変数が設定されている場合、「要」のエンドポイントは `X-API-Key` ヘッダーが必須 (不一致は 401)。空なら認証無効。
+認証: `API_KEY` 環境変数が設定されている場合、「要」のエンドポイントは `X-API-Key` ヘッダーが必須 (不一致は 401)。`API_KEY`/`API_KEYS` が両方空で `AUTH_DISABLED=true` も未指定なら起動拒否 (fail-closed, #646)。認証なしで動かすには `AUTH_DISABLED=true` を明示する。
 
 | Method | Path | 認証 | 概要 |
 |--------|------|------|------|
@@ -262,7 +262,8 @@ title / authors / categories / published_date / source: 任意のメタデータ
 | `LLM_GENERATE_TIMEOUT` | 要約時の `llm.generate()` 上限秒 | `903` |
 | `SUMMARIZE_TOTAL_TIMEOUT` | `summarize()` 全体の上限秒 | `1063` |
 | `PORT` | API サーバーポート | `8020` |
-| `API_KEY` | `/health` 以外の全エンドポイントの X-API-Key（読み取り系含む。空=認証無効） | (空) |
+| `API_KEY` | `/health` 以外の全エンドポイントの X-API-Key（読み取り系含む。`API_KEY`/`API_KEYS` 両方空かつ `AUTH_DISABLED` 未指定なら起動拒否） | (空) |
+| `AUTH_DISABLED` | `true` で認証なし起動を明示許可（既定 false, #646） | false |
 | `PAPER_API_KEY` | コレクタ側が送る X-API-Key（cron は repo secret 経由） | (空) |
 | `SEMANTIC_SCHOLAR_API_KEY` | `scripts/semantic_scholar_collect.py` 用 API キー（`--api-key` でも指定可。サーバー設定ではない） | (空) |
 | `DISCORD_WEBHOOK_URL` | arxiv-daily.yml の失敗/結果通知先（**repo secret 必須**。未設定だと通知が無効化され、schedule 実行の失敗は Notify ステップが exit 1 で表面化する。登録はオペレーター手動作業 #481） | (未設定) |
