@@ -370,3 +370,46 @@ def test_failed_write_does_not_hold_write_lock_for_other_connections(temp_db):
     finally:
         conn.close()
         other.close()
+
+
+# --- summaries columns derived from PaperSummary (#530) ---
+
+
+def test_summaries_ddl_matches_paper_summary_fields(temp_db):
+    """DDL is hand-written; fail loudly if it drifts from PaperSummary.model_fields."""
+    from academic_paper.db import SUMMARY_COLUMNS
+
+    init_db(temp_db)
+    conn = get_connection(temp_db)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(summaries)")}
+    conn.close()
+    assert set(SUMMARY_COLUMNS) <= cols
+    assert cols == set(SUMMARY_COLUMNS) | {"id", "paper_id", "model"}
+
+
+def test_save_summary_roundtrip_get_and_list(temp_db):
+    from academic_paper.db import get_summary, list_summaries, save_summary
+
+    init_db(temp_db)
+    conn = get_connection(temp_db)
+    paper_id = save_paper(conn, "a.pdf", "hash-a", title="T")
+    s1 = {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k1", "k2"]}
+    save_summary(conn, paper_id, "mdl", s1)
+
+    got = get_summary(conn, paper_id)
+    assert got["model"] == "mdl"
+    assert (got["objective"], got["method"], got["results"], got["limitations"]) == ("o", "m", "r", "l")
+    assert got["keywords"] == ["k1", "k2"]
+    assert got["raw_json"] == s1
+
+    total, items = list_summaries(conn)
+    assert total == 1
+    assert items[0]["objective"] == "o" and items[0]["keywords"] == ["k1", "k2"]
+    assert items[0]["title"] == "T"
+
+    # upsert overwrites; missing fields default to ""
+    save_summary(conn, paper_id, "mdl2", {"objective": "new"})
+    got = get_summary(conn, paper_id)
+    assert got["model"] == "mdl2" and got["objective"] == "new" and got["method"] == ""
+    assert got["keywords"] is not None
+    conn.close()
