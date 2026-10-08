@@ -48,6 +48,8 @@ dev = [
     "ruff==0.16.8",
     "respx>=0.21",
     "fpdf2>=2.7",
+    # tests/test_watchdog_workflow.py parses workflow YAML (#517).
+    "pyyaml>=6.0",
 ]
 
 [project.urls]

@@ -168,6 +168,24 @@ ruff is pinned in three places that must match: `pyproject.toml` (dev extra
 they drift (e.g. a Dependabot bump of only `pyproject.toml`), so bump all three
 in the same PR.
 
+## Scheduled workflow watchdog
+
+`.github/workflows/scheduled-watchdog.yml` (GitHub-hosted `ubuntu-latest`, every 3 hours + manual dispatch) watches the
+self-hosted-runner cron workflows. A job that never gets a runner runs no steps, so its own notifications cannot fire (#499).
+It runs `scripts/watchdog_check.py` against `gh run list` output and fails when:
+
+| Condition | Threshold | Rationale |
+|-----------|-----------|-----------|
+| a run stays `queued` | > 3h | GitHub cancels queued jobs after 24h; 3h catches a dead runner early |
+| latest completed run is `cancelled` / `failure` | - | the failure was not otherwise noticed |
+| last `success` too old | `arxiv-daily` 26h, `portfolio-publish` ~170h | daily cron + 2h slack; weekly cron (Sun) + ~2h slack |
+
+On a violation the job exits 1 (red run in the Actions tab) and posts the violation lines plus the run URL to Discord.
+Read the message as `<workflow name>: <reason>`; run `gh run list --workflow <file>` to investigate.
+The Discord step uses the `DISCORD_WEBHOOK_URL` repository secret (same one as `arxiv-daily.yml`); if it is unset the
+notification is skipped and only the red run remains. `tests/test_watchdog_workflow.py` guards that the watchdog stays
+on GitHub-hosted runners, keeps `actions: read` only, covers both workflows and has a timeout.
+
 ## License
 
 MIT
