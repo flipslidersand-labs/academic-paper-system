@@ -10,4 +10,3 @@ def test_papers_routes_registered_on_router_and_in_openapi():
     assert "get" in paths["/papers"]
     assert "get" in paths["/papers/{paper_id}"]
     assert {r.path for r in router.routes} == {"/papers/ingest", "/papers", "/papers/{paper_id}"}
-
