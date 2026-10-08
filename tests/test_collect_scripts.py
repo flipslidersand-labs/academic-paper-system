@@ -504,3 +504,65 @@ def test_openalex_ingest_paper_metadata_source(monkeypatch):
         "published_date": "",
         "source": "openalex",
     }
+
+
+# --- #528: pubmed uses shared helpers ---
+
+
+def _run_pubmed_main(monkeypatch, argv):
+    monkeypatch.setattr("sys.argv", ["pubmed_collect", *argv])
+    pubmed_collect.main()
+
+
+def test_pubmed_zero_results_writes_zero_summary_and_exits_0(monkeypatch, tmp_path):
+    monkeypatch.setattr(pubmed_collect, "fetch_pmc_ids", lambda *a, **k: [])
+    out = tmp_path / "s.json"
+    with pytest.raises(SystemExit) as ei:
+        _run_pubmed_main(monkeypatch, ["--summary-file", str(out)])
+    assert ei.value.code == 0
+    assert json.loads(out.read_text()) == {"fetched": 0, "ingested": 0, "duplicate": 0, "failed": 0, "detail": []}
+
+
+def test_pubmed_fetch_failure_keeps_current_behavior_no_summary(monkeypatch, tmp_path):
+    # NEEDS_CONFIRMATION (#528): writing fetch_error here is undecided; current behavior is exit 1, no summary.
+    def _boom(*a, **k):
+        raise RuntimeError("ncbi down")
+
+    monkeypatch.setattr(pubmed_collect, "fetch_pmc_ids", _boom)
+    out = tmp_path / "s.json"
+    with pytest.raises(SystemExit) as ei:
+        _run_pubmed_main(monkeypatch, ["--summary-file", str(out)])
+    assert ei.value.code == 1
+    assert not out.exists()
+
+
+def test_pubmed_ingest_paper_metadata_source(monkeypatch):
+    captured = _capture_ingest(monkeypatch)
+    paper = {"pmc_id": "123", "title": "T", "authors": ["A"], "pub_date": None, "categories": ["x"]}
+    result = pubmed_collect.ingest_paper(None, paper, "http://api")
+    assert result["label"] == "PMC123"
+    assert captured["file_name"] == "pmc_123.pdf"
+    assert captured["metadata"] == {
+        "title": "T",
+        "authors": json.dumps(["A"]),
+        "categories": json.dumps(["x"]),
+        "published_date": "",
+        "source": "pubmed",
+    }
+
+
+def test_pubmed_main_keeps_rate_limit_sleep_and_shared_client(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(pubmed_collect.time, "sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(pubmed_collect, "fetch_pmc_ids", lambda *a, **k: ["1"])
+    seen = {}
+
+    def _meta(ids, client, api_key=""):
+        seen["client"] = client
+        return [{"pmc_id": "1", "title": "T", "authors": [], "pub_date": None, "categories": []}]
+
+    monkeypatch.setattr(pubmed_collect, "fetch_paper_metadata", _meta)
+    monkeypatch.setattr(pubmed_collect, "ingest_paper", lambda *a, **k: {"status": "ingested", "label": "PMC1"})
+    _run_pubmed_main(monkeypatch, [])
+    assert isinstance(seen["client"], httpx.Client)
+    assert sleeps.count(0.34) == 2  # before metadata fetch + per-paper ingest
