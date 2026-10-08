@@ -38,7 +38,7 @@ from academic_paper.embedder import EmbedderClient
 from academic_paper.errors import _http_exc_for  # noqa: F401  (re-exported for backward compat, #614)
 from academic_paper.extractor import extract_text, hash_file
 from academic_paper.jobs import job_store
-from academic_paper.llm import OllamaClient, get_llm_client
+from academic_paper.llm import get_llm_client
 from academic_paper.logging_config import configure_logging
 from academic_paper.models import PaperSummary
 from academic_paper.scorer import compute_score
@@ -120,13 +120,14 @@ async def lifespan(app: FastAPI):
     embed_client = httpx.AsyncClient(timeout=settings.embedding_timeout)
     app.state.embedder = EmbedderClient(client=embed_client)
     app.state.vector_store = QdrantStore()
-    # Build OllamaClient with a lifespan-managed persistent AsyncClient so TCP
-    # connections are reused across summarize-all iterations (#192).
+    # Ollama gets a lifespan-managed persistent AsyncClient so TCP connections are
+    # reused across summarize-all iterations (#192). The client is injected (not
+    # owned by the LLM client), so this lifespan closes it.
     ollama_http_client: httpx.AsyncClient | None = None
-    llm_client = get_llm_client()
-    if isinstance(llm_client, OllamaClient):
+    provider = settings.llm_provider
+    if provider == "ollama" or (provider == "auto" and not settings.google_api_key and settings.ollama_url):
         ollama_http_client = httpx.AsyncClient(timeout=settings.ollama_timeout)
-        llm_client._client = ollama_http_client
+    llm_client = get_llm_client(http_client=ollama_http_client)
     app.state.llm = llm_client
     if llm_client is not None:
         app.state.summarizer = RAGSummarizer(llm_client, app.state.vector_store, app.state.embedder)
@@ -153,6 +154,8 @@ async def lifespan(app: FastAPI):
                 t.cancel()
     app.state.probe_task.cancel()
     await embed_client.aclose()
+    if app.state.llm is not None:
+        await app.state.llm.aclose()
     if ollama_http_client is not None:
         await ollama_http_client.aclose()
     await app.state.vector_store.aclose()
