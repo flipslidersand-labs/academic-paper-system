@@ -720,6 +720,44 @@ def test_ingest_async_job_failed_when_paper_status_update_raises(client):
     assert job["errors"]
 
 
+def test_safe_error_message_hides_internal_url_and_names_timeouts():
+    """Regression (#474): job/score errors must not carry str(exc) (internal URLs),
+    and an empty-str TimeoutError is still reported by name."""
+    from academic_paper.server import _safe_error_message
+
+    req = httpx.Request("POST", "http://10.0.0.5:9092/embed/batch")
+    http_err = httpx.HTTPStatusError(
+        "500 for url 'http://10.0.0.5:9092/embed/batch'", request=req, response=httpx.Response(500, request=req)
+    )
+    # HTTPStatusError is not a connect/timeout error → unclassified, opaque error-id
+    msg = _safe_error_message(http_err)
+    assert "10.0.0.5" not in msg and "9092" not in msg and "http" not in msg
+    conn_msg = _safe_error_message(httpx.ConnectError("conn refused http://10.0.0.5:9092"))
+    assert "10.0.0.5" not in conn_msg and conn_msg
+    assert _safe_error_message(TimeoutError()) == "TimeoutError"
+    assert _safe_error_message(ValueError("secret http://10.0.0.5")) == "ValueError"
+
+
+def test_ingest_async_job_errors_do_not_leak_internal_url(client):
+    """Regression (#474): GET /jobs errors for a failed background ingest omit the upstream URL."""
+    pdf_content = create_minimal_pdf()
+    client.app.state.embedder.embed = AsyncMock(
+        side_effect=httpx.ConnectError("All connection attempts failed for http://10.0.0.5:9092/embed/batch")
+    )
+    with patch("academic_paper.server.extract_text") as mock_extract:
+        mock_extract.return_value = [{"page": 1, "text": "Some text"}]
+        response = client.post(
+            "/papers/ingest",
+            files={"file": ("leak.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert response.status_code == 202
+        job = _wait_for_job(client, response.json()["job_id"])
+
+    assert job["status"] == "failed"
+    assert job["errors"]
+    assert all("10.0.0.5" not in err and "9092" not in err for err in job["errors"])
+
+
 def test_list_papers_pagination(client, temp_db):
     """Test GET /papers pagination with limit and offset."""
     conn = get_connection(temp_db)
