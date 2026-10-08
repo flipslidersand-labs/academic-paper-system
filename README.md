@@ -19,7 +19,7 @@ PDF upload
 ## API
 
 Every endpoint except `GET /health` requires the `X-API-Key` header when the
-`API_KEY` env var is set (auth is disabled when it is unset).
+`API_KEY` env var is set (the server refuses to start when it is unset, unless `AUTH_DISABLED=true` is set explicitly).
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|

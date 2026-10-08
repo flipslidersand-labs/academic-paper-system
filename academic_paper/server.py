@@ -111,6 +111,12 @@ async def _cleanup_orphaned_ingests(app: FastAPI) -> None:
 async def lifespan(app: FastAPI):
     """Initialize database and services on startup."""
     configure_logging(level=settings.log_level, fmt=settings.log_format)
+    # Fail closed: no API key configured and auth not explicitly disabled (#646).
+    if not settings.accepted_api_keys and not settings.auth_disabled:
+        raise RuntimeError(
+            "API_KEY / API_KEYS is not set. Refusing to start with unauthenticated endpoints; "
+            "set API_KEY (or API_KEYS), or set AUTH_DISABLED=true to run without authentication explicitly (#646)."
+        )
     setup_telemetry(app, settings.otel_endpoint)
     init_db(settings.academic_db)
     await job_store.init(settings.academic_db)
@@ -140,7 +146,7 @@ async def lifespan(app: FastAPI):
     app.state.probe_task = asyncio.create_task(_probe_startup_health(app))
     await _cleanup_orphaned_ingests(app)
     if not settings.accepted_api_keys:
-        logger.warning("API_KEY is not set — all endpoints (including write endpoints) are unauthenticated (#241)")
+        logger.warning("AUTH_DISABLED=true — all endpoints (including write endpoints) are unauthenticated (#241)")
     yield
     # Graceful shutdown: wait up to 30 s for in-flight ingest tasks (#194).
     active = list(app.state.active_ingest_tasks)
