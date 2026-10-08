@@ -11,7 +11,7 @@ from academic_paper.retry import async_with_retry
 _GEMINI_RETRYABLE = (genai_errors.ServerError, httpx.NetworkError, httpx.TimeoutException)
 _OLLAMA_RETRYABLE = (httpx.NetworkError, httpx.TimeoutException)
 
-GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = "gemini-2.0-flash"  # default for settings.gemini_model
 
 
 class BaseLLMClient(ABC):
@@ -48,13 +48,15 @@ class BaseLLMClient(ABC):
 class GeminiClient(BaseLLMClient):
     """Client for Google Gemini API."""
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None, model: str | None = None):
         """Initialize Gemini client.
 
         Args:
             api_key: Google API key. If None, uses settings.google_api_key
+            model: Model name. If None, uses settings.gemini_model
         """
         self.api_key = api_key or settings.google_api_key
+        self.model = model or settings.gemini_model
         from google import genai
         from google.genai.types import HttpOptions
 
@@ -79,21 +81,31 @@ class GeminiClient(BaseLLMClient):
         # event loop remains responsive during multi-second LLM generation (#149).
         # Retries transient server-side errors and timeout/network errors (#234, #264);
         # ClientError (4xx) is not retried.
+        # NOTE (#313): cancelling (e.g. summarize_total_timeout) stops further retry
+        # attempts, but an in-flight generate_content thread cannot be interrupted;
+        # it ends at the genai HTTP timeout (gemini_timeout_ms).
         response = await async_with_retry(
             asyncio.to_thread,
             self.client.models.generate_content,
-            model=GEMINI_MODEL,
+            model=self.model,
             contents=full_prompt,
             attempts=3,
             base_delay=1.0,
             exceptions=_GEMINI_RETRYABLE,
         )
-        return response.text
+        text = response.text
+        if text is None:
+            # text is None when candidates/parts are empty (safety/recitation block, etc.);
+            # BaseLLMClient.generate promises str, so fail with a descriptive error (#473).
+            candidates = getattr(response, "candidates", None) or []
+            finish_reason = getattr(candidates[0], "finish_reason", None) if candidates else None
+            raise ValueError(f"Gemini returned no text (finish_reason={finish_reason})")
+        return text
 
     @property
     def display_name(self) -> str:
         """Model name recorded alongside generated summaries (#347)."""
-        return GEMINI_MODEL
+        return self.model
 
     def close(self) -> None:
         """Close the underlying genai.Client HTTP session (#262)."""
@@ -174,16 +186,23 @@ class OllamaClient(BaseLLMClient):
 
 
 def get_llm_client() -> BaseLLMClient | None:
-    """Get appropriate LLM client based on configuration.
+    """Get LLM client based on settings.llm_provider.
 
-    Priority:
-    1. If GOOGLE_API_KEY is set, return GeminiClient
-    2. Else if OLLAMA_URL is set, return OllamaClient
-    3. Otherwise return None
-
-    Returns:
-        LLMClient instance or None if no configuration available
+    - auto (default): GeminiClient if GOOGLE_API_KEY is set, else OllamaClient
+      if OLLAMA_URL is set, else None
+    - gemini: GeminiClient; raises ValueError if GOOGLE_API_KEY is empty
+    - ollama: OllamaClient
+    - none: None (LLM disabled)
     """
+    provider = settings.llm_provider
+    if provider == "none":
+        return None
+    if provider == "gemini":
+        if not settings.google_api_key:
+            raise ValueError("LLM_PROVIDER=gemini requires GOOGLE_API_KEY to be set")
+        return GeminiClient()
+    if provider == "ollama":
+        return OllamaClient()
     if settings.google_api_key:
         return GeminiClient()
     if settings.ollama_url:

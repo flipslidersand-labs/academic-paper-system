@@ -20,6 +20,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPE
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
+from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
 from academic_paper.chunker import chunk_pages
 from academic_paper.config import settings
@@ -121,24 +122,10 @@ def _validate_published_date(value: str | None, field: str = "published_date") -
         )
 
 
-async def _check_embedding_svc(timeout: float = 3.0) -> None:
-    """Probe embedding-svc /health with the API key; raise on any error status.
-
-    Shared by the startup probe and /health so both use the same criteria —
-    a 401/403 means ingest/search are down just as surely as a 5xx (#142).
-    """
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.get(
-            f"{settings.embedding_svc_url}/health",
-            headers={"X-API-Key": settings.embedding_api_key},
-        )
-        resp.raise_for_status()
-
-
 async def _probe_startup_health(app: FastAPI) -> None:
     """Probe Qdrant and embedding-svc at startup; log warnings on failure."""
     try:
-        await asyncio.to_thread(app.state.vector_store.client.get_collections)
+        await app.state.vector_store.aping()
         logger.info("Startup probe OK: Qdrant")
     except Exception:
         logger.warning(
@@ -147,12 +134,12 @@ async def _probe_startup_health(app: FastAPI) -> None:
         )
 
     try:
-        await _check_embedding_svc(timeout=2.0)
+        await app.state.embedder.health(timeout=2.0)
         logger.info("Startup probe OK: embedding-svc")
     except Exception:
         logger.warning(
             "Startup probe: embedding-svc unreachable at %s — ingest/search will fail until available",
-            settings.embedding_svc_url,
+            app.state.embedder.base_url,
         )
 
 
@@ -258,13 +245,8 @@ def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
         # Checked before the generic ValueError branch below (#336): this is an
         # upstream protocol failure, not bad client input, so it maps to 502.
         return HTTPException(status_code=502, detail="Embedding service returned a mismatched vector count")
-    try:
-        from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
-
-        if isinstance(exc, (UnexpectedResponse, ResponseHandlingException)):
-            return HTTPException(status_code=502, detail="Vector store returned an unexpected response")
-    except ImportError:
-        pass
+    if isinstance(exc, (UnexpectedResponse, ResponseHandlingException)):
+        return HTTPException(status_code=502, detail="Vector store returned an unexpected response")
     if isinstance(exc, sqlite3.IntegrityError):
         return HTTPException(status_code=409, detail="Conflict: duplicate record")
     if isinstance(exc, ValueError):
@@ -332,9 +314,6 @@ async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_na
     with tracer.start_as_current_span("embed.batch"):
         embeddings = await app.state.embedder.embed(chunk_texts, mode="index")
 
-    if len(embeddings) != len(chunk_texts):
-        raise ValueError(f"Embedding count mismatch: expected {len(chunk_texts)} embeddings, got {len(embeddings)}")
-
     await app.state.vector_store.aensure_collection()
 
     points = []
@@ -373,6 +352,18 @@ async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_na
     return len(chunks_list)
 
 
+async def _compensate_qdrant(paper_id: int) -> None:
+    """Best-effort: delete a paper's Qdrant vectors after a failed ingest (#471).
+
+    Upsert is sent in batches, so a mid-way failure leaves earlier batches behind.
+    A failure here is logged and swallowed so it never masks the original error.
+    """
+    try:
+        await app.state.vector_store.adelete_by_paper_id(paper_id)
+    except Exception as exc:
+        logger.error("Qdrant compensation delete failed for paper_id=%s: %s", paper_id, exc)
+
+
 async def _mark_paper_failed(paper_id: int) -> None:
     """Best-effort: set a paper's status to 'failed' without blocking the event loop.
 
@@ -393,35 +384,48 @@ async def _mark_paper_failed(paper_id: int) -> None:
         logger.error("Failed to mark paper_id=%s as failed (job status still updated)", paper_id, exc_info=True)
 
 
-async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str, file_name: str) -> None:
-    """Background task: run the ingest pipeline, updating job + paper status."""
-    job = job_store.get(job_id)
-    if job is None:
-        return
-    job.status = "running"
-    job.total = 1
-    await job_store.persist(job)
+def _unlink_quiet(path: str) -> None:
     try:
-        chunks = await _ingest_pipeline(tmp_path, paper_id, file_hash, file_name)
-        job.result = {"paper_id": paper_id, "file_name": file_name, "chunks": chunks, "status": "indexed"}
-        job.processed = 1
-        job.status = "done"
-    except Exception as e:
-        logger.exception("Background ingest failed for paper_id=%s", paper_id)
-        # _mark_paper_failed never raises (#421): it swallows and logs its own
-        # errors, so the job attributes below always run afterward instead of
-        # being skipped by an exception from the paper-status write.
-        await _mark_paper_failed(paper_id)
-        job.failed = 1
-        job.errors.append(f"paper_id={paper_id}: {str(e) or type(e).__name__}")
-        job.status = "failed"
-    finally:
-        job.finished_at = time.time()
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str, file_name: str) -> None:
+    """Background task: run the ingest pipeline, updating job + paper status.
+
+    Owns ``tmp_path`` cleanup on every path, including the early return when
+    the job is gone and a failure in the initial ``persist`` (#454).
+    """
+    try:
+        job = job_store.get(job_id)
+        if job is None:
+            return
+        job.status = "running"
+        job.total = 1
         await job_store.persist(job)
         try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+            chunks = await _ingest_pipeline(tmp_path, paper_id, file_hash, file_name)
+            job.result = {"paper_id": paper_id, "file_name": file_name, "chunks": chunks, "status": "indexed"}
+            job.processed = 1
+            job.status = "done"
+        except Exception as e:
+            logger.exception("Background ingest failed for paper_id=%s", paper_id)
+            # _mark_paper_failed never raises (#421): it swallows and logs its own
+            # errors, so the job attributes below always run afterward instead of
+            # being skipped by an exception from the paper-status write.
+            await _mark_paper_failed(paper_id)
+            # Upsert may have partially succeeded (batched); remove leftover vectors
+            # so a failed paper is not returned by vector search (#471).
+            await _compensate_qdrant(paper_id)
+            job.failed = 1
+            job.errors.append(f"paper_id={paper_id}: {str(e) or type(e).__name__}")
+            job.status = "failed"
+        finally:
+            job.finished_at = time.time()
+            await job_store.persist(job)
+    finally:
+        _unlink_quiet(tmp_path)
 
 
 @app.post("/papers/ingest", dependencies=[Depends(verify_api_key)])
@@ -444,7 +448,8 @@ async def ingest_paper(
     Set `wait=true` to process synchronously and receive the indexed result (200).
 
     Raises:
-        HTTPException 409: File already ingested.
+        HTTPException 409: File already ingested, or the same file is currently
+            being ingested (existing row is 'indexed' or 'pending').
         HTTPException 413: File exceeds the max upload size.
         HTTPException 415: File is not a PDF (missing %PDF- magic bytes).
         HTTPException 422: Invalid metadata (non-ISO published_date, non-string list elements).
@@ -487,14 +492,19 @@ async def ingest_paper(
 
         with db_connection(settings.academic_db) as conn:
             cursor = conn.cursor()
-            # Only 409 when already successfully indexed; failed rows are removed
-            # so the same PDF can be re-uploaded after a partial failure (#145).
+            # 409 when already indexed or still being ingested ('pending'); failed rows
+            # are removed so the same PDF can be re-uploaded after a partial failure (#145).
+            # Deleting a 'pending' row would pull it out from under the running job and
+            # its compensating Qdrant delete could wipe the new paper's shared points (#496).
+            # Stale 'pending' rows from a killed server are turned 'failed' at startup.
             cursor.execute("SELECT id, status FROM papers WHERE file_hash = ?", (file_hash,))
             existing = cursor.fetchone()
             if existing:
                 if existing["status"] == "indexed":
                     raise HTTPException(status_code=409, detail="File already ingested")
-                # 'failed' / 'pending' row — purge and re-ingest
+                if existing["status"] == "pending":
+                    raise HTTPException(status_code=409, detail="File is already being ingested")
+                # 'failed' row — purge and re-ingest
                 delete_paper(conn, existing["id"])
 
             paper_id = save_paper(
@@ -516,10 +526,7 @@ async def ingest_paper(
                 await _mark_paper_failed(paper_id)
                 # _ingest_pipeline already compensates Qdrant on save_chunks failure;
                 # compensate here for embed/upsert errors that leave no Qdrant data.
-                try:
-                    await app.state.vector_store.adelete_by_paper_id(paper_id)
-                except Exception:
-                    pass
+                await _compensate_qdrant(paper_id)
                 raise _http_exc_for(e, "Ingest failed: check PDF content and try again")
             return {
                 "paper_id": paper_id,
@@ -531,6 +538,9 @@ async def ingest_paper(
         job = await job_store.create(kind="ingest")
         keep_tmp = True  # background task now owns tmp cleanup
         task = asyncio.create_task(_run_ingest(job.id, tmp_path, paper_id, file_hash, file_name))
+        # A task cancelled before its first step (shutdown) never enters
+        # _run_ingest's try/finally, so also unlink when the task completes (#454).
+        task.add_done_callback(lambda _t, p=tmp_path: _unlink_quiet(p))
         active = getattr(app.state, "active_ingest_tasks", None)
         if active is not None:
             active.add(task)
@@ -547,10 +557,7 @@ async def ingest_paper(
         raise _http_exc_for(e, "Ingest failed unexpectedly")
     finally:
         if tmp_path is not None and not keep_tmp:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+            _unlink_quiet(tmp_path)
 
 
 @app.get("/papers", dependencies=[Depends(verify_api_key)])
@@ -804,8 +811,8 @@ async def _run_summarize_all(job_id: str) -> None:
         for row in rows:
             paper_id = row[0]
             file_hash = row[1]
-            row_title = row[2] if len(row) > 2 else None
-            row_file_name = row[3] if len(row) > 3 else None
+            row_title = row["title"]
+            row_file_name = row["file_name"]
             try:
                 summary = await app.state.summarizer.summarize(
                     paper_id, file_hash, title=row_title, file_name=row_file_name
@@ -906,13 +913,13 @@ async def health():
     overall = "ok"
 
     try:
-        await asyncio.to_thread(app.state.vector_store.client.get_collections)
+        await app.state.vector_store.aping()
     except Exception:
         status["qdrant"] = "error"
         overall = "degraded"
 
     try:
-        await _check_embedding_svc()
+        await app.state.embedder.health()
     except Exception:
         status["embedding_svc"] = "error"
         overall = "degraded"
@@ -929,8 +936,7 @@ def stats():
             papers = conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
             chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
             try:
-                info = app.state.vector_store.client.get_collection(settings.qdrant_collection)
-                qdrant_points = info.points_count
+                qdrant_points = app.state.vector_store.count_points()
             except Exception:
                 qdrant_points = -1
         return {"papers": papers, "chunks": chunks, "qdrant_points": qdrant_points}

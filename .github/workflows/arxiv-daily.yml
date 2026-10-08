@@ -13,10 +13,6 @@ on:
         description: "Max papers to fetch per source"
         default: "20"
         required: false
-      api_url:
-        description: "API base URL"
-        default: "http://localhost:8020"
-        required: false
       summarize:
         description: "Run bulk summarization after collection (true/false)"
         default: "true"
@@ -42,7 +38,9 @@ jobs:
     # values never get template-expanded into run scripts (script injection
     # on the self-hosted runner, #135). Defaults live here, in one place.
     env:
-      API_URL: ${{ github.event.inputs.api_url || 'http://localhost:8020' }}
+      # Fixed on purpose (#480): a dispatch-supplied URL would receive
+      # X-API-Key and let the runner POST to arbitrary LAN hosts (SSRF).
+      API_URL: http://localhost:8020
       CATEGORIES: ${{ github.event.inputs.categories || 'cs.AI cs.LG cs.CL' }}
       MAX_RESULTS: ${{ github.event.inputs.max_results || '20' }}
       # Write-endpoint auth (#183). ingest_client reads this env; curl steps
@@ -84,10 +82,15 @@ jobs:
           echo "Checking $API_URL/health ..."
           # Single-quoted so the inner bash expands $API_URL itself — the outer
           # shell never splices the value into the command string.
+          # shellcheck disable=SC2016
           timeout 30 bash -c 'until curl -sf "$API_URL/health" > /dev/null; do sleep 3; done'
           echo "API is healthy"
 
       - name: Collect arXiv papers
+        # continue-on-error so one transient PDF failure does not skip the other
+        # collectors / summarize / score (#482). "Verify collector results"
+        # below re-fails the job when arXiv fully failed or crashed.
+        continue-on-error: true
         run: |
           # Validate $CATEGORIES to prevent argparse injection via word splitting
           # (#193). Only allow alphanumeric, dots, commas, and spaces.
@@ -113,8 +116,7 @@ jobs:
             --query "machine learning deep learning natural language processing" \
             --max "$MAX_RESULTS" \
             --api-url "$API_URL" \
-            --summary-file summary-s2.json \
-            ${SEMANTIC_SCHOLAR_API_KEY:+--api-key "$SEMANTIC_SCHOLAR_API_KEY"}
+            --summary-file summary-s2.json
 
       - name: Collect PubMed papers
         continue-on-error: true
@@ -134,8 +136,7 @@ jobs:
             --api-url "$API_URL" \
             --from-date "$FROM_DATE" \
             --until-date "$UNTIL_DATE" \
-            --summary-file summary-pubmed.json \
-            ${NCBI_API_KEY:+--api-key "$NCBI_API_KEY"}
+            --summary-file summary-pubmed.json
 
       - name: Collect OpenAlex papers
         continue-on-error: true
@@ -158,6 +159,7 @@ jobs:
 
           problems = []
           for name, path in [
+              ("arxiv", "summary-arxiv.json"),
               ("semantic-scholar", "summary-s2.json"),
               ("pubmed", "summary-pubmed.json"),
               ("openalex", "summary-openalex.json"),
@@ -174,6 +176,8 @@ jobs:
                   print(f"WARN {name}: search API failed ({s['fetch_error']}) — no papers this run")
               elif fetched > 0 and ok == 0 and s.get("failed", 0) > 0:
                   problems.append(f"{name}: all {fetched} fetched papers failed to ingest")
+              elif s.get("failed", 0) > 0:
+                  print(f"::warning::{name}: {s['failed']} of {fetched} fetched papers failed to ingest")
 
           if problems:
               print("Collector health check failed:")
@@ -184,7 +188,9 @@ jobs:
           EOF
 
       - name: Trigger bulk summarization
-        if: ${{ github.event.inputs.summarize != 'false' }}
+        # !cancelled(): still run when "Verify collector results" failed (#482);
+        # the job stays red through that failed step.
+        if: ${{ !cancelled() && github.event.inputs.summarize != 'false' }}
         run: |
           set -euo pipefail
 
@@ -194,13 +200,20 @@ jobs:
           # and the step aborted after "Polling failed 5 times in a row").
           AUTH=(${PAPER_API_KEY:+-H "X-API-Key: $PAPER_API_KEY"})
 
-          # POST /jobs/summarize-all — capture HTTP status and body separately
-          HTTP_CODE=$(curl -s -o /tmp/job_response.json -w "%{http_code}" \
+          # POST /jobs/summarize-all — capture HTTP status and body separately.
+          # Response lives in $RUNNER_TEMP and is removed first: /tmp persists
+          # across runs on the self-hosted runner, so a stale file from a
+          # previous run could otherwise be shown as today's response (#483).
+          JOB_RESPONSE="$RUNNER_TEMP/job_response.json"
+          rm -f "$JOB_RESPONSE"
+          # `|| true`: on connection failure curl still prints 000 via -w; let
+          # the else branch below report it instead of aborting under set -e.
+          HTTP_CODE=$(curl -s -o "$JOB_RESPONSE" -w "%{http_code}" \
             "${AUTH[@]}" \
-            -X POST "$API_URL/jobs/summarize-all")
+            -X POST "$API_URL/jobs/summarize-all" || true)
 
           if [ "$HTTP_CODE" = "202" ]; then
-            JOB_ID=$(python3 -c "import json; print(json.load(open('/tmp/job_response.json'))['job_id'])")
+            JOB_ID=$(python3 -c "import json; print(json.load(open('$JOB_RESPONSE'))['job_id'])")
             echo "Summarize job started: $JOB_ID"
 
             # Poll until done or timeout (5 minutes). A transient curl/parse
@@ -253,21 +266,28 @@ jobs:
             echo '{"status":"no-llm","processed":0,"failed":0}' > summarize-result.json
           else
             echo "Unexpected response from /jobs/summarize-all: HTTP $HTTP_CODE"
-            cat /tmp/job_response.json
+            cat "$JOB_RESPONSE" 2>/dev/null || true
             echo '{"status":"error","processed":0,"failed":0}' > summarize-result.json
             exit 1
           fi
 
       - name: Score papers
+        if: ${{ !cancelled() }}
         run: |
-          HTTP_CODE=$(curl -s -o /tmp/score_response.json -w "%{http_code}" \
+          # Stored in $RUNNER_TEMP (not /tmp) and cleared first so Notify
+          # Discord never reports a previous run's scored count (#483).
+          SCORE_RESPONSE="$RUNNER_TEMP/score_response.json"
+          rm -f "$SCORE_RESPONSE"
+          HTTP_CODE=$(curl -s -o "$SCORE_RESPONSE" -w "%{http_code}" \
             ${PAPER_API_KEY:+-H "X-API-Key: $PAPER_API_KEY"} \
-            -X POST "$API_URL/papers/score-all")
+            -X POST "$API_URL/papers/score-all" || true)
           if [ "$HTTP_CODE" = "200" ]; then
             echo "=== Score results ==="
-            cat /tmp/score_response.json | python3 -m json.tool
+            python3 -m json.tool < "$SCORE_RESPONSE"
           else
-            echo "Warning: scoring failed (HTTP $HTTP_CODE) — continuing"
+            echo "::warning::scoring failed (HTTP $HTTP_CODE) — continuing"
+            # Record the failure so Notify can show it as an error.
+            printf '{"scored":"error(HTTP %s)","error":true}\n' "$HTTP_CODE" > "$SCORE_RESPONSE"
           fi
 
       - name: Upload run summaries
@@ -295,7 +315,15 @@ jobs:
 
           webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "")
           if not webhook_url:
-              print("DISCORD_WEBHOOK_URL not set, skipping")
+              print("::warning::DISCORD_WEBHOOK_URL not set — failure notifications are disabled")
+              # A scheduled run that already failed must not end up silent
+              # (#481): fail this step too so the failure is visible even
+              # without a webhook. Manual runs / successful runs only warn.
+              if (
+                  os.environ.get("GITHUB_EVENT_NAME") == "schedule"
+                  and os.environ.get("JOB_STATUS", "success") != "success"
+              ):
+                  sys.exit(1)
               sys.exit(0)
 
           def load_summary(path):
@@ -311,11 +339,13 @@ jobs:
           openalex = load_summary("summary-openalex.json")
           summ = load_summary("summarize-result.json")
 
+          # Missing/unreadable file (Score skipped or never ran) stays {} ->
+          # shown as "-"; never read a stale file from a previous run (#483).
           score_info = {}
           try:
-              with open("/tmp/score_response.json") as f:
+              with open(os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), "score_response.json")) as f:
                   score_info = json.load(f)
-          except FileNotFoundError:
+          except (FileNotFoundError, json.JSONDecodeError):
               pass
 
           def fmt(d):
@@ -328,7 +358,8 @@ jobs:
           scored = score_info.get("scored", "-")
 
           job_status = os.environ.get("JOB_STATUS", "success")
-          ok = job_status == "success"
+          score_failed = bool(score_info.get("error"))
+          ok = job_status == "success" and not score_failed
           color = 0x00b894 if ok else 0xe17055
 
           embed = {
@@ -346,7 +377,7 @@ jobs:
                   },
                   {
                       "name": "⭐ スコアリング",
-                      "value": f"更新: {scored} 件",
+                      "value": f"失敗: {scored}" if score_failed else f"更新: {scored} 件",
                       "inline": False,
                   },
               ],
@@ -360,6 +391,9 @@ jobs:
               headers={"Content-Type": "application/json"},
               method="POST",
           )
-          with urllib.request.urlopen(req, timeout=10) as resp:
-              print(f"Discord notified: HTTP {resp.status}")
+          try:
+              with urllib.request.urlopen(req, timeout=10) as resp:
+                  print(f"Discord notified: HTTP {resp.status}")
+          except Exception as e:  # noqa: BLE001 — notification must never mask the job result
+              print(f"::warning::Discord notification failed: {e}")
           EOF

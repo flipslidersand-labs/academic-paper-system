@@ -73,7 +73,7 @@ def test_chunk_pages_preserves_page_info() -> None:
 
 def test_chunk_pages_empty_input() -> None:
     """Test that empty input returns empty list."""
-    chunks = chunk_pages([])
+    chunks = chunk_pages([], chunk_size=512, overlap=64)
     assert chunks == []
 
 

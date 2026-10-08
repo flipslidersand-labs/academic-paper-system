@@ -57,6 +57,10 @@ def test_fts_search_returns_results(temp_db):
     assert "text" in results[0]
     assert "rank" in results[0]
     assert any("machine" in r["text"].lower() for r in results)
+    # #508: chunk_index / page_start come straight from the JOINed chunks row
+    ml = next(r for r in results if "machine" in r["text"].lower())
+    assert ml["chunk_index"] == 0
+    assert ml["page_start"] == 1
 
     conn.close()
 
