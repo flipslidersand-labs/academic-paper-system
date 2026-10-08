@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from academic_paper.config import Settings
+from academic_paper import config
+from academic_paper.config import Settings, get_settings
 
 
 def test_placeholder_embedding_url_rejected():
@@ -148,3 +149,20 @@ def test_env_example_documents_every_settings_field():
     }
     missing = [name for name in Settings.model_fields if name.upper() not in documented_keys]
     assert not missing, f"Settings fields missing from .env.example: {missing}"
+
+
+def test_get_settings_returns_cached_instance_and_alias():
+    assert get_settings() is get_settings()
+    assert get_settings() is config.settings
+
+
+def test_get_settings_cache_clear_rebuilds():
+    first = get_settings()
+    get_settings.cache_clear()
+    assert get_settings() is not first
+
+
+def test_override_settings_fixture_restores(override_settings):
+    original = get_settings().max_upload_mb
+    override_settings(max_upload_mb=original + 1)
+    assert config.settings.max_upload_mb == original + 1
