@@ -8,7 +8,7 @@ import re
 import httpx
 from qdrant_client.http.exceptions import ApiException, ResponseHandlingException, UnexpectedResponse
 
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.embedder import EmbedderClient
 from academic_paper.llm import BaseLLMClient
 from academic_paper.models import PaperSummary
@@ -82,10 +82,9 @@ class RAGSummarizer:
 
     def _chunks_from_db(self, paper_id: int, top_k: int) -> list[dict]:
         """Load the first top_k chunks in chunk_index order from SQLite, Qdrant-shaped."""
-        from academic_paper.config import settings
         from academic_paper.db import db_connection, get_chunks
 
-        with db_connection(settings.academic_db) as conn:
+        with db_connection(get_settings().academic_db) as conn:
             chunks_db = get_chunks(conn, paper_id)
         return [
             {
@@ -118,7 +117,7 @@ class RAGSummarizer:
 
         Raises:
             ValueError: If no chunks found or LLM returns invalid JSON
-            TimeoutError: If the call exceeds settings.summarize_total_timeout
+            TimeoutError: If the call exceeds get_settings().summarize_total_timeout
         """
         # The embedding/Qdrant/LLM wait_for calls below are awaited sequentially,
         # so their individual timeouts stack in the worst case (#269). Wrap the
@@ -130,7 +129,7 @@ class RAGSummarizer:
         # Qdrant wrappers use to_thread_cancellable so retries/batches stop on cancel.
         return await asyncio.wait_for(
             self._summarize_impl(paper_id, file_hash, top_k=top_k, title=title, file_name=file_name),
-            timeout=settings.summarize_total_timeout,
+            timeout=get_settings().summarize_total_timeout,
         )
 
     async def _search_or_fallback(self, query_vector: list[float], paper_id: int, top_k: int) -> list[dict]:
@@ -148,7 +147,7 @@ class RAGSummarizer:
                     limit=top_k,
                     paper_id_filter=paper_id,
                 ),
-                timeout=settings.qdrant_timeout,
+                timeout=get_settings().qdrant_timeout,
             )
         except UnexpectedResponse as e:
             if _is_permanent_client_error(e.status_code):
@@ -174,17 +173,17 @@ class RAGSummarizer:
         title: str | None = None,
         file_name: str | None = None,
     ) -> dict:
-        """Implementation of summarize(), bounded overall by settings.summarize_total_timeout."""
+        """Implementation of summarize(), bounded overall by get_settings().summarize_total_timeout."""
         # Build a real query vector from title or filename for semantic chunk retrieval
         query_text = title or (file_name.removesuffix(".pdf") if file_name else None) or "academic paper"
         chunks: list[dict]
         if self.embedder is not None:
             try:
-                # Bounded by settings.embedding_timeout in addition to the
+                # Bounded by get_settings().embedding_timeout in addition to the
                 # embedder's own httpx timeout — a hung TCP connection (no
                 # HTTP error, no response) would otherwise block forever (#237).
                 query_vector = await asyncio.wait_for(
-                    self.embedder.embed_single(query_text, mode="search"), timeout=settings.embedding_timeout
+                    self.embedder.embed_single(query_text, mode="search"), timeout=get_settings().embedding_timeout
                 )
             except httpx.HTTPStatusError as e:
                 if _is_permanent_client_error(e.response.status_code):
@@ -251,7 +250,7 @@ Please respond ONLY with valid JSON in this exact format:
         # to propagate so the caller records the job as failed (server.py
         # summarize endpoints already catch Exception and set status=failed).
         response = await asyncio.wait_for(
-            self.llm.generate(prompt, system=SYSTEM_PROMPT), timeout=settings.llm_generate_timeout
+            self.llm.generate(prompt, system=SYSTEM_PROMPT), timeout=get_settings().llm_generate_timeout
         )
 
         if not response:

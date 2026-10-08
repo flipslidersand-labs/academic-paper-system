@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from academic_paper.config import settings
 from academic_paper.summarizer import SYSTEM_PROMPT, RAGSummarizer
 
 
@@ -474,7 +473,7 @@ async def test_summarize_embed_runtime_error_propagates():
 
 
 @pytest.mark.anyio
-async def test_summarize_falls_back_to_db_on_embed_timeout(monkeypatch):
+async def test_summarize_falls_back_to_db_on_embed_timeout(override_settings):
     """A hung embed_single (no HTTP error, no response) must not block forever (#237).
 
     embedding_timeout bounds the wait; on expiry the summarizer falls back to
@@ -482,7 +481,7 @@ async def test_summarize_falls_back_to_db_on_embed_timeout(monkeypatch):
     """
     from unittest.mock import patch
 
-    monkeypatch.setattr(settings, "embedding_timeout", 0.05)
+    override_settings(embedding_timeout=0.05)
 
     mock_llm = AsyncMock()
     mock_llm.generate.return_value = json.dumps(
@@ -508,11 +507,11 @@ async def test_summarize_falls_back_to_db_on_embed_timeout(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_summarize_falls_back_to_db_on_qdrant_timeout(monkeypatch):
+async def test_summarize_falls_back_to_db_on_qdrant_timeout(override_settings):
     """A hung Qdrant search must not block forever; falls back to DB chunk order (#237)."""
     from unittest.mock import patch
 
-    monkeypatch.setattr(settings, "qdrant_timeout", 0.05)
+    override_settings(qdrant_timeout=0.05)
 
     mock_llm = AsyncMock()
     mock_llm.generate.return_value = json.dumps(
@@ -565,13 +564,13 @@ async def test_summarize_no_embedder_falls_back_to_db_on_qdrant_error():
 
 
 @pytest.mark.anyio
-async def test_summarize_llm_timeout_propagates(monkeypatch):
+async def test_summarize_llm_timeout_propagates(override_settings):
     """A hung LLM backend must not block forever; TimeoutError propagates so the
 
     caller (server.py) records the job as failed (#237). Unlike embed/Qdrant,
     there is no fallback path for LLM generation.
     """
-    monkeypatch.setattr(settings, "llm_generate_timeout", 0.05)
+    override_settings(llm_generate_timeout=0.05)
 
     mock_llm = AsyncMock()
 
@@ -590,17 +589,17 @@ async def test_summarize_llm_timeout_propagates(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_summarize_overall_timeout_bounds_stacked_individual_timeouts(monkeypatch):
+async def test_summarize_overall_timeout_bounds_stacked_individual_timeouts(override_settings):
     """The 3 inner wait_for calls (embedding/qdrant/llm) stack sequentially in the
 
     worst case, so summarize()'s real worst-case latency is their sum, not any one
     of them. summarize_total_timeout must cut the whole call short even when each
     individual timeout is generous enough to not fire on its own (#269).
     """
-    monkeypatch.setattr(settings, "embedding_timeout", 10)
-    monkeypatch.setattr(settings, "qdrant_timeout", 10)
-    monkeypatch.setattr(settings, "llm_generate_timeout", 10)
-    monkeypatch.setattr(settings, "summarize_total_timeout", 0.05)
+    override_settings(embedding_timeout=10)
+    override_settings(qdrant_timeout=10)
+    override_settings(llm_generate_timeout=10)
+    override_settings(summarize_total_timeout=0.05)
 
     mock_embedder = AsyncMock()
     mock_embedder.embed_single = AsyncMock(return_value=[0.1] * 768)
