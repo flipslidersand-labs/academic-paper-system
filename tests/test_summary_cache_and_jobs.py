@@ -93,5 +93,7 @@ def test_summarize_all_db_exception_marks_job_failed(client):
     with patch("academic_paper.server.db_connection", side_effect=sqlite3.OperationalError("db boom")):
         job = _run_job()
     assert job.status == "failed"
-    assert any("db boom" in e for e in job.errors)
+    # #474: raw exception text must not leak into job errors
+    assert job.errors
+    assert not any("db boom" in e for e in job.errors)
     assert job.finished_at is not None

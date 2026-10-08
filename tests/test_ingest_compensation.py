@@ -111,7 +111,8 @@ def test_async_compensation_delete_failure_still_fails_job(client):
         body = _post(client, wait=False).json()
         job = _wait_for_job(client, body["job_id"])
     assert job["status"] == "failed"
-    assert "locked" in job["errors"][0]
+    assert job["errors"][0].startswith(f"paper_id={body['paper_id']}: Internal error [")
+    assert "locked" not in job["errors"][0]
 
 
 def test_reupload_after_compensated_failure_is_accepted(client):
