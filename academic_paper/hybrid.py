@@ -38,7 +38,7 @@ def rrf_merge(
 
     # Process vector results (rank_position is 1-indexed)
     for i, result in enumerate(vector_results):
-        payload = result["payload"]
+        payload = result.get("payload") or {}
         # Try to get chunk_id from payload
         chunk_id = payload.get("chunk_id")
         if chunk_id is None:
