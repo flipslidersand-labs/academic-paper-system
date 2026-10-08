@@ -130,3 +130,17 @@ def test_extract_nuggets_mismatched_vecs_falls_back_to_bm25():
         sentence_vecs=[[1.0, 0.0]],  # only 1 vec for 2 sentences
     )
     assert result == "Alpha beta gamma."
+
+
+def test_bm25_idf_uses_document_frequency():
+    # "common" appears in every sentence (df=N), "rare" in one sentence (df=1).
+    # With a document-frequency idf the rare term must outweigh the common one
+    # for sentences of equal length and tf=1 (#383).
+    sentences = ["common rare x", "common y z", "common w v"]
+    rare = bm25_scores("rare", sentences)
+    common = bm25_scores("common", sentences)
+    assert rare[0] > common[0]
+    # Common term: identical tf/length -> identical score across sentences.
+    assert common[0] == common[1] == common[2]
+    # Rare term only scores the sentence that contains it.
+    assert rare[1] == rare[2] == 0.0

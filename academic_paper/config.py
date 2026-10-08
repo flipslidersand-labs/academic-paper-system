@@ -1,4 +1,5 @@
 import re
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -30,8 +31,21 @@ class Settings(BaseSettings):
     chunk_size: int = Field(default=512, gt=0, description="Size of text chunks for processing")
     chunk_overlap: int = Field(default=64, ge=0, description="Overlap between consecutive chunks")
     qdrant_collection: str = Field(default="academic-papers", description="Qdrant collection name")
+    embedding_dim: int = Field(
+        default=768,
+        gt=0,
+        description="Embedding vector dimension; must match the embedding model and Qdrant collection",
+    )
     port: int = Field(default=8020, gt=0, description="Port for API server")
     google_api_key: str = Field(default="", description="Google API key for generative AI")
+    llm_provider: Literal["auto", "gemini", "ollama", "none"] = Field(
+        default="auto",
+        description=(
+            "LLM provider: auto = Gemini if GOOGLE_API_KEY is set else Ollama; "
+            "gemini/ollama = explicit; none = disable LLM (#498)"
+        ),
+    )
+    gemini_model: str = Field(default="gemini-2.0-flash", description="Gemini model name (#498)")
     gemini_timeout_ms: int = Field(default=60000, gt=0, description="Gemini API HTTP timeout in milliseconds")
     ollama_url: str = Field(default="http://localhost:11434", description="Ollama service URL")
     ollama_model: str = Field(default="mistral", description="Ollama model to use")
