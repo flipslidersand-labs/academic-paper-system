@@ -1,5 +1,7 @@
 """Tests for FastAPI server endpoints."""
 
+import asyncio
+import logging
 import sqlite3
 import tempfile
 import time
@@ -14,6 +16,8 @@ from fastapi.testclient import TestClient
 
 from academic_paper.config import settings
 from academic_paper.db import get_chunks, get_connection, save_chunks, save_paper
+from academic_paper.embedder import EmbedderClient
+from academic_paper.jobs import job_store
 from academic_paper.server import _cleanup_orphaned_ingests, app
 
 
@@ -64,6 +68,8 @@ def client(temp_db):
             # Manually set the mocked services since lifespan is patched
             client.app.state.embedder = mock_embedder
             client.app.state.vector_store = mock_qdrant
+            # Lifespan (which awaits job_store.init) is patched out too (#477).
+            job_store._db_path = temp_db
             yield client
 
 
@@ -340,9 +346,8 @@ def test_ingest_stores_qdrant_id(client):
 def test_health_returns_ok(client):
     """Test GET /health returns ok when all services are healthy."""
     # Mock vector_store to have a working client
-    mock_client = MagicMock()
-    mock_client.get_collections.return_value = MagicMock(collections=[])
-    client.app.state.vector_store.client = mock_client
+    client.app.state.vector_store.aping = AsyncMock(return_value=None)
+    client.app.state.embedder = EmbedderClient(base_url="http://embed.test", api_key="k")
 
     # Mock httpx to return 200 status
     with patch("academic_paper.server.httpx.AsyncClient") as mock_httpx:
@@ -360,10 +365,8 @@ def test_health_returns_ok(client):
 
 def test_health_returns_degraded_on_qdrant_error(client):
     """Test GET /health returns 503 degraded when Qdrant is unavailable (#195)."""
-    # Mock vector_store to raise exception
-    mock_client = MagicMock()
-    mock_client.get_collections.side_effect = Exception("Connection failed")
-    client.app.state.vector_store.client = mock_client
+    client.app.state.vector_store.aping = AsyncMock(side_effect=Exception("Connection failed"))
+    client.app.state.embedder = EmbedderClient(base_url="http://embed.test", api_key="k")
 
     # Mock httpx to return 200 status
     with patch("academic_paper.server.httpx.AsyncClient") as mock_httpx:
@@ -395,12 +398,7 @@ def test_stats_returns_counts(client):
         )
         assert response_ingest.status_code == 200
 
-    # Mock vector_store client for stats call
-    mock_client = MagicMock()
-    mock_collection_info = MagicMock()
-    mock_collection_info.points_count = 1
-    mock_client.get_collection.return_value = mock_collection_info
-    client.app.state.vector_store.client = mock_client
+    client.app.state.vector_store.count_points = MagicMock(return_value=1)
 
     # Get stats
     response = client.get("/stats")
@@ -462,9 +460,8 @@ def _mock_embedding_response(status_code: int) -> MagicMock:
 
 def test_health_embedding_svc_degraded(client):
     """Test GET /health returns 503 degraded when embedding-svc returns 5xx (#195)."""
-    mock_client = MagicMock()
-    mock_client.get_collections.return_value = MagicMock(collections=[])
-    client.app.state.vector_store.client = mock_client
+    client.app.state.vector_store.aping = AsyncMock(return_value=None)
+    client.app.state.embedder = EmbedderClient(base_url="http://embed.test", api_key="k")
 
     with patch("academic_paper.server.httpx.AsyncClient") as mock_httpx:
         mock_httpx.return_value.__aenter__.return_value.get = AsyncMock(return_value=_mock_embedding_response(503))
@@ -479,9 +476,8 @@ def test_health_embedding_svc_degraded(client):
 
 def test_health_embedding_svc_auth_failure_degraded(client):
     """Regression (#142, #195): a 401 from embedding-svc must report degraded with HTTP 503."""
-    mock_client = MagicMock()
-    mock_client.get_collections.return_value = MagicMock(collections=[])
-    client.app.state.vector_store.client = mock_client
+    client.app.state.vector_store.aping = AsyncMock(return_value=None)
+    client.app.state.embedder = EmbedderClient(base_url="http://embed.test", api_key="k")
 
     with patch("academic_paper.server.httpx.AsyncClient") as mock_httpx:
         mock_httpx.return_value.__aenter__.return_value.get = AsyncMock(return_value=_mock_embedding_response(401))
@@ -495,9 +491,7 @@ def test_health_embedding_svc_auth_failure_degraded(client):
 
 def test_stats_qdrant_error(client):
     """Test GET /stats returns qdrant_points=-1 when Qdrant collection is unavailable."""
-    mock_client = MagicMock()
-    mock_client.get_collection.side_effect = Exception("Connection failed")
-    client.app.state.vector_store.client = mock_client
+    client.app.state.vector_store.count_points = MagicMock(side_effect=Exception("Connection failed"))
 
     response = client.get("/stats")
     assert response.status_code == 200
@@ -567,8 +561,11 @@ def test_ingest_extract_value_error_returns_400(client):
         assert response.status_code == 400
 
 
-def test_ingest_embedding_count_mismatch_returns_400(client):
-    """embedder returns fewer vectors than chunks (#227) → 400, not silently truncated by zip()."""
+def test_ingest_embedding_count_mismatch_returns_502(client):
+    """embedding-svc returns a mismatched vector count (#227/#336): EmbedderClient.embed
+    raises EmbeddingCountMismatchError, which maps to 502 (upstream failure), not 400."""
+    from academic_paper.embedder import EmbeddingCountMismatchError
+
     pdf_content = create_minimal_pdf()
 
     with (
@@ -580,14 +577,15 @@ def test_ingest_embedding_count_mismatch_returns_400(client):
             {"text": "chunk one", "page_start": 1},
             {"text": "chunk two", "page_start": 1},
         ]
-        # Simulate a partial/degraded embedding-svc batch response (#227).
-        client.app.state.embedder.embed = AsyncMock(return_value=[[0.1] * 768])
+        client.app.state.embedder.embed = AsyncMock(
+            side_effect=EmbeddingCountMismatchError("embedding-svc returned 1 vectors for 2 input texts")
+        )
 
         response = client.post(
             "/papers/ingest?wait=true",
             files={"file": ("mismatch.pdf", BytesIO(pdf_content), "application/pdf")},
         )
-        assert response.status_code == 400
+        assert response.status_code == 502
 
 
 def test_ingest_async_returns_202_and_completes_job(client):
@@ -667,6 +665,35 @@ def test_ingest_async_job_failed_on_no_text(client):
 
     paper = client.get(f"/papers/{body['paper_id']}").json()
     assert paper["status"] == "failed"
+
+
+def test_ingest_async_upsert_failure_compensates_qdrant(client):
+    """Regression (#471): a mid-way upsert failure in the background job deletes the
+    partially-upserted vectors, even when the compensation delete itself fails."""
+    pdf_content = create_minimal_pdf()
+
+    for delete_mock in (AsyncMock(return_value=None), AsyncMock(side_effect=RuntimeError("qdrant down"))):
+        client.app.state.vector_store.aupsert = AsyncMock(side_effect=RuntimeError("batch 2 failed"))
+        client.app.state.vector_store.adelete_by_paper_id = delete_mock
+        with patch("academic_paper.server.extract_text") as mock_extract:
+            mock_extract.return_value = [{"page": 1, "text": f"Doc {id(delete_mock)}"}]
+            response = client.post(
+                "/papers/ingest",
+                files={
+                    "file": (
+                        f"u{id(delete_mock)}.pdf",
+                        BytesIO(pdf_content + str(id(delete_mock)).encode()),
+                        "application/pdf",
+                    )
+                },
+            )
+            assert response.status_code == 202
+            body = response.json()
+            job = _wait_for_job(client, body["job_id"])
+
+        assert job["status"] == "failed"
+        delete_mock.assert_awaited_once_with(body["paper_id"])
+        assert client.get(f"/papers/{body['paper_id']}").json()["status"] == "failed"
 
 
 def test_ingest_async_job_failed_when_paper_status_update_raises(client):
@@ -953,6 +980,25 @@ def test_stats_unexpected_error_returns_500(client):
     assert "Internal error" in response.json()["detail"]
 
 
+def test_search_real_qdrant_store_5xx_returns_502(client):
+    """Regression (#472): a persistent Qdrant 5xx surfaces through the real QdrantStore
+    retry path as UnexpectedResponse, so /search maps it to 502 (not an opaque 500)."""
+    from qdrant_client.http.exceptions import UnexpectedResponse
+
+    from academic_paper.vector_store import QdrantStore
+
+    with patch("academic_paper.vector_store.QdrantClient") as mock_client_cls:
+        mock_client_cls.return_value.query_points.side_effect = UnexpectedResponse(
+            status_code=503, reason_phrase="Service Unavailable", content=b"", headers={}
+        )
+        client.app.state.vector_store = QdrantStore(url="http://test", collection="c")
+        client.app.state.embedder.embed_single = AsyncMock(return_value=[0.1] * 768)
+        with patch("academic_paper.retry.time.sleep"):
+            response = client.get("/search", params={"q": "x", "mode": "vector"})
+
+    assert response.status_code == 502
+
+
 def test_http_exc_for_maps_embedding_count_mismatch_to_502():
     """_http_exc_for maps EmbeddingCountMismatchError to 502, not the generic
     ValueError 400 branch — it is an upstream protocol failure, not bad client
@@ -1114,6 +1160,50 @@ def test_ingest_indexed_paper_still_409(client):
         assert r2.status_code == 409
 
 
+def test_ingest_concurrent_same_pdf_pending_returns_409(client):
+    """Regression (#496): a 2nd upload of a PDF whose ingest is still running gets 409
+    and must not delete the pending row or trigger a compensating Qdrant delete."""
+    import threading
+
+    pdf_content = create_minimal_pdf()
+    embed_started = threading.Event()
+    release = threading.Event()
+
+    async def slow_embed(*args, **kwargs):
+        embed_started.set()
+        await asyncio.to_thread(release.wait, 10)
+        return [[0.1] * 768]
+
+    with patch("academic_paper.server.extract_text") as mock_extract:
+        mock_extract.return_value = [{"page": 1, "text": "Concurrent content"}]
+        client.app.state.embedder.embed = slow_embed
+
+        first = client.post(
+            "/papers/ingest",
+            files={"file": ("same.pdf", BytesIO(pdf_content), "application/pdf")},
+        )
+        assert first.status_code == 202
+        paper_id = first.json()["paper_id"]
+        assert embed_started.wait(10), "first ingest never reached embedding"
+
+        try:
+            second = client.post(
+                "/papers/ingest",
+                files={"file": ("same.pdf", BytesIO(pdf_content), "application/pdf")},
+            )
+            assert second.status_code == 409
+            assert "being ingested" in second.json()["detail"].lower()
+            assert client.get(f"/papers/{paper_id}").json()["status"] == "pending"
+        finally:
+            release.set()
+
+        job = _wait_for_job(client, first.json()["job_id"])
+
+    assert job["status"] == "done"
+    assert client.get(f"/papers/{paper_id}").json()["status"] == "indexed"
+    client.app.state.vector_store.adelete_by_paper_id.assert_not_called()
+
+
 def test_write_endpoints_require_api_key_when_configured(client, temp_db):
     """Regression (#146): write endpoints return 401 when API_KEY is set and key missing."""
     with patch.object(settings, "api_key", "secret-key"):
@@ -1236,7 +1326,8 @@ def _lifespan_client(temp_db):
     mock_qdrant.adelete_by_paper_id = AsyncMock(return_value=None)
     mock_qdrant.aensure_collection = AsyncMock(return_value=None)
     mock_qdrant.aclose = AsyncMock(return_value=None)
-    mock_qdrant.client.get_collections = MagicMock(return_value=None)
+    mock_qdrant.aping = AsyncMock(return_value=None)
+    mock_qdrant.count_points = MagicMock(return_value=0)
     return (
         patch.object(settings, "academic_db", temp_db),
         patch("academic_paper.server.EmbedderClient", return_value=mock_embedder),
@@ -1310,6 +1401,33 @@ async def test_cleanup_orphaned_ingests_cleans_stuck_paper(temp_db):
 
 
 @pytest.mark.anyio
+async def test_cleanup_orphaned_ingests_marks_failed_when_qdrant_delete_raises(temp_db, caplog):
+    """Qdrant delete failure is logged but every pending paper still becomes 'failed' (#502)."""
+    conn = get_connection(temp_db)
+    paper_ids = [save_paper(conn, f"stuck{i}.pdf", f"hash_stuck_{i}") for i in range(2)]
+    conn.execute("UPDATE papers SET status = 'pending'")
+    conn.commit()
+    conn.close()
+
+    mock_app = MagicMock()
+    mock_qdrant = MagicMock()
+    mock_qdrant.adelete_by_paper_id = AsyncMock(side_effect=RuntimeError("qdrant down"))
+    mock_app.state.vector_store = mock_qdrant
+
+    with patch.object(settings, "academic_db", temp_db), caplog.at_level(logging.WARNING):
+        await _cleanup_orphaned_ingests(mock_app)  # must not raise
+
+    assert mock_qdrant.adelete_by_paper_id.await_count == len(paper_ids)
+    check = get_connection(temp_db)
+    statuses = [
+        check.execute("SELECT status FROM papers WHERE id = ?", (pid,)).fetchone()["status"] for pid in paper_ids
+    ]
+    check.close()
+    assert statuses == ["failed", "failed"]
+    assert caplog.text.count("Qdrant delete failed") == len(paper_ids)
+
+
+@pytest.mark.anyio
 async def test_cleanup_orphaned_ingests_handles_db_error_non_fatal():
     """_cleanup_orphaned_ingests swallows DB errors (non-fatal startup)."""
     mock_app = MagicMock()
@@ -1329,3 +1447,33 @@ def test_search_q_accepts_max_length(client, temp_db):
     """q at the max_length boundary (1000 chars) is still accepted."""
     resp = client.get("/search", params={"q": "a" * 1000, "mode": "keyword"})
     assert resp.status_code == 200
+
+
+def test_run_ingest_unlinks_tmpfile_when_job_missing(tmp_path):
+    """_run_ingest owns tmp cleanup even when the job is gone (early return) (#454)."""
+    import asyncio
+
+    from academic_paper.server import _run_ingest
+
+    pdf = tmp_path / "leak.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    asyncio.run(_run_ingest("no-such-job", str(pdf), 1, "h", "f.pdf"))
+    assert not pdf.exists()
+
+
+def test_run_ingest_unlinks_tmpfile_when_persist_fails(tmp_path):
+    """A failing initial job persist must not leak the temp PDF (#454)."""
+    import asyncio
+
+    from academic_paper.server import _run_ingest
+
+    pdf = tmp_path / "leak2.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    job = MagicMock()
+    with (
+        patch("academic_paper.server.job_store.get", return_value=job),
+        patch("academic_paper.server.job_store.persist", AsyncMock(side_effect=RuntimeError("db"))),
+        pytest.raises(RuntimeError),
+    ):
+        asyncio.run(_run_ingest("j", str(pdf), 1, "h", "f.pdf"))
+    assert not pdf.exists()

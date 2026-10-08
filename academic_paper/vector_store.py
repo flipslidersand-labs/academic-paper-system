@@ -7,7 +7,7 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.models import Distance, FieldCondition, Filter, FilterSelector, MatchValue, PointStruct, VectorParams
 
 from academic_paper.config import settings
-from academic_paper.retry import with_retry
+from academic_paper.retry import raise_if_cancelled, to_thread_cancellable, with_retry
 
 PAPER_NS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 
@@ -28,6 +28,20 @@ def _reraise_qdrant_response(exc: UnexpectedResponse) -> None:
 
 
 _QDRANT_RETRYABLE = (_RetryableQdrantError, httpx.NetworkError, httpx.TimeoutException)
+
+
+def _qdrant_retry(fn):
+    """Run fn with retries; after the final attempt re-raise the original UnexpectedResponse.
+
+    _RetryableQdrantError is an internal retry marker. Callers (summarizer fallback,
+    server._http_exc_for) classify UnexpectedResponse, so it must not leak out (#472).
+    """
+    try:
+        return with_retry(fn, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
+    except _RetryableQdrantError as exc:
+        raise exc.__cause__ from None
+
+
 _UPSERT_BATCH_MAX = 200  # keep single requests well under qdrant_timeout (#236)
 
 
@@ -37,15 +51,22 @@ def make_qdrant_id(file_hash: str, chunk_index: int) -> str:
 
 
 class QdrantStore:
-    def __init__(self, url: str | None = None, api_key: str | None = None, collection: str | None = None):
+    def __init__(
+        self,
+        url: str | None = None,
+        api_key: str | None = None,
+        collection: str | None = None,
+        vector_size: int | None = None,
+    ):
         self.url = url or settings.qdrant_url
         self.api_key = api_key or settings.qdrant_api_key or None
         self.collection = collection or settings.qdrant_collection
+        self.vector_size = vector_size or settings.embedding_dim
         self.client = QdrantClient(url=self.url, api_key=self.api_key, timeout=settings.qdrant_timeout)
 
     def ensure_collection(self) -> None:
         """コレクションが存在しなければ作成（冪等、失敗時3回リトライ #266）
-        size=768, distance=Cosine
+        size=settings.embedding_dim, distance=Cosine。既存コレクションの次元が不一致なら ValueError。
         """
 
         def _do():
@@ -55,12 +76,20 @@ class QdrantStore:
                 if self.collection not in names:
                     self.client.create_collection(
                         collection_name=self.collection,
-                        vectors_config=VectorParams(size=768, distance=Distance.COSINE),
+                        vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE),
                     )
+                else:
+                    existing = self.client.get_collection(self.collection).config.params.vectors
+                    existing_size = getattr(existing, "size", None)
+                    if existing_size is not None and existing_size != self.vector_size:
+                        raise ValueError(
+                            f"Qdrant collection '{self.collection}' has vector size {existing_size}, "
+                            f"but embedding_dim is {self.vector_size}; recreate the collection or fix EMBEDDING_DIM"
+                        )
             except UnexpectedResponse as exc:
                 _reraise_qdrant_response(exc)
 
-        with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
+        _qdrant_retry(_do)
 
     def upsert(self, points: list[dict]) -> None:
         """チャンクをQdrantにupsertする（失敗時3回リトライ、200件ずつバッチ分割 #236）
@@ -72,6 +101,7 @@ class QdrantStore:
         タイムアウトは解消しない（embedder.pyの/embed/batch分割と同様の対処）。
         """
         for i in range(0, len(points), _UPSERT_BATCH_MAX):
+            raise_if_cancelled()  # skip remaining batches once the caller gave up (#313)
             batch = points[i : i + _UPSERT_BATCH_MAX]
             structs = [PointStruct(id=p["id"], vector=p["vector"], payload=p["payload"]) for p in batch]
 
@@ -81,7 +111,7 @@ class QdrantStore:
                 except UnexpectedResponse as exc:
                     _reraise_qdrant_response(exc)
 
-            with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
+            _qdrant_retry(_do)
 
     def delete_by_paper_id(self, paper_id: int) -> None:
         """Qdrant から paper_id に属する全ポイントを削除（補償用、#145）。"""
@@ -96,7 +126,7 @@ class QdrantStore:
             except UnexpectedResponse as exc:
                 _reraise_qdrant_response(exc)
 
-        with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
+        _qdrant_retry(_do)
 
     def search(self, query_vector: list[float], limit: int = 10, paper_id_filter: int | None = None) -> list[dict]:
         """ベクトル類似検索（失敗時3回リトライ）
@@ -118,28 +148,42 @@ class QdrantStore:
             except UnexpectedResponse as exc:
                 _reraise_qdrant_response(exc)
 
-        results = with_retry(_do, attempts=3, base_delay=1.0, exceptions=_QDRANT_RETRYABLE)
+        results = _qdrant_retry(_do)
         return [{"id": str(r.id), "score": r.score, "payload": r.payload} for r in results.points]
 
     # ------------------------------------------------------------------
     # Async wrappers — run sync methods in a thread pool so event-loop
     # callers don't block (#149). with_retry uses time.sleep which is
     # safe inside a thread but would stall the loop if called directly.
+    # A cancelled caller (e.g. wait_for timeout) cannot stop a running thread;
+    # to_thread_cancellable only stops further retries/batches (#313). The
+    # in-flight request still runs until settings.qdrant_timeout.
     # ------------------------------------------------------------------
 
     async def aupsert(self, points: list[dict]) -> None:
-        await asyncio.to_thread(self.upsert, points)
+        await to_thread_cancellable(self.upsert, points)
 
     async def adelete_by_paper_id(self, paper_id: int) -> None:
-        await asyncio.to_thread(self.delete_by_paper_id, paper_id)
+        await to_thread_cancellable(self.delete_by_paper_id, paper_id)
 
     async def asearch(
         self, query_vector: list[float], limit: int = 10, paper_id_filter: int | None = None
     ) -> list[dict]:
-        return await asyncio.to_thread(self.search, query_vector, limit, paper_id_filter)
+        return await to_thread_cancellable(self.search, query_vector, limit, paper_id_filter)
 
     async def aensure_collection(self) -> None:
-        await asyncio.to_thread(self.ensure_collection)
+        await to_thread_cancellable(self.ensure_collection)
+
+    def ping(self) -> None:
+        """Qdrant への疎通確認。到達不能なら例外を送出する（/health・起動プローブ用）。"""
+        self.client.get_collections()
+
+    async def aping(self) -> None:
+        await asyncio.to_thread(self.ping)
+
+    def count_points(self) -> int | None:
+        """このストアのコレクションのポイント数を返す（/stats 用）。"""
+        return self.client.get_collection(self.collection).points_count
 
     def close(self) -> None:
         """QdrantClient のコネクションプールを解放する（#228）。"""

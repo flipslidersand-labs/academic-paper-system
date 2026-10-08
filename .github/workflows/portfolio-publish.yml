@@ -63,3 +63,19 @@ jobs:
           done
           echo "push failed after retries" >&2
           exit 1
+
+      # Scheduled workflow: without an active alert a failure is silent (#429).
+      # Same DISCORD_WEBHOOK_URL secret as arxiv-daily.yml; skip when unset.
+      - name: Notify Discord on failure
+        if: failure()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "::warning::DISCORD_WEBHOOK_URL not set, skipping failure notification"
+            exit 0
+          fi
+          curl -sf -H 'Content-Type: application/json' \
+            -d "{\"content\": \"Portfolio Publish failed: ${RUN_URL}\"}" \
+            "$DISCORD_WEBHOOK_URL" || echo "::warning::Discord notification failed"

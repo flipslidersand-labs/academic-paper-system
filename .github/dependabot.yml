@@ -1,14 +1,25 @@
 version: 2
+# 依存更新は Dependabot に一本化 (#522, 親 #501)。
+# - Python: requirements.lock は週次 workflow (lock-update.yml, #521) が更新する。
+#   pip エントリは lock を認識できず ruff の bump しか出さなかったため削除
+#   (ruff は ci.yml で固定済み)。
+# - Docker: #379 で入れたベースイメージ digest 更新を維持する。
 updates:
-  # Python dependencies (pyproject.toml / requirements.lock)
-  - package-ecosystem: "pip"
+  # GitHub Actions used in workflows (including SHA-pinned steps)
+  - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
 
-  # GitHub Actions used in workflows (including SHA-pinned steps)
-  - package-ecosystem: "github-actions"
+  # Dockerfile / docker-compose.yml のイメージ (digest 固定含む)
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "docker-compose"
     directory: "/"
     schedule:
       interval: "weekly"
