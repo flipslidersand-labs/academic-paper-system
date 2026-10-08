@@ -7,9 +7,6 @@ to track page boundaries across chunk boundaries.
 
 from __future__ import annotations
 
-DEFAULT_SIZE = 512
-DEFAULT_OVERLAP = 64
-
 
 def _split_paragraphs(text: str) -> list[str]:
     """Split text by double newlines into paragraphs."""
@@ -19,8 +16,8 @@ def _split_paragraphs(text: str) -> list[str]:
 
 def chunk_pages(
     pages: list[dict],
-    chunk_size: int = DEFAULT_SIZE,
-    overlap: int = DEFAULT_OVERLAP,
+    chunk_size: int,
+    overlap: int,
 ) -> list[dict]:
     """Generate chunks from page list with page boundary tracking.
 
@@ -65,31 +62,30 @@ def chunk_pages(
     # Apply search-engine chunking algorithm with page tracking
     chunks: list[dict] = []
     buf: list[str] = []
-    buf_pages: list[int] = []
+    buf_page_start = buf_page_end = 0
 
     def flush() -> None:
-        nonlocal buf, buf_pages
+        nonlocal buf
         if buf:
             text = " ".join(buf)
-            page_start = min(buf_pages) if buf_pages else 1
-            page_end = max(buf_pages) if buf_pages else 1
             chunks.append(
                 {
                     "text": text,
-                    "page_start": page_start,
-                    "page_end": page_end,
+                    "page_start": buf_page_start,
+                    "page_end": buf_page_end,
                     "chunk_index": len(chunks),
                     "token_count": len(buf),
                 }
             )
             buf = []
-            buf_pages = []
 
     for para_words, page_num in paragraphs_with_pages:
         # Try to add paragraph to current buffer
         if len(buf) + len(para_words) <= chunk_size:
+            if not buf:
+                buf_page_start = page_num
+            buf_page_end = page_num
             buf.extend(para_words)
-            buf_pages.extend([page_num] * len(para_words))
             continue
 
         # Flush buffer if it has content
@@ -98,7 +94,7 @@ def chunk_pages(
         # If paragraph itself fits in chunk size
         if len(para_words) <= chunk_size:
             buf = para_words.copy()
-            buf_pages = [page_num] * len(para_words)
+            buf_page_start = buf_page_end = page_num
             continue
 
         # Split long paragraph using sliding window
@@ -121,7 +117,6 @@ def chunk_pages(
                 break
 
         buf = []
-        buf_pages = []
 
     # Flush remaining buffer
     flush()

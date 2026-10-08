@@ -8,7 +8,7 @@ Research paper knowledge base — PDF ingestion → hybrid search → structured
 PDF upload
   → pdfplumber extraction
   → text chunking (512 tokens / 64 overlap)
-  → e5-large-v2 embeddings (768-d) via embedding-svc
+  → multilingual-e5-base embeddings (768-d) via embedding-svc
   → Qdrant vector store  +  SQLite FTS5 (BM25)
   → RRF hybrid retrieval
   → Gemini / Ollama structured summarization
@@ -18,14 +18,25 @@ PDF upload
 
 ## API
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/papers/ingest` | Upload a PDF; returns **202 + `job_id`** and indexes in the background (`?wait=true` for synchronous 200) |
-| `GET` | `/papers` | List papers (paginated) |
-| `GET` | `/papers/{id}` | Paper detail |
-| `GET` | `/papers/{id}/summary` | LLM-generated structured summary (cached) |
-| `GET` | `/jobs/{id}` | Poll a background job; `done` carries `result.paper_id`/`result.chunks` |
-| `GET` | `/search` | Hybrid search (`mode=hybrid\|vector\|keyword`) |
+Every endpoint except `GET /health` requires the `X-API-Key` header when the
+`API_KEY` env var is set (auth is disabled when it is unset).
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/papers/ingest` | yes | Upload a PDF; returns **202 + `job_id`** and indexes in the background (`?wait=true` for synchronous 200) |
+| `GET` | `/papers` | yes | List papers (paginated; `author`/`category` filters, `sort=ingested_at\|score`) |
+| `GET` | `/papers/{id}` | yes | Paper detail |
+| `GET` | `/papers/{id}/summary` | yes | Cached structured summary only (never triggers LLM generation) |
+| `POST` | `/papers/{id}/summary` | yes | Generate the summary (cached unless `?force=true`) |
+| `POST` | `/papers/score-all` | yes | Compute and store relevance scores for all papers |
+| `POST` | `/papers/{id}/score` | yes | Compute and store the relevance score for one paper |
+| `GET` | `/summaries` | yes | List summaries with paper metadata (`limit`/`offset`) |
+| `POST` | `/jobs/summarize-all` | yes | Start a background job that summarizes papers (**202 + `job_id`**) |
+| `GET` | `/jobs` | yes | List background jobs |
+| `GET` | `/jobs/{id}` | yes | Poll a background job; `done` carries `result.paper_id`/`result.chunks` |
+| `GET` | `/search` | yes | Hybrid search (`mode=hybrid\|vector\|keyword`) |
+| `GET` | `/health` | no | Qdrant / embedding-svc reachability (**503** when degraded) |
+| `GET` | `/stats` | yes | Counts: `papers`, `chunks`, `qdrant_points` |
 
 ### Ingestion (async)
 
@@ -64,6 +75,45 @@ in one call — used by the collector scripts' `--wait`-free default via polling
   "cached": false
 }
 ```
+
+## Automated collection
+
+Besides manual PDF upload, `scripts/` collects papers from external sources and
+ingests them through `POST /papers/ingest` (the scripts only talk to the API
+over HTTP):
+
+| Script | Source |
+|--------|--------|
+| `scripts/arxiv_collect.py` | arXiv (`--categories`, `--max`, `--from-date`, `--until-date`) |
+| `scripts/pubmed_collect.py` | PubMed |
+| `scripts/openalex_collect.py` | OpenAlex |
+| `scripts/semantic_scholar_collect.py` | Semantic Scholar |
+
+All collectors accept `--api-url` (default `http://localhost:8020`) and
+`--summary-file` (write a run summary JSON); run `python scripts/<name>.py --help`
+for the full option list. When `API_KEY` is set on the server, export the same
+value as `PAPER_API_KEY` for the scripts.
+
+`.github/workflows/arxiv-daily.yml` runs them daily (cron `0 0 * * *`, 09:00 JST)
+on a self-hosted runner that can reach `localhost:8020`, then triggers bulk
+summarization (`POST /jobs/summarize-all`) and scoring (`POST /papers/score-all`).
+
+## Scoring & Portfolio
+
+- **Scoring** (`academic_paper/scorer.py`): `score = freshness (0-0.5) + category match (0-0.5)`.
+  Freshness decays exponentially with a 30-day half-life; category match is the
+  fraction of preferred categories present. Preferred categories come from the
+  `PREFERRED_CATEGORIES` env var (default `cs.AI,cs.LG,cs.CL`).
+- **Portfolio** (`scripts/generate_portfolio.py`): fetches papers sorted by score
+  from the API and writes a static site (`index.html`, `papers.json`) to
+  `--output-dir` (default `docs`):
+
+  ```bash
+  python scripts/generate_portfolio.py --api-url http://localhost:8020 --output-dir docs
+  ```
+
+  `.github/workflows/portfolio-publish.yml` regenerates and commits `docs/`
+  weekly (Sunday 10:00 JST).
 
 ## Setup
 
@@ -110,7 +160,26 @@ volumes:
 pytest
 ```
 
+### ruff version pin
+
+ruff is pinned in three places that must match: `pyproject.toml` (dev extra
+`ruff==X`), `.github/workflows/ci.yml` (`ruff-version`) and
+`.pre-commit-config.yaml` (`rev: vX`). `tests/test_ruff_pin_sync.py` fails when
+they drift (e.g. a Dependabot bump of only `pyproject.toml`), so bump all three
+in the same PR.
+
 ## License
 
 MIT
 
+### Third-party licenses
+
+- Runtime dependencies (`requirements.lock`, what the Docker image ships) are all
+  permissive (MIT / BSD / Apache-2.0 / ISC / PSF; `certifi` is MPL-2.0).
+- **Dev-only exception:** `fpdf2` (LGPL-3.0, optional `dev` extra) is used only by
+  tests to generate sample PDFs. It is not in `requirements.lock`, not installed in
+  the Docker image, and not part of the built wheel, so it is never distributed.
+  `pip install academic-paper-system[dev]` does install it into your dev environment.
+- `.github/workflows/license-check.yml` enforces an SPDX-style allow-list with
+  `pip-licenses` for both runtime and dev installs; `fpdf2` is the sole listed exception.
+  Adding another copyleft package makes the check fail.

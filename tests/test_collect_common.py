@@ -1,5 +1,6 @@
 """Tests for scripts/_collect_common.py helpers."""
 
+import argparse
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -8,7 +9,17 @@ import httpx
 import pytest
 
 # scripts/ is added to sys.path in tests/conftest.py (#272).
-from _collect_common import _paper_label, assert_safe_url, download_pdf, ingest_pdf, run_collect  # noqa: E402
+from _collect_common import (  # noqa: E402
+    _paper_label,
+    add_common_args,
+    assert_safe_url,
+    download_pdf,
+    format_date_range,
+    ingest_downloaded,
+    ingest_pdf,
+    run_collect,
+    write_summary,
+)
 
 # ---------------------------------------------------------------------------
 # download_pdf
@@ -293,6 +304,44 @@ def test_pin_resolution_forces_getaddrinfo_to_validated_result():
     assert socket.getaddrinfo is real_getaddrinfo
 
 
+def test_pin_resolution_rejects_nested_use_and_releases_afterwards():
+    """#314: a second pin while one is active raises, and the state is restored."""
+    import socket
+
+    from _collect_common import _pin_resolution
+
+    real_getaddrinfo = socket.getaddrinfo
+    ai = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("203.0.113.1", 443))]
+    with _pin_resolution("a.example", ai):
+        patched = socket.getaddrinfo
+        with pytest.raises(RuntimeError, match="already active"):
+            with _pin_resolution("b.example", ai):
+                pass
+        # The failed inner entry must not have disturbed the outer pin.
+        assert socket.getaddrinfo is patched
+    assert socket.getaddrinfo is real_getaddrinfo
+    # Lock released: a fresh pin works again.
+    with _pin_resolution("a.example", ai):
+        pass
+
+
+def test_pin_resolution_rejects_mismatched_port():
+    """#314: the pinned addrinfos are only valid for the validated port."""
+    import socket
+
+    from _collect_common import _pin_resolution
+
+    ai = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("203.0.113.1", 443))]
+    with _pin_resolution("example.com", ai):
+        assert socket.getaddrinfo("example.com", 443) == ai
+        assert socket.getaddrinfo("example.com", "443") == ai
+        assert socket.getaddrinfo("example.com", port=443) == ai
+        with pytest.raises(RuntimeError, match="pinned"):
+            socket.getaddrinfo("example.com", 8080)
+        with pytest.raises(RuntimeError, match="pinned"):
+            socket.getaddrinfo("example.com", None)
+
+
 def test_download_pdf_pins_resolution_during_fetch():
     """download_pdf must pin socket.getaddrinfo so the client's own connect
     can't re-resolve a rebinding domain to a different (private) address."""
@@ -443,3 +492,100 @@ def test_paper_label_falls_back_to_id():
 
 def test_paper_label_unknown():
     assert _paper_label({}) == "?"
+
+
+# ---------------------------------------------------------------------------
+# add_common_args / format_date_range / write_summary / ingest_downloaded (#525)
+# ---------------------------------------------------------------------------
+
+
+def test_add_common_args_defaults():
+    parser = argparse.ArgumentParser()
+    add_common_args(parser)
+    args = parser.parse_args([])
+    assert args.api_url == "http://localhost:8020"
+    assert args.poll_timeout == 300
+    assert args.summary_file is None
+    assert args.from_date == ""
+    assert args.until_date == ""
+
+
+def test_add_common_args_parses_values_and_validates_dates():
+    parser = argparse.ArgumentParser()
+    add_common_args(parser)
+    args = parser.parse_args(
+        ["--api-url", "http://x:1", "--poll-timeout", "5", "--summary-file", "s.json",
+         "--from-date", "2025-01-02", "--until-date", "2025-02-03"]
+    )  # fmt: skip
+    assert (args.api_url, args.poll_timeout, args.summary_file) == ("http://x:1", 5, "s.json")
+    assert (args.from_date, args.until_date) == ("2025-01-02", "2025-02-03")
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--from-date", "not-a-date"])
+
+
+def test_format_date_range():
+    assert format_date_range("", "") == ""
+    assert format_date_range("2025-01-01", "") == " [2025-01-01 → *]"
+    assert format_date_range("", "2025-02-01") == " [* → 2025-02-01]"
+
+
+def test_write_summary_path_none_is_noop(tmp_path):
+    write_summary(None, fetched=3)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_write_summary_defaults_when_counts_omitted(tmp_path):
+    out = tmp_path / "s.json"
+    write_summary(str(out), fetched=0)
+    assert json.loads(out.read_text()) == {"ingested": 0, "duplicate": 0, "failed": 0, "fetched": 0, "detail": []}
+
+
+def test_write_summary_with_fetch_error(tmp_path):
+    out = tmp_path / "s.json"
+    write_summary(str(out), fetched=0, fetch_error="boom")
+    data = json.loads(out.read_text())
+    assert data["fetch_error"] == "boom"
+    assert data["fetched"] == 0
+
+
+def test_write_summary_with_counts_and_detail_no_fetch_error_key(tmp_path):
+    out = tmp_path / "s.json"
+    counts = {"ingested": 1, "duplicate": 0, "failed": 1}
+    detail = [{"label": "a", "status": "ingested"}]
+    write_summary(str(out), fetched=2, counts=counts, detail=detail)
+    data = json.loads(out.read_text())
+    assert data == {**counts, "fetched": 2, "detail": detail}
+
+
+def test_ingest_downloaded_builds_metadata_and_calls_pre_ingest():
+    seen = {}
+
+    def _pre(tmp_path):
+        seen["pre"] = tmp_path
+
+    with patch("_collect_common.ingest_pdf", return_value={"status": "ingested"}) as mock_ingest:
+        result = ingest_downloaded(
+            _mock_stream_response(b"%PDF-1.4 x"),
+            "http://api",
+            pdf_url="https://example.com/a.pdf",
+            file_name="a.pdf",
+            title="T",
+            authors=["A", "B"],
+            categories=["c"],
+            published_date=None,
+            source="arxiv",
+            poll_timeout=7,
+            pre_ingest=_pre,
+        )
+    assert result == {"status": "ingested"}
+    assert seen["pre"].endswith(".pdf")
+    args = mock_ingest.call_args.args
+    assert args[1:3] == ("http://api", "a.pdf")
+    assert args[4] == {
+        "title": "T",
+        "authors": json.dumps(["A", "B"]),
+        "categories": json.dumps(["c"]),
+        "published_date": "",
+        "source": "arxiv",
+    }
+    assert args[5] == 7

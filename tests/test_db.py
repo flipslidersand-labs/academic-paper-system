@@ -11,9 +11,12 @@ from academic_paper.db import (
     get_chunks,
     get_connection,
     init_db,
+    list_papers_filtered,
     save_chunks,
     save_paper,
+    save_summary,
     search_fts,
+    upsert_job,
 )
 
 
@@ -257,3 +260,113 @@ def test_init_db_backfills_arxiv_id(temp_db):
     row = conn.execute("SELECT arxiv_id FROM papers WHERE file_hash = 'h-legacy'").fetchone()
     assert row[0] == "2410.10071"
     conn.close()
+
+
+def _jobs_columns(db_path):
+    conn = get_connection(db_path)
+    try:
+        return {r[1]: r for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+    finally:
+        conn.close()
+
+
+def test_init_db_migrates_legacy_jobs_table_without_kind(tmp_path):
+    """A pre-kind jobs table gains kind (NOT NULL DEFAULT '') and result (#476)."""
+    temp_db = str(tmp_path / "legacy.db")
+    conn = get_connection(temp_db)
+    conn.execute(
+        "CREATE TABLE jobs (id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending', "
+        "total INTEGER NOT NULL DEFAULT 0, processed INTEGER NOT NULL DEFAULT 0, "
+        "failed INTEGER NOT NULL DEFAULT 0, errors TEXT NOT NULL DEFAULT '[]', "
+        "started_at REAL NOT NULL, finished_at REAL)"
+    )
+    conn.execute("INSERT INTO jobs (id, started_at) VALUES ('old', 1.0)")
+    conn.commit()
+    conn.close()
+
+    init_db(temp_db)
+
+    cols = _jobs_columns(temp_db)
+    assert "kind" in cols and "result" in cols
+    conn = get_connection(temp_db)
+    assert conn.execute("SELECT kind FROM jobs WHERE id='old'").fetchone()[0] == ""
+    conn.close()
+
+
+def test_init_db_keeps_existing_jobs_kind_column_idempotent(temp_db):
+    """init_db twice on a DB that already has kind must not fail or duplicate (#476)."""
+    init_db(temp_db)
+    init_db(temp_db)
+    assert {"kind", "result"} <= set(_jobs_columns(temp_db))
+
+
+# --- #309: failed writes must not leave an open transaction -----------------
+
+
+def _chunk(idx: int, qdrant_id: str) -> dict:
+    return {
+        "chunk_index": idx,
+        "page_start": 1,
+        "page_end": 1,
+        "text": f"text {idx}",
+        "token_count": 2,
+        "qdrant_id": qdrant_id,
+    }
+
+
+def _fail_save_chunks(conn):
+    pid = save_paper(conn, "a.pdf", "hash-a")
+    with pytest.raises(sqlite3.IntegrityError):
+        # Second chunk violates UNIQUE(qdrant_id) after the first was inserted.
+        save_chunks(conn, pid, [_chunk(0, "same"), _chunk(1, "same")])
+    return pid
+
+
+def _fail_save_paper(conn):
+    save_paper(conn, "a.pdf", "dup-hash")
+    with pytest.raises(sqlite3.IntegrityError):
+        save_paper(conn, "b.pdf", "dup-hash")
+
+
+def _fail_save_summary(conn):
+    with pytest.raises(sqlite3.IntegrityError):
+        save_summary(conn, 9999, "m", {"objective": "x"})  # FK violation
+
+
+def _fail_upsert_job(conn):
+    with pytest.raises(sqlite3.IntegrityError):
+        upsert_job(conn, "j1", None, 0, 0, 0, [], 0.0, None)  # status NOT NULL
+
+
+@pytest.mark.parametrize("fail", [_fail_save_chunks, _fail_save_paper, _fail_save_summary, _fail_upsert_job])
+def test_failed_write_rolls_back_open_transaction(temp_db, fail):
+    conn = get_connection(temp_db)
+    try:
+        fail(conn)
+        assert not conn.in_transaction
+    finally:
+        conn.close()
+
+
+def test_failed_save_chunks_leaves_no_partial_rows(temp_db):
+    conn = get_connection(temp_db)
+    try:
+        pid = _fail_save_chunks(conn)
+        assert get_chunks(conn, pid) == []
+    finally:
+        conn.close()
+
+
+def test_failed_write_does_not_hold_write_lock_for_other_connections(temp_db):
+    """A failed save_* followed by list_papers_filtered must not pin the write lock."""
+    conn = get_connection(temp_db)
+    other = get_connection(temp_db)
+    other.execute("PRAGMA busy_timeout = 100")
+    try:
+        _fail_save_chunks(conn)
+        list_papers_filtered(conn)
+        # Would raise "database is locked" if conn kept its failed transaction.
+        save_paper(other, "c.pdf", "hash-c")
+    finally:
+        conn.close()
+        other.close()

@@ -312,3 +312,17 @@ def test_embedding_timeout_env_override(monkeypatch):
 
     s = Settings()
     assert s.embedding_timeout == 60
+
+
+@pytest.mark.anyio
+async def test_health_sends_api_key_and_raises_on_error_status():
+    """EmbedderClient.health は X-API-Key 付きで /health を叩き、エラー status で例外 (#495)"""
+    embedder = EmbedderClient(base_url="http://embed.test", api_key="secret")
+    with respx.mock:
+        route = respx.get("http://embed.test/health").mock(return_value=httpx.Response(200))
+        await embedder.health()
+        assert route.calls.last.request.headers["X-API-Key"] == "secret"
+
+        respx.get("http://embed.test/health").mock(return_value=httpx.Response(401))
+        with pytest.raises(httpx.HTTPStatusError):
+            await embedder.health()

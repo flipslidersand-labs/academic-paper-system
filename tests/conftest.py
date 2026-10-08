@@ -15,8 +15,20 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 import pytest
 
-from academic_paper.db import init_db
-from academic_paper.jobs import job_store
+# Settings reads ".env" relative to the cwd (#505). Import the package from an
+# empty cwd so a developer's local .env cannot leak into the module-level
+# `settings` singleton, then disable env_file for any later Settings() calls.
+_orig_cwd = os.getcwd()
+with tempfile.TemporaryDirectory() as _empty_dir:
+    os.chdir(_empty_dir)
+    try:
+        from academic_paper.config import Settings
+
+        Settings.model_config["env_file"] = None
+        from academic_paper.db import init_db
+        from academic_paper.jobs import job_store
+    finally:
+        os.chdir(_orig_cwd)
 
 
 @pytest.fixture

@@ -4,8 +4,12 @@ Provides:
   - download_pdf   : stream a PDF URL into a temp file (avoid full-content memory)
   - ingest_pdf     : call submit_and_wait and surface server detail on HTTP error
   - run_collect    : canonical ingest loop — counts, summary print, JSON write, exit
+  - add_common_args / format_date_range : shared CLI flags and date-range display
+  - write_summary  : single writer for the summary JSON (workflow contract)
+  - ingest_downloaded : download_pdf + ingest_pdf with shared metadata assembly
 """
 
+import argparse
 import contextlib
 import ipaddress
 import json
@@ -13,10 +17,12 @@ import re
 import socket
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
 import httpx
+from cli_utils import iso_date
 from ingest_client import submit_and_wait
 
 from academic_paper.config import settings
@@ -78,6 +84,11 @@ def _split_safe_url(url: str) -> tuple[str, int]:
     return host, port
 
 
+# Guards the process-wide socket.getaddrinfo patch: only one pin may be active at a
+# time. A nested or concurrent entry raises instead of silently cross-polluting (#314).
+_pin_lock = threading.Lock()
+
+
 @contextlib.contextmanager
 def _pin_resolution(host: str, addrinfos: list):
     """Force ``socket.getaddrinfo(host, ...)`` to return the already-validated
@@ -91,12 +102,26 @@ def _pin_resolution(host: str, addrinfos: list):
 
     Collector scripts process papers strictly sequentially in a single
     thread (see ``run_collect``), so process-wide monkeypatching here is
-    safe; this must not be used from concurrent/async code paths.
+    safe; this must not be used from concurrent/async code paths. That
+    contract is enforced: a nested or concurrent entry raises RuntimeError (#314).
+
+    A lookup for *host* on a port other than the validated one is refused
+    (RuntimeError) rather than answered with the wrong addresses (#314).
     """
+    if not _pin_lock.acquire(blocking=False):
+        raise RuntimeError("_pin_resolution is already active; nested/concurrent use is not supported")
     real_getaddrinfo = socket.getaddrinfo
+    pinned_ports = {int(info[4][1]) for info in addrinfos}
 
     def _patched(node, *args, **kwargs):
         if node == host:
+            port = args[0] if args else kwargs.get("port")
+            try:
+                port_ok = port is not None and int(port) in pinned_ports
+            except (TypeError, ValueError):
+                port_ok = False
+            if not port_ok:
+                raise RuntimeError(f"getaddrinfo({host!r}, port={port!r}) does not match the pinned resolution")
             return addrinfos
         return real_getaddrinfo(node, *args, **kwargs)
 
@@ -105,6 +130,7 @@ def _pin_resolution(host: str, addrinfos: list):
         yield
     finally:
         socket.getaddrinfo = real_getaddrinfo
+        _pin_lock.release()
 
 
 @contextlib.contextmanager
@@ -196,6 +222,110 @@ def ingest_pdf(
         raise RuntimeError(f"HTTP {exc.response.status_code}: {detail}") from exc
 
 
+def add_common_args(parser: argparse.ArgumentParser) -> None:
+    """Register the CLI flags shared by every collector script."""
+    parser.add_argument(
+        "--api-url",
+        default="http://localhost:8020",
+        help="academic-paper-system API base URL (default: http://localhost:8020)",
+    )
+    parser.add_argument(
+        "--poll-timeout",
+        type=int,
+        default=300,
+        metavar="SEC",
+        help="Max seconds to wait for each ingest job to finish (default: 300)",
+    )
+    parser.add_argument(
+        "--summary-file",
+        default=None,
+        help="Write run summary JSON to this path (optional)",
+    )
+    parser.add_argument(
+        "--from-date",
+        type=iso_date,
+        default="",
+        metavar="YYYY-MM-DD",
+        help="Only include papers published on or after this date (inclusive)",
+    )
+    parser.add_argument(
+        "--until-date",
+        type=iso_date,
+        default="",
+        metavar="YYYY-MM-DD",
+        help="Only include papers published on or before this date (inclusive)",
+    )
+
+
+def format_date_range(from_date: str, until_date: str) -> str:
+    """Return ``" [from → until]"`` for log lines, or ``""`` when neither is set."""
+    if from_date or until_date:
+        return f" [{from_date or '*'} → {until_date or '*'}]"
+    return ""
+
+
+def write_summary(
+    path: str | None,
+    *,
+    fetched: int,
+    counts: dict[str, int] | None = None,
+    detail: list[dict] | None = None,
+    fetch_error: str | None = None,
+) -> None:
+    """Write the run-summary JSON read by the workflows; no-op when *path* is None."""
+    if not path:
+        return
+    payload: dict = {
+        **(counts if counts is not None else {"ingested": 0, "duplicate": 0, "failed": 0}),
+        "fetched": fetched,
+        "detail": detail if detail is not None else [],
+    }
+    if fetch_error is not None:
+        payload["fetch_error"] = fetch_error
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
+
+
+def ingest_downloaded(
+    client: httpx.Client,
+    api_url: str,
+    *,
+    pdf_url: str,
+    file_name: str,
+    title: str,
+    authors: list,
+    categories: list,
+    published_date: str | None,
+    source: str,
+    pdf_timeout: int = 60,
+    poll_timeout: int = 300,
+    pre_ingest=None,
+) -> dict:
+    """Download *pdf_url* and ingest it with the standard metadata shape.
+
+    ``authors``/``categories`` are JSON-encoded, a missing ``published_date``
+    becomes ``""`` and *source* is attached. ``pre_ingest(tmp_path)``, when
+    given, runs after download and before the ingest call (e.g. arXiv ID check).
+    """
+    with download_pdf(client, pdf_url, pdf_timeout) as tmp_path:
+        if pre_ingest is not None:
+            pre_ingest(tmp_path)
+        return ingest_pdf(
+            client,
+            api_url,
+            file_name,
+            tmp_path,
+            {
+                "title": title,
+                "authors": json.dumps(authors),
+                "categories": json.dumps(categories),
+                "published_date": published_date or "",
+                "source": source,
+            },
+            poll_timeout,
+        )
+
+
 def run_collect(
     source_label: str,
     papers: list[dict],
@@ -244,11 +374,7 @@ def run_collect(
     print(f"- Failed   : {counts['failed']}")
 
     if summary_file:
-        payload: dict = {**counts, "fetched": len(papers), "detail": detail}
-        if fetch_error is not None:
-            payload["fetch_error"] = fetch_error
-        with open(summary_file, "w") as f:
-            json.dump(payload, f, indent=2)
+        write_summary(summary_file, fetched=len(papers), counts=counts, detail=detail, fetch_error=fetch_error)
         print(f"[{tag_lower}] summary written to {summary_file}")
 
     if counts["failed"] > 0:
