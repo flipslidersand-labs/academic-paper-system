@@ -21,14 +21,13 @@ Exit codes:
 """
 
 import argparse
-import json
 import os
 import sys
 import time
 
 import httpx
-from _collect_common import download_pdf, ingest_pdf, run_collect
-from cli_utils import check_date_order, iso_date, positive_int
+from _collect_common import add_common_args, format_date_range, ingest_downloaded, run_collect, write_summary
+from cli_utils import check_date_order, positive_int
 
 S2_API = "https://api.semanticscholar.org/graph/v1/paper/search"
 S2_FIELDS = "paperId,title,authors,year,publicationDate,openAccessPdf,fieldsOfStudy"
@@ -124,21 +123,19 @@ def ingest_paper(
     categories = paper.get("fieldsOfStudy") or []
     pub_date = (paper.get("publicationDate") or "")[:10] or None
 
-    with download_pdf(client, pdf_url, pdf_timeout) as tmp_path:
-        result = ingest_pdf(
-            client,
-            api_url,
-            f"s2_{s2_id[:12]}.pdf",
-            tmp_path,
-            {
-                "title": title,
-                "authors": json.dumps(authors),
-                "categories": json.dumps(categories),
-                "published_date": pub_date or "",
-                "source": "semantic_scholar",
-            },
-            poll_timeout,
-        )
+    result = ingest_downloaded(
+        client,
+        api_url,
+        pdf_url=pdf_url,
+        file_name=f"s2_{s2_id[:12]}.pdf",
+        title=title,
+        authors=authors,
+        categories=categories,
+        published_date=pub_date,
+        source="semantic_scholar",
+        pdf_timeout=pdf_timeout,
+        poll_timeout=poll_timeout,
+    )
     return {**result, "label": s2_id[:8], "s2_id": s2_id}
 
 
@@ -158,20 +155,6 @@ def main() -> None:
         help="[deprecated] Use --query instead. If given, joined as single query.",
     )
     parser.add_argument(
-        "--from-date",
-        type=iso_date,
-        default="",
-        metavar="YYYY-MM-DD",
-        help="Filter papers published on or after this date (inclusive)",
-    )
-    parser.add_argument(
-        "--until-date",
-        type=iso_date,
-        default="",
-        metavar="YYYY-MM-DD",
-        help="Filter papers published on or before this date (inclusive)",
-    )
-    parser.add_argument(
         "--max",
         type=positive_int,
         default=10,
@@ -179,27 +162,11 @@ def main() -> None:
         help="Max open-access papers to ingest (default: 10)",
     )
     parser.add_argument(
-        "--api-url",
-        default="http://localhost:8020",
-        help="academic-paper-system API base URL",
-    )
-    parser.add_argument(
-        "--poll-timeout",
-        type=int,
-        default=300,
-        metavar="SEC",
-        help="Max seconds to wait for each ingest job to finish (default: 300)",
-    )
-    parser.add_argument(
         "--api-key",
         default="",
         help="Semantic Scholar API key (or set SEMANTIC_SCHOLAR_API_KEY env var)",
     )
-    parser.add_argument(
-        "--summary-file",
-        default=None,
-        help="Write run summary JSON to this path",
-    )
+    add_common_args(parser)
     args = parser.parse_args()
     check_date_order(parser, args.from_date, args.until_date)
 
@@ -212,9 +179,7 @@ def main() -> None:
 
     api_key = args.api_key or os.environ.get("SEMANTIC_SCHOLAR_API_KEY", "")
 
-    date_range = ""
-    if args.from_date or args.until_date:
-        date_range = f" [{args.from_date or '*'} → {args.until_date or '*'}]"
+    date_range = format_date_range(args.from_date, args.until_date)
     print(f"[s2] query='{query}'{date_range} max={args.max_results} api={args.api_url}")
     if api_key:
         print("[s2] using API key")
@@ -229,9 +194,7 @@ def main() -> None:
     print(f"[s2] found {len(papers)} open-access papers")
     if fetch_error and not papers:
         print(f"[s2] FATAL: search API failed with no results: {fetch_error}", file=sys.stderr)
-        if args.summary_file:
-            with open(args.summary_file, "w") as f:
-                json.dump({"fetched": 0, "fetch_error": fetch_error}, f, indent=2)
+        write_summary(args.summary_file, fetched=0, fetch_error=fetch_error)
         sys.exit(1)
 
     run_collect(
