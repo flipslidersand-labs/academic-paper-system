@@ -167,7 +167,7 @@ async def test_embed_fallback_client_uses_embedding_timeout():
     fake_settings = Settings(embedding_timeout=99)
 
     with (
-        patch("academic_paper.embedder.settings", fake_settings),
+        patch("academic_paper.embedder.get_settings", return_value=fake_settings),
         respx.mock,
     ):
         respx.post("http://localhost:9092/embed/batch").mock(
