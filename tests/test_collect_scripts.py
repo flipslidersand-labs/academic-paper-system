@@ -422,3 +422,85 @@ def test_portfolio_main_aborts_when_no_papers_fetched(monkeypatch, tmp_path):
 
     assert exc_info.value.code == 1
     assert not (out_dir / "index.html").exists()
+
+
+# --- #527: openalex / semantic_scholar use shared helpers ---
+
+
+@pytest.mark.parametrize("module_name", ["openalex_collect", "semantic_scholar_collect"])
+def test_fetch_failure_writes_fetch_error_summary_and_exits_1(monkeypatch, tmp_path, module_name):
+    module = {"openalex_collect": openalex_collect, "semantic_scholar_collect": semantic_scholar_collect}[module_name]
+    monkeypatch.setattr(module, "fetch_papers", lambda *a, **k: ([], "api 500"))
+    out = tmp_path / "s.json"
+    monkeypatch.setattr("sys.argv", [module_name, "--summary-file", str(out)])
+    with pytest.raises(SystemExit) as ei:
+        module.main()
+    assert ei.value.code == 1
+    data = json.loads(out.read_text())
+    assert data["fetched"] == 0
+    assert data["fetch_error"] == "api 500"
+
+
+def _capture_ingest(monkeypatch):
+    import contextlib
+
+    import _collect_common
+
+    captured = {}
+
+    @contextlib.contextmanager
+    def _fake_download(client, url, timeout=60, max_mb=None):
+        captured["url"] = url
+        yield "/tmp/fake.pdf"
+
+    def _fake_ingest(client, api_url, file_name, tmp_path, metadata, poll_timeout=300):
+        captured["file_name"] = file_name
+        captured["metadata"] = metadata
+        return {"status": "ingested"}
+
+    monkeypatch.setattr(_collect_common, "download_pdf", _fake_download)
+    monkeypatch.setattr(_collect_common, "ingest_pdf", _fake_ingest)
+    return captured
+
+
+def test_s2_ingest_paper_metadata_source(monkeypatch):
+    captured = _capture_ingest(monkeypatch)
+    paper = _s2_paper("abcdef1234567890")
+    paper.update(
+        title="T\nx",
+        authors=[{"name": "A"}],
+        fieldsOfStudy=["CS"],
+        publicationDate="2025-01-02",
+    )
+    result = semantic_scholar_collect.ingest_paper(None, paper, "http://api")
+    assert result["s2_id"] == "abcdef1234567890"
+    assert captured["file_name"] == "s2_abcdef123456.pdf"
+    assert captured["metadata"] == {
+        "title": "T x",
+        "authors": json.dumps(["A"]),
+        "categories": json.dumps(["CS"]),
+        "published_date": "2025-01-02",
+        "source": "semantic_scholar",
+    }
+
+
+def test_openalex_ingest_paper_metadata_source(monkeypatch):
+    captured = _capture_ingest(monkeypatch)
+    work = {
+        "id": "https://openalex.org/W123",
+        "title": "Title",
+        "_pdf_url": "https://example.com/a.pdf",
+        "authorships": [{"author": {"display_name": "A"}}, {"author": {}}],
+        "topics": [{"field": {"display_name": "CS"}}],
+        "publication_date": None,
+    }
+    result = openalex_collect.ingest_paper(None, work, "http://api")
+    assert result["id"] == "W123"
+    assert captured["url"] == "https://example.com/a.pdf"
+    assert captured["metadata"] == {
+        "title": "Title",
+        "authors": json.dumps(["A"]),
+        "categories": json.dumps(["CS"]),
+        "published_date": "",
+        "source": "openalex",
+    }
