@@ -51,6 +51,12 @@ def make_qdrant_id(file_hash: str, chunk_index: int) -> str:
 
 
 class QdrantStore:
+    """Qdrant ストア。公開 API は a* 非同期版（aensure_collection/aupsert/adelete_by_paper_id/asearch）と close/aclose。
+
+    _ensure_collection/_upsert/_delete_by_paper_id/_search は to_thread 経由専用の内部実装
+    （with_retry の time.sleep を含むため event loop 上で直接呼ぶと停止する #149）。
+    """
+
     def __init__(
         self,
         url: str | None = None,
@@ -64,7 +70,7 @@ class QdrantStore:
         self.vector_size = vector_size or settings.embedding_dim
         self.client = QdrantClient(url=self.url, api_key=self.api_key, timeout=settings.qdrant_timeout)
 
-    def ensure_collection(self) -> None:
+    def _ensure_collection(self) -> None:
         """コレクションが存在しなければ作成（冪等、失敗時3回リトライ #266）
         size=settings.embedding_dim, distance=Cosine。既存コレクションの次元が不一致なら ValueError。
         """
@@ -91,7 +97,7 @@ class QdrantStore:
 
         _qdrant_retry(_do)
 
-    def upsert(self, points: list[dict]) -> None:
+    def _upsert(self, points: list[dict]) -> None:
         """チャンクをQdrantにupsertする（失敗時3回リトライ、200件ずつバッチ分割 #236）
         points要素: {"id": str(UUID), "vector": List[float], "payload": dict}
         payload例: {"paper_id": int, "chunk_index": int, "text": str, "file_name": str}
@@ -113,7 +119,7 @@ class QdrantStore:
 
             _qdrant_retry(_do)
 
-    def delete_by_paper_id(self, paper_id: int) -> None:
+    def _delete_by_paper_id(self, paper_id: int) -> None:
         """Qdrant から paper_id に属する全ポイントを削除（補償用、#145）。"""
         flt = Filter(must=[FieldCondition(key="paper_id", match=MatchValue(value=paper_id))])
 
@@ -128,7 +134,7 @@ class QdrantStore:
 
         _qdrant_retry(_do)
 
-    def search(self, query_vector: list[float], limit: int = 10, paper_id_filter: int | None = None) -> list[dict]:
+    def _search(self, query_vector: list[float], limit: int = 10, paper_id_filter: int | None = None) -> list[dict]:
         """ベクトル類似検索（失敗時3回リトライ）
         paper_id_filterが指定された場合はpaper_idでフィルタリング
         Returns: [{"id": str, "score": float, "payload": dict}]
@@ -161,18 +167,18 @@ class QdrantStore:
     # ------------------------------------------------------------------
 
     async def aupsert(self, points: list[dict]) -> None:
-        await to_thread_cancellable(self.upsert, points)
+        await to_thread_cancellable(self._upsert, points)
 
     async def adelete_by_paper_id(self, paper_id: int) -> None:
-        await to_thread_cancellable(self.delete_by_paper_id, paper_id)
+        await to_thread_cancellable(self._delete_by_paper_id, paper_id)
 
     async def asearch(
         self, query_vector: list[float], limit: int = 10, paper_id_filter: int | None = None
     ) -> list[dict]:
-        return await to_thread_cancellable(self.search, query_vector, limit, paper_id_filter)
+        return await to_thread_cancellable(self._search, query_vector, limit, paper_id_filter)
 
     async def aensure_collection(self) -> None:
-        await to_thread_cancellable(self.ensure_collection)
+        await to_thread_cancellable(self._ensure_collection)
 
     def ping(self) -> None:
         """Qdrant への疎通確認。到達不能なら例外を送出する（/health・起動プローブ用）。"""
