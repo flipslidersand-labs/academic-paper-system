@@ -1,8 +1,7 @@
 """API-key authentication with scope checks (#602, parent #355).
 
-Behavior is unchanged from the single-scope era: every accepted key currently
-holds every scope, so a valid key always passes and the 403 path is not yet
-reachable from real keys. Per-key scope assignment is a later step.
+api_key / api_keys hold every scope; ingest_api_key holds only the ingest scope
+(#626). Endpoints do not yet request scopes, so existing behavior is unchanged.
 """
 
 import hmac
@@ -23,30 +22,38 @@ class Scope(StrEnum):
 ALL_SCOPES: frozenset[Scope] = frozenset(Scope)
 
 
-def resolve_scopes(provided: str | None, configured: list[str]) -> frozenset[Scope] | None:
+def resolve_scopes(
+    provided: str | None, configured: list[str], ingest_keys: list[str] | tuple[str, ...] = ()
+) -> frozenset[Scope] | None:
     """Return the scopes granted to ``provided``, or None if it matches no configured key.
 
     Compares as UTF-8 bytes so a non-ASCII header fails the comparison instead of
     raising TypeError in hmac.compare_digest (#425), and checks every candidate
-    without short-circuiting (#601). Currently every key gets every scope.
+    without short-circuiting (#601). ``configured`` keys get every scope;
+    ``ingest_keys`` get only the ingest scope (#626).
     """
     value = (provided or "").encode("utf-8")
-    matches = [hmac.compare_digest(value, key.encode("utf-8")) for key in configured]
-    return ALL_SCOPES if any(matches) else None
+    full = [hmac.compare_digest(value, key.encode("utf-8")) for key in configured]
+    ingest = [hmac.compare_digest(value, key.encode("utf-8")) for key in ingest_keys]
+    if any(full):
+        return ALL_SCOPES
+    if any(ingest):
+        return frozenset({Scope.INGEST})
+    return None
 
 
 def require_scope(*scopes: Scope) -> Callable[..., Awaitable[None]]:
     """FastAPI dependency factory: 401 for missing/invalid key, 403 if the key lacks a scope.
 
-    Auth disabled (no api_key / api_keys configured) passes through.
+    Auth disabled (no api_key / api_keys / ingest_api_key configured) passes through.
     """
     required = frozenset(scopes)
 
     async def dependency(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
-        configured = settings.accepted_api_keys
-        if not configured:
+        if not settings.auth_enabled:
             return  # auth disabled
-        granted = resolve_scopes(x_api_key, configured)
+        ingest_keys = [settings.ingest_api_key] if settings.ingest_api_key else []
+        granted = resolve_scopes(x_api_key, settings.accepted_api_keys, ingest_keys)
         if granted is None:
             raise HTTPException(status_code=401, detail="Invalid or missing API key")
         if not required <= granted:

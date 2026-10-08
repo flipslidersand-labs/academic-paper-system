@@ -139,8 +139,10 @@ async def lifespan(app: FastAPI):
     # (documented asyncio pitfall), and cancel it on shutdown.
     app.state.probe_task = asyncio.create_task(_probe_startup_health(app))
     await _cleanup_orphaned_ingests(app)
-    if not settings.accepted_api_keys:
-        logger.warning("API_KEY is not set — all endpoints (including write endpoints) are unauthenticated (#241)")
+    if not settings.auth_enabled:
+        logger.warning(
+            "API_KEY is not set (nor API_KEYS / INGEST_API_KEY) — all endpoints (including write endpoints) are unauthenticated (#241)"
+        )
     yield
     # Graceful shutdown: wait up to 30 s for in-flight ingest tasks (#194).
     active = list(app.state.active_ingest_tasks)
