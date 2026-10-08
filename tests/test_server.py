@@ -126,7 +126,7 @@ def test_ingest_valid_pdf(client):
     """Test POST /papers/ingest with valid PDF."""
     pdf_content = create_minimal_pdf()
 
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = [
             {"page": 1, "text": "Test Document content"},
         ]
@@ -158,7 +158,7 @@ def test_ingest_cleans_up_tmpfile(client):
 
     with (
         patch("academic_paper.server.tempfile.NamedTemporaryFile", side_effect=fake_ntf),
-        patch("academic_paper.server.extract_text") as mock_extract,
+        patch("academic_paper.services.ingest_service.extract_text") as mock_extract,
     ):
         mock_extract.return_value = [{"page": 1, "text": "Test Document content"}]
         response = client.post(
@@ -187,7 +187,7 @@ def test_ingest_cleans_up_tmpfile_on_error(client):
 
     with (
         patch("academic_paper.server.tempfile.NamedTemporaryFile", side_effect=fake_ntf),
-        patch("academic_paper.server.extract_text", side_effect=RuntimeError("boom")),
+        patch("academic_paper.services.ingest_service.extract_text", side_effect=RuntimeError("boom")),
     ):
         response = client.post(
             "/papers/ingest?wait=true",
@@ -229,7 +229,7 @@ def test_ingest_extract_timeout_fails_job_and_cleans_tmpfile(client):
     with (
         patch.object(settings, "pdf_extract_timeout", 0.05),
         patch("academic_paper.server.tempfile.NamedTemporaryFile", side_effect=fake_ntf),
-        patch("academic_paper.server.extract_text", side_effect=slow_extract),
+        patch("academic_paper.services.ingest_service.extract_text", side_effect=slow_extract),
     ):
         response = client.post(
             "/papers/ingest?wait=true",
@@ -245,7 +245,7 @@ def test_ingest_duplicate_pdf(client):
     """Test POST /papers/ingest with duplicate PDF returns 409."""
     pdf_content = create_minimal_pdf()
 
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = [
             {"page": 1, "text": "Test Document content"},
         ]
@@ -270,7 +270,7 @@ def test_list_papers_with_data(client):
     """Test GET /papers returns papers after ingestion."""
     pdf_content = create_minimal_pdf()
 
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = [
             {"page": 1, "text": "Test Document content"},
         ]
@@ -295,7 +295,7 @@ def test_ingest_calls_embedder(client):
     """Test POST /papers/ingest calls EmbedderClient and QdrantStore."""
     pdf_content = create_minimal_pdf()
 
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = [
             {"page": 1, "text": "Test Document content paragraph one"},
         ]
@@ -317,7 +317,7 @@ def test_ingest_stores_qdrant_id(client):
     """Test POST /papers/ingest stores qdrant_id in database."""
     pdf_content = create_minimal_pdf()
 
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = [
             {"page": 1, "text": "Test Document content paragraph one"},
         ]
@@ -387,7 +387,7 @@ def test_stats_returns_counts(client):
     # First ingest a paper to get some data
     pdf_content = create_minimal_pdf()
 
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = [
             {"page": 1, "text": "Test Document content"},
         ]
@@ -421,7 +421,7 @@ def test_get_paper_by_id_success(client):
     """Test GET /papers/{paper_id} returns paper details."""
     pdf_content = create_minimal_pdf()
 
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = [{"page": 1, "text": "Test Document content"}]
         resp = client.post(
             "/papers/ingest?wait=true",
@@ -503,7 +503,7 @@ def test_ingest_empty_pages(client):
     """Test POST /papers/ingest returns 400 when no text extracted from PDF."""
     pdf_content = create_minimal_pdf()
 
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = []
 
         response = client.post(
@@ -518,8 +518,8 @@ def test_ingest_no_chunks(client):
     pdf_content = create_minimal_pdf()
 
     with (
-        patch("academic_paper.server.extract_text") as mock_extract,
-        patch("academic_paper.server.chunk_pages") as mock_chunk,
+        patch("academic_paper.services.ingest_service.extract_text") as mock_extract,
+        patch("academic_paper.services.ingest_service.chunk_pages") as mock_chunk,
     ):
         mock_extract.return_value = [{"page": 1, "text": "Some text"}]
         mock_chunk.return_value = []
@@ -535,7 +535,7 @@ def test_ingest_embedding_connect_error_returns_503(client):
     """Embedding service connect failure → 503 (upstream unavailable), not 400 (#148)."""
     pdf_content = create_minimal_pdf()
 
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = [{"page": 1, "text": "Test Document content"}]
         client.app.state.embedder.embed = AsyncMock(side_effect=httpx.ConnectError("refused"))
 
@@ -550,7 +550,7 @@ def test_ingest_extract_value_error_returns_400(client):
     """ValueError from extraction (no text / no chunks) → 400, not 500 (#148)."""
     pdf_content = create_minimal_pdf()
 
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = [{"page": 1, "text": "Test Document content"}]
         client.app.state.embedder.embed = AsyncMock(side_effect=ValueError("No chunks generated"))
 
@@ -569,8 +569,8 @@ def test_ingest_embedding_count_mismatch_returns_502(client):
     pdf_content = create_minimal_pdf()
 
     with (
-        patch("academic_paper.server.extract_text") as mock_extract,
-        patch("academic_paper.server.chunk_pages") as mock_chunk,
+        patch("academic_paper.services.ingest_service.extract_text") as mock_extract,
+        patch("academic_paper.services.ingest_service.chunk_pages") as mock_chunk,
     ):
         mock_extract.return_value = [{"page": 1, "text": "Some text"}]
         mock_chunk.return_value = [
@@ -596,7 +596,7 @@ def test_ingest_async_returns_202_and_completes_job(client):
     # than inline before the response is returned, so the mock must stay active
     # through _wait_for_job() too — not just through the POST — or the real
     # extract_text() can run once this patch is torn down.
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = [{"page": 1, "text": "Async ingest content"}]
 
         response = client.post(
@@ -623,7 +623,7 @@ def test_ingest_async_duplicate_returns_409(client):
     """Async ingest of an already-ingested file returns 409 synchronously."""
     pdf_content = create_minimal_pdf()
 
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = [{"page": 1, "text": "Dup content"}]
         first = client.post(
             "/papers/ingest",
@@ -650,7 +650,7 @@ def test_ingest_async_job_failed_on_no_text(client):
 
     # Keep the mock active through _wait_for_job(), same reasoning as
     # test_ingest_async_returns_202_and_completes_job above (#277).
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = []
         response = client.post(
             "/papers/ingest",
@@ -675,7 +675,7 @@ def test_ingest_async_upsert_failure_compensates_qdrant(client):
     for delete_mock in (AsyncMock(return_value=None), AsyncMock(side_effect=RuntimeError("qdrant down"))):
         client.app.state.vector_store.aupsert = AsyncMock(side_effect=RuntimeError("batch 2 failed"))
         client.app.state.vector_store.adelete_by_paper_id = delete_mock
-        with patch("academic_paper.server.extract_text") as mock_extract:
+        with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
             mock_extract.return_value = [{"page": 1, "text": f"Doc {id(delete_mock)}"}]
             response = client.post(
                 "/papers/ingest",
@@ -703,7 +703,7 @@ def test_ingest_async_job_failed_when_paper_status_update_raises(client):
     pdf_content = create_minimal_pdf()
 
     with (
-        patch("academic_paper.server.extract_text") as mock_extract,
+        patch("academic_paper.services.ingest_service.extract_text") as mock_extract,
         patch("academic_paper.server.update_paper_status", side_effect=sqlite3.OperationalError("database is locked")),
     ):
         mock_extract.return_value = []  # triggers the "No text extracted" failure path
@@ -744,7 +744,7 @@ def test_ingest_async_job_errors_do_not_leak_internal_url(client):
     client.app.state.embedder.embed = AsyncMock(
         side_effect=httpx.ConnectError("All connection attempts failed for http://10.0.0.5:9092/embed/batch")
     )
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = [{"page": 1, "text": "Some text"}]
         response = client.post(
             "/papers/ingest",
@@ -848,7 +848,7 @@ def test_ingest_sanitizes_title_and_source(client):
     """title/source with control chars are sanitized before being stored (#233)."""
     pdf_content = create_minimal_pdf()
 
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = [{"page": 1, "text": "Test Document content"}]
 
         response = client.post(
@@ -1088,7 +1088,7 @@ def test_ingest_file_at_limit_is_accepted(client):
 
     with (
         patch.object(settings, "max_upload_mb", limit_mb),
-        patch("academic_paper.server.extract_text") as mock_extract,
+        patch("academic_paper.services.ingest_service.extract_text") as mock_extract,
     ):
         mock_extract.return_value = [{"page": 1, "text": "Test content"}]
         response = client.post(
@@ -1158,7 +1158,7 @@ def test_ingest_failed_paper_can_be_reingest(client):
     """Regression (#145): a paper stuck in 'failed' status can be re-uploaded."""
     pdf_content = create_minimal_pdf()
 
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = [{"page": 1, "text": "Retry content"}]
 
         # First upload fails at embedding (503 = upstream down)
@@ -1182,7 +1182,7 @@ def test_ingest_indexed_paper_still_409(client):
     """Successfully indexed paper still returns 409 on duplicate upload (#145)."""
     pdf_content = create_minimal_pdf()
 
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = [{"page": 1, "text": "Already indexed"}]
 
         r1 = client.post(
@@ -1212,7 +1212,7 @@ def test_ingest_concurrent_same_pdf_pending_returns_409(client):
         await asyncio.to_thread(release.wait, 10)
         return [[0.1] * 768]
 
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = [{"page": 1, "text": "Concurrent content"}]
         client.app.state.embedder.embed = slow_embed
 
@@ -1261,7 +1261,7 @@ def test_write_endpoints_require_api_key_when_configured(client, temp_db):
         assert r2.status_code == 401
 
         # Correct key → proceeds past auth (may fail later, but not 401)
-        with patch("academic_paper.server.extract_text") as mock_extract:
+        with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
             mock_extract.return_value = [{"page": 1, "text": "Auth test"}]
             r3 = client.post(
                 "/papers/ingest?wait=true",
@@ -1286,7 +1286,7 @@ def test_non_ascii_api_key_header_rejected_with_401_not_500(client):
 def test_write_endpoints_pass_without_api_key_when_unconfigured(client):
     """When API_KEY is empty (default), write endpoints accept requests without key."""
     with patch.object(settings, "api_key", ""):
-        with patch("academic_paper.server.extract_text") as mock_extract:
+        with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
             mock_extract.return_value = [{"page": 1, "text": "No auth needed"}]
             r = client.post(
                 "/papers/ingest?wait=true",

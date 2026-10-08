@@ -67,7 +67,7 @@ def _post(client, body: bytes):
 def test_exactly_at_limit_is_accepted(client, size_unknown):
     with (
         patch.object(settings, "max_upload_mb", 1),
-        patch("academic_paper.server.extract_text", return_value=[{"page": 1, "text": "content"}]),
+        patch("academic_paper.services.ingest_service.extract_text", return_value=[{"page": 1, "text": "content"}]),
     ):
         resp = _post(client, _pdf(1024 * 1024))
     assert resp.status_code == 200, resp.text
