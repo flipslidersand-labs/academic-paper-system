@@ -25,6 +25,7 @@ from academic_paper.llm import get_llm_client
 from academic_paper.logging_config import configure_logging
 from academic_paper.routers.jobs import router as jobs_router
 from academic_paper.routers.papers import router as papers_router
+from academic_paper.routers.summary import router as summary_router
 from academic_paper.services import ingest_service
 from academic_paper.services.search_service import run_search
 from academic_paper.services.summary_service import (  # noqa: F401  (_summary_response re-exported, #618)
@@ -208,47 +209,7 @@ async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str,
 
 app.include_router(papers_router)
 app.include_router(jobs_router)
-
-
-@app.get("/papers/{paper_id}/summary", dependencies=[Depends(require_scope(Scope.READ))])
-async def get_summary_endpoint(paper_id: int):
-    """Return the cached summary only (GET is safe/idempotent, #140). Generation lives in POST."""
-    return get_cached_summary(paper_id)
-
-
-@app.post("/papers/{paper_id}/summary", dependencies=[Depends(require_scope(Scope.ADMIN))])
-async def generate_summary_endpoint(paper_id: int, force: bool = Query(False)):
-    """Generate the summary (cached result is returned unless force=true)."""
-    return await generate_summary(paper_id, force, app.state.llm, app.state.summarizer)
-
-
-@app.post("/papers/score-all", dependencies=[Depends(require_scope(Scope.ADMIN))])
-def score_all_papers():
-    """Compute and store relevance scores for all papers.
-
-    Score = freshness (30-day half-life, 0–0.5) + category match (0–0.5).
-    Preferred categories are configured via PREFERRED_CATEGORIES env var.
-    A per-paper failure is counted in `failed`/`errors` and does not abort the run (#276).
-
-    Returns:
-        JSON with total, scored, failed counts and per-paper errors.
-    """
-    return score_all()
-
-
-@app.post("/papers/{paper_id}/score", dependencies=[Depends(require_scope(Scope.ADMIN))])
-def score_paper(paper_id: int):
-    """Compute and store relevance score for a single paper."""
-    return score_one(paper_id)
-
-
-@app.get("/summaries", dependencies=[Depends(require_scope(Scope.READ))])
-def list_summaries_endpoint(
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-):
-    """List all paper summaries with associated paper metadata."""
-    return list_all_summaries(limit, offset)
+app.include_router(summary_router)
 
 
 async def _run_summarize_all(job_id: str) -> None:
