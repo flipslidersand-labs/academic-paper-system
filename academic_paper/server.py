@@ -2,16 +2,12 @@
 
 import asyncio
 import hmac
-import json
 import logging
 import os
 import re
-import sqlite3
 import tempfile
 import time
-import uuid
 from contextlib import asynccontextmanager
-from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -20,7 +16,6 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPE
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
-from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
 from academic_paper.chunker import chunk_pages
 from academic_paper.config import settings
@@ -39,7 +34,8 @@ from academic_paper.db import (
     update_paper_score,
     update_paper_status,
 )
-from academic_paper.embedder import EmbedderClient, EmbeddingCountMismatchError
+from academic_paper.embedder import EmbedderClient
+from academic_paper.errors import _http_exc_for  # noqa: F401  (re-exported for backward compat, #614)
 from academic_paper.extractor import extract_text, hash_file
 from academic_paper.jobs import job_store
 from academic_paper.llm import OllamaClient, get_llm_client
@@ -49,78 +45,15 @@ from academic_paper.scorer import compute_score
 from academic_paper.services.search_service import run_search
 from academic_paper.summarizer import RAGSummarizer
 from academic_paper.telemetry import get_tracer, setup_telemetry
+from academic_paper.validators import (  # noqa: F401  (re-exported for backward compat, #614)
+    _parse_list_field,
+    _sanitize_text,
+    _validate_published_date,
+)
 from academic_paper.vector_store import QdrantStore, make_qdrant_id
 
 logger = logging.getLogger(__name__)
 tracer = get_tracer()
-
-
-_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
-
-
-def _sanitize_text(value: str | None) -> str | None:
-    """Strip control characters (incl. newlines) from externally-sourced metadata.
-
-    title/authors/categories/source come from arXiv/OpenAlex/PubMed/Semantic
-    Scholar, sources anyone can post free-form text to. Left unsanitized they
-    are stored verbatim and later exposed via /papers, /summaries, and cron
-    logs — enabling log injection and stored XSS (#233), the same class of
-    issue file_name was fixed for in #189.
-    """
-    if value is None:
-        return None
-    cleaned = _CONTROL_CHARS_RE.sub(" ", value).strip()
-    return cleaned or None
-
-
-def _parse_list_field(value: str | None, field: str = "field") -> list[str] | None:
-    """Parse a JSON array string or comma-separated string into a list.
-
-    JSON arrays must contain only strings — nested objects/arrays were
-    previously coerced via str(x) and stored as Python reprs (#144).
-    Each resulting item is sanitized of control characters (#233).
-
-    Raises:
-        HTTPException 422: value is valid JSON but not an array of strings
-        (e.g. a JSON object or number), or is a JSON array with non-string
-        elements (#231).
-    """
-    if not value:
-        return None
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError:
-        return [s for s in (_sanitize_text(x) for x in value.split(",")) if s]
-    if not isinstance(parsed, list) or not all(isinstance(x, str) for x in parsed):
-        raise HTTPException(
-            status_code=422, detail=f"{field} must be a JSON array of strings or a comma-separated string"
-        )
-    return [s for s in (_sanitize_text(x) for x in parsed) if s]
-
-
-_MIN_PUBLISHED_YEAR = 1900
-
-
-def _validate_published_date(value: str | None, field: str = "published_date") -> None:
-    """Reject non-ISO dates, and dates outside a sane range, before they reach scoring.
-
-    date.fromisoformat() alone accepts formally valid but meaningless dates
-    (e.g. 0001-01-01, 9999-12-31) or future dates; score_all_papers/score_paper
-    compute freshness from days-since-published, so such values silently
-    produce nonsense scores instead of erroring (#271).
-    """
-    if not value:
-        return
-    try:
-        parsed = date.fromisoformat(value)
-    except ValueError:
-        raise HTTPException(status_code=422, detail=f"{field} must be an ISO date (YYYY-MM-DD), got {value!r}")
-    if parsed > date.today():
-        raise HTTPException(status_code=422, detail=f"{field} must not be in the future, got {value!r}")
-    if parsed.year < _MIN_PUBLISHED_YEAR:
-        raise HTTPException(
-            status_code=422, detail=f"{field} must be on or after {_MIN_PUBLISHED_YEAR}-01-01, got {value!r}"
-        )
 
 
 async def _probe_startup_health(app: FastAPI) -> None:
@@ -220,42 +153,6 @@ async def lifespan(app: FastAPI):
     if ollama_http_client is not None:
         await ollama_http_client.aclose()
     await app.state.vector_store.aclose()
-
-
-def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
-    """Map an exception to an appropriate HTTPException (#148).
-
-    - Dependency-unavailable (httpx connect/timeout, Qdrant HTTP errors) → 502/503
-    - EmbeddingCountMismatchError (embedding-svc returned a mismatched vector count) → 502
-    - sqlite3.IntegrityError (file_hash UNIQUE violation) → 409
-    - ValueError from input validation (no text, no chunks) → 400
-    - Everything else → 500 with opaque error-id (details go to logger only)
-    """
-    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
-        return HTTPException(status_code=503, detail="Upstream service unavailable")
-    if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)):
-        return HTTPException(status_code=503, detail="Upstream service timeout or network error")
-    if isinstance(exc, TimeoutError):
-        # builtin TimeoutError (raised by asyncio.wait_for on extraction/summarization
-        # deadlines, #238/#237/#269) is not a subclass of httpx.TimeoutException, so it
-        # falls through to the catch-all below without this check. It's an expected
-        # boundary condition the client should retry/split on, not an unclassified
-        # error (#423).
-        return HTTPException(status_code=504, detail=fallback_msg or "Processing timed out")
-    if isinstance(exc, EmbeddingCountMismatchError):
-        # Checked before the generic ValueError branch below (#336): this is an
-        # upstream protocol failure, not bad client input, so it maps to 502.
-        return HTTPException(status_code=502, detail="Embedding service returned a mismatched vector count")
-    if isinstance(exc, (UnexpectedResponse, ResponseHandlingException)):
-        return HTTPException(status_code=502, detail="Vector store returned an unexpected response")
-    if isinstance(exc, sqlite3.IntegrityError):
-        return HTTPException(status_code=409, detail="Conflict: duplicate record")
-    if isinstance(exc, ValueError):
-        return HTTPException(status_code=400, detail=fallback_msg)
-    # Catch-all: 500 with opaque error id; real detail only in log.
-    error_id = str(uuid.uuid4())[:8]
-    logger.error("Unclassified error [%s]: %s", error_id, exc, exc_info=True)
-    return HTTPException(status_code=500, detail=f"Internal error [{error_id}]")
 
 
 app = FastAPI(title="Academic Paper System", lifespan=lifespan)
