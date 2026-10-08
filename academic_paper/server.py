@@ -1,7 +1,6 @@
 """FastAPI server for academic paper ingestion and retrieval."""
 
 import asyncio
-import hmac
 import json
 import logging
 import os
@@ -22,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
+from academic_paper.auth import require_scope
 from academic_paper.chunker import chunk_pages
 from academic_paper.config import settings
 from academic_paper.db import (
@@ -263,6 +263,9 @@ def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
 app = FastAPI(title="Academic Paper System", lifespan=lifespan)
 
 
+_require_authenticated = require_scope()  # any valid key, no scope required (#602)
+
+
 async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
     """Require X-API-Key on write and read endpoints when API_KEY env var is set (#146).
 
@@ -273,18 +276,7 @@ async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-A
     Uses hmac.compare_digest for constant-time comparison to prevent
     timing attacks that could leak key length / prefix (#190).
     """
-    configured = settings.accepted_api_keys  # api_key + api_keys (#601)
-    if not configured:
-        return  # auth disabled
-    # hmac.compare_digest raises TypeError on str with non-ASCII characters;
-    # comparing as UTF-8 bytes accepts any header value and just fails the
-    # comparison instead of turning an unauthenticated request into a 500 (#425).
-    provided = (x_api_key or "").encode("utf-8")
-    # Compare against every candidate without short-circuiting so timing does not
-    # reveal which configured key (if any) matched (#601).
-    matches = [hmac.compare_digest(provided, key.encode("utf-8")) for key in configured]
-    if not any(matches):
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    await _require_authenticated(x_api_key)
 
 
 # /metrics is added by Instrumentator.expose() rather than manually registered, so it
