@@ -52,6 +52,10 @@ jobs:
         # volume (or other config) that isn't created automatically.
         # paper-rag's env_file just needs to exist for `config` to resolve;
         # .env.example (no secrets) is enough.
+        # QDRANT_API_KEY is required by docker-compose.yml (#657); the value here
+        # is a throwaway placeholder used only for `config` validation.
+        env:
+          QDRANT_API_KEY: ci-placeholder-not-a-secret
         run: |
           cp .env.example .env
           docker compose config --quiet

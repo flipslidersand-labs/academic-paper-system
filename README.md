@@ -140,6 +140,11 @@ docker compose up -d
 curl http://localhost:8020/health
 ```
 
+Qdrant runs with API-key auth enabled (#657). Set `QDRANT_API_KEY` in `.env`
+(one value, used for both the Qdrant server and `paper-rag`); Compose refuses to
+start Qdrant if it is empty. Generate one with e.g. `openssl rand -hex 32`.
+The Qdrant image is pinned to a tag plus digest; Dependabot updates it.
+
 `qdrant_storage`/`qdrant_snapshots` are created automatically by Compose on
 first run. To reuse an existing volume on a given host instead, add a
 `docker-compose.override.yml` (already gitignored):
