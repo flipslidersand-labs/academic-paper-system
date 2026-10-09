@@ -32,16 +32,12 @@ from academic_paper.jobs import job_store
 from academic_paper.llm import get_llm_client
 from academic_paper.logging_config import configure_logging
 from academic_paper.routers.jobs import router as jobs_router
+from academic_paper.routers.summary import router as summary_router
 from academic_paper.services import ingest_service
 from academic_paper.services.search_service import run_search
 from academic_paper.services.summary_service import (  # noqa: F401  (_summary_response re-exported, #618)
     _summary_response,
-    generate_summary,
-    get_cached_summary,
-    list_all_summaries,
     run_summarize_all,
-    score_all,
-    score_one,
 )
 from academic_paper.summarizer import RAGSummarizer
 from academic_paper.telemetry import get_tracer, setup_telemetry
@@ -379,45 +375,7 @@ def get_paper_endpoint(paper_id: int):
         raise _http_exc_for(e, "Failed to get paper")
 
 
-@app.get("/papers/{paper_id}/summary", dependencies=[Depends(verify_api_key)])
-async def get_summary_endpoint(paper_id: int):
-    """Return the cached summary only (GET is safe/idempotent, #140). Generation lives in POST."""
-    return get_cached_summary(paper_id)
-
-
-@app.post("/papers/{paper_id}/summary", dependencies=[Depends(verify_api_key)])
-async def generate_summary_endpoint(paper_id: int, force: bool = Query(False)):
-    """Generate the summary (cached result is returned unless force=true)."""
-    return await generate_summary(paper_id, force, app.state.llm, app.state.summarizer)
-
-
-@app.post("/papers/score-all", dependencies=[Depends(verify_api_key)])
-def score_all_papers():
-    """Compute and store relevance scores for all papers.
-
-    Score = freshness (30-day half-life, 0–0.5) + category match (0–0.5).
-    Preferred categories are configured via PREFERRED_CATEGORIES env var.
-    A per-paper failure is counted in `failed`/`errors` and does not abort the run (#276).
-
-    Returns:
-        JSON with total, scored, failed counts and per-paper errors.
-    """
-    return score_all()
-
-
-@app.post("/papers/{paper_id}/score", dependencies=[Depends(verify_api_key)])
-def score_paper(paper_id: int):
-    """Compute and store relevance score for a single paper."""
-    return score_one(paper_id)
-
-
-@app.get("/summaries", dependencies=[Depends(verify_api_key)])
-def list_summaries_endpoint(
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-):
-    """List all paper summaries with associated paper metadata."""
-    return list_all_summaries(limit, offset)
+app.include_router(summary_router)
 
 
 async def _run_summarize_all(job_id: str) -> None:
