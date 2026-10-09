@@ -263,7 +263,7 @@ title / authors / categories / published_date / source: 任意のメタデータ
 | `SUMMARIZE_TOTAL_TIMEOUT` | `summarize()` 全体の上限秒 | `1063` |
 | `PORT` | API サーバーポート | `8020` |
 | `API_KEY` | `/health` 以外の全エンドポイントの X-API-Key（読み取り系含む。空=認証無効） | (空) |
-| `INGEST_API_KEY` | ingest スコープ限定の X-API-Key（#355。単独設定でも認証有効。エンドポイントへのスコープ適用は #627） | (空) |
+| `INGEST_API_KEY` | ingest スコープ限定の X-API-Key（#355。単独設定でも認証有効。POST /papers/ingest のみ許可、他は 403。/metrics は admin スコープ=フルキー必須 #627） | (空) |
 | `PAPER_API_KEY` | コレクタ側が送る X-API-Key（cron は repo secret 経由） | (空) |
 | `SEMANTIC_SCHOLAR_API_KEY` | `scripts/semantic_scholar_collect.py` 用 API キー（`--api-key` でも指定可。サーバー設定ではない） | (空) |
 | `DISCORD_WEBHOOK_URL` | arxiv-daily.yml の失敗/結果通知先（**repo secret 必須**。未設定だと通知が無効化され、schedule 実行の失敗は Notify ステップが exit 1 で表面化する。登録はオペレーター手動作業 #481） | (未設定) |

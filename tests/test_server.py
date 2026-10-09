@@ -1607,3 +1607,49 @@ def test_run_ingest_unlinks_tmpfile_when_persist_fails(tmp_path):
     ):
         asyncio.run(_run_ingest("j", str(pdf), 1, "h", "f.pdf"))
     assert not pdf.exists()
+
+
+# --- scope separation per route (#627, parent #355) ---
+
+_SCOPED_ROUTES = [
+    ("post", "/papers/ingest", "ingest"),
+    ("get", "/papers", "read"),
+    ("get", "/papers/p1", "read"),
+    ("get", "/papers/p1/summary", "read"),
+    ("get", "/summaries", "read"),
+    ("get", "/search?q=x", "read"),
+    ("get", "/stats", "read"),
+    ("get", "/jobs", "read"),
+    ("get", "/jobs/j1", "read"),
+    ("post", "/papers/p1/summary", "admin"),
+    ("post", "/papers/p1/score", "admin"),
+    ("post", "/papers/score-all", "admin"),
+    ("post", "/jobs/summarize-all", "admin"),
+    ("get", "/metrics", "admin"),
+]
+
+
+@pytest.mark.parametrize(("method", "path", "scope"), _SCOPED_ROUTES)
+def test_ingest_key_scope_per_route(client, method, path, scope):
+    with (
+        patch.object(settings, "api_key", "full-key"),
+        patch.object(settings, "api_keys", ""),
+        patch.object(settings, "ingest_api_key", "ing-key"),
+    ):
+        r = getattr(client, method)(path, headers={"X-API-Key": "ing-key"})
+        if scope == "ingest":
+            assert r.status_code not in (401, 403)
+        else:
+            assert r.status_code == 403
+
+
+@pytest.mark.parametrize(("method", "path", "scope"), _SCOPED_ROUTES)
+def test_full_key_and_bad_key_per_route(client, method, path, scope):
+    with (
+        patch.object(settings, "api_key", "full-key"),
+        patch.object(settings, "api_keys", ""),
+        patch.object(settings, "ingest_api_key", "ing-key"),
+    ):
+        assert getattr(client, method)(path, headers={"X-API-Key": "full-key"}).status_code not in (401, 403)
+        assert getattr(client, method)(path, headers={"X-API-Key": "bad"}).status_code == 401
+        assert getattr(client, method)(path).status_code == 401

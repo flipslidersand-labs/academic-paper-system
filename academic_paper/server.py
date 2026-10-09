@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from academic_paper.auth import require_scope
+from academic_paper.auth import Scope, require_scope
 from academic_paper.config import settings
 from academic_paper.db import (
     db_connection,
@@ -184,10 +184,10 @@ async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-A
 
 
 # /metrics is added by Instrumentator.expose() rather than manually registered, so it
-# must be gated the same way as every other route: pass verify_api_key through as a
+# must be gated the same way as every other route: pass require_scope(Scope.ADMIN) as a
 # dependency (#299 — request-path counters and latency histograms are otherwise
 # readable without auth whenever API_KEY is set).
-Instrumentator().instrument(app).expose(app, dependencies=[Depends(verify_api_key)])
+Instrumentator().instrument(app).expose(app, dependencies=[Depends(require_scope(Scope.ADMIN))])
 
 
 async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_name: str) -> int:
@@ -226,7 +226,7 @@ async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str,
     )
 
 
-@app.post("/papers/ingest", dependencies=[Depends(verify_api_key)])
+@app.post("/papers/ingest", dependencies=[Depends(require_scope(Scope.INGEST))])
 async def ingest_paper(
     file: UploadFile = File(...),
     title: str | None = Form(None, max_length=1000),
@@ -358,7 +358,7 @@ async def ingest_paper(
             _unlink_quiet(tmp_path)
 
 
-@app.get("/papers", dependencies=[Depends(verify_api_key)])
+@app.get("/papers", dependencies=[Depends(require_scope(Scope.READ))])
 def list_papers_endpoint(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -380,7 +380,7 @@ def list_papers_endpoint(
         raise _http_exc_for(e, "Failed to list papers")
 
 
-@app.get("/papers/{paper_id}", dependencies=[Depends(verify_api_key)])
+@app.get("/papers/{paper_id}", dependencies=[Depends(require_scope(Scope.READ))])
 def get_paper_endpoint(paper_id: int):
     """Get paper details by ID."""
     try:
@@ -396,19 +396,19 @@ def get_paper_endpoint(paper_id: int):
         raise _http_exc_for(e, "Failed to get paper")
 
 
-@app.get("/papers/{paper_id}/summary", dependencies=[Depends(verify_api_key)])
+@app.get("/papers/{paper_id}/summary", dependencies=[Depends(require_scope(Scope.READ))])
 async def get_summary_endpoint(paper_id: int):
     """Return the cached summary only (GET is safe/idempotent, #140). Generation lives in POST."""
     return get_cached_summary(paper_id)
 
 
-@app.post("/papers/{paper_id}/summary", dependencies=[Depends(verify_api_key)])
+@app.post("/papers/{paper_id}/summary", dependencies=[Depends(require_scope(Scope.ADMIN))])
 async def generate_summary_endpoint(paper_id: int, force: bool = Query(False)):
     """Generate the summary (cached result is returned unless force=true)."""
     return await generate_summary(paper_id, force, app.state.llm, app.state.summarizer)
 
 
-@app.post("/papers/score-all", dependencies=[Depends(verify_api_key)])
+@app.post("/papers/score-all", dependencies=[Depends(require_scope(Scope.ADMIN))])
 def score_all_papers():
     """Compute and store relevance scores for all papers.
 
@@ -453,7 +453,7 @@ def score_all_papers():
         raise _http_exc_for(e, "Scoring failed unexpectedly")
 
 
-@app.post("/papers/{paper_id}/score", dependencies=[Depends(verify_api_key)])
+@app.post("/papers/{paper_id}/score", dependencies=[Depends(require_scope(Scope.ADMIN))])
 def score_paper(paper_id: int):
     """Compute and store relevance score for a single paper."""
     try:
@@ -472,7 +472,7 @@ def score_paper(paper_id: int):
         raise _http_exc_for(e, "Scoring failed")
 
 
-@app.get("/summaries", dependencies=[Depends(verify_api_key)])
+@app.get("/summaries", dependencies=[Depends(require_scope(Scope.READ))])
 def list_summaries_endpoint(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -543,7 +543,7 @@ async def _run_summarize_all(job_id: str) -> None:
         await job_store.persist(job)
 
 
-@app.post("/jobs/summarize-all", status_code=202, dependencies=[Depends(verify_api_key)])
+@app.post("/jobs/summarize-all", status_code=202, dependencies=[Depends(require_scope(Scope.ADMIN))])
 async def start_summarize_all(background_tasks: BackgroundTasks):
     """Start a background job to summarize all papers without a cached summary."""
     if app.state.llm is None or app.state.summarizer is None:
@@ -556,7 +556,7 @@ async def start_summarize_all(background_tasks: BackgroundTasks):
     return {"job_id": job.id, "status": job.status}
 
 
-@app.get("/jobs/{job_id}", dependencies=[Depends(verify_api_key)])
+@app.get("/jobs/{job_id}", dependencies=[Depends(require_scope(Scope.READ))])
 def get_job_endpoint(job_id: str):
     """Get status of a background job by ID."""
     job = job_store.get(job_id)
@@ -565,13 +565,13 @@ def get_job_endpoint(job_id: str):
     return job.to_dict()
 
 
-@app.get("/jobs", dependencies=[Depends(verify_api_key)])
+@app.get("/jobs", dependencies=[Depends(require_scope(Scope.READ))])
 def list_jobs_endpoint():
     """List all background jobs (#190: require auth — exposes all job IDs / paper metadata)."""
     return {"jobs": [j.to_dict() for j in job_store.list_all()]}
 
 
-@app.get("/search", dependencies=[Depends(verify_api_key)])
+@app.get("/search", dependencies=[Depends(require_scope(Scope.READ))])
 async def search(
     q: str = Query(..., min_length=1, max_length=1000),
     mode: str = Query("hybrid", pattern="^(vector|keyword|hybrid|nugget)$"),
@@ -636,7 +636,7 @@ async def health():
     return JSONResponse(content={"status": overall, **status}, status_code=http_status)
 
 
-@app.get("/stats", dependencies=[Depends(verify_api_key)])
+@app.get("/stats", dependencies=[Depends(require_scope(Scope.READ))])
 def stats():
     """DB統計情報"""
     try:
