@@ -45,6 +45,9 @@ jobs:
     # linux-general (ARC self-hosted) には docker socket が無く `docker build` が
     # 失敗するため、ubuntu-latest 固定のままにする（forgeの release.yml と同じ制約）。
     runs-on: ubuntu-latest
+    # Cap runner occupancy (#652). Default is 360 min; a hung build/smoke test
+    # should fail well before that.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - name: Validate docker-compose.yml (#435)
