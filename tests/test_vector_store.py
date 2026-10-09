@@ -370,3 +370,81 @@ def test_ping_and_count_points_use_store_collection():
 
         mock_client.get_collections.assert_called_once()
         mock_client.get_collection.assert_called_once_with("my-coll")
+
+
+# ---------------------------------------------------------------------------
+# #674: 4xx 非リトライ / 5xx・不明ステータスのリトライ変換 / 非同期ラッパー委譲
+# ---------------------------------------------------------------------------
+
+_OPS = {
+    "ensure_collection": (lambda s: s._ensure_collection(), "get_collections"),
+    "upsert": (lambda s: s._upsert([{"id": "a", "vector": [0.1], "payload": {}}]), "upsert"),
+    "delete_by_paper_id": (lambda s: s._delete_by_paper_id(1), "delete"),
+}
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_calls"),
+    [(404, 1), (503, 3), (None, 3)],
+    ids=["4xx-no-retry", "5xx-retried", "unknown-status-retried"],
+)
+@pytest.mark.parametrize("op", list(_OPS))
+def test_qdrant_ops_retry_policy_by_status(op, status, expected_calls):
+    """4xx は1回で再送出、5xx/status 不明は3回試行し元の UnexpectedResponse が出る (#306/#472/#674)"""
+    run, client_method = _OPS[op]
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = MagicMock()
+        MockClient.return_value = mock_client
+        mock_client.get_collections.return_value.collections = []
+        error = UnexpectedResponse(status_code=status, reason_phrase="err", content=b"", headers={})
+        getattr(mock_client, client_method).side_effect = error
+
+        store = QdrantStore(url="http://test", collection="c")
+        with patch("academic_paper.retry.time.sleep") as mock_sleep:
+            with pytest.raises(UnexpectedResponse) as excinfo:
+                run(store)
+
+        assert excinfo.value is error  # _RetryableQdrantError は外に漏れない
+        assert getattr(mock_client, client_method).call_count == expected_calls
+        assert mock_sleep.call_count == max(expected_calls - 1, 0)
+
+
+def test_reraise_qdrant_response_translates_status():
+    """_reraise_qdrant_response: 4xx はそのまま、5xx/None は _RetryableQdrantError (#674)"""
+    from academic_paper.vector_store import _reraise_qdrant_response, _RetryableQdrantError
+
+    for status in (400, 404, 499):
+        exc = UnexpectedResponse(status_code=status, reason_phrase="x", content=b"", headers={})
+        with pytest.raises(UnexpectedResponse) as excinfo:
+            _reraise_qdrant_response(exc)
+        assert excinfo.value is exc
+    for status in (500, 503, None):
+        exc = UnexpectedResponse(status_code=status, reason_phrase="x", content=b"", headers={})
+        with pytest.raises(_RetryableQdrantError) as excinfo:
+            _reraise_qdrant_response(exc)
+        assert excinfo.value.__cause__ is exc
+
+
+@pytest.mark.parametrize(
+    ("async_name", "sync_name", "args"),
+    [
+        ("aensure_collection", "_ensure_collection", ()),
+        ("aupsert", "_upsert", ([{"id": "a", "vector": [0.1], "payload": {}}],)),
+        ("adelete_by_paper_id", "_delete_by_paper_id", (42,)),
+        ("asearch", "_search", ([0.1, 0.2], 5, 7)),
+    ],
+)
+def test_async_wrappers_delegate_to_sync_once_with_args(async_name, sync_name, args):
+    """a* ラッパーは対応する同期実装を引数付きで1回だけ呼ぶ(asearch は結果も返す) (#674)"""
+    with patch("academic_paper.vector_store.QdrantClient"):
+        store = QdrantStore(url="http://test", collection="c")
+    sentinel = [{"id": "x"}]
+    sync_mock = MagicMock(return_value=sentinel)
+    with patch.object(store, sync_name, sync_mock):
+        result = asyncio.run(getattr(store, async_name)(*args))
+
+    sync_mock.assert_called_once_with(*args)
+    if async_name == "asearch":
+        assert result == sentinel
+    else:
+        assert result is None
