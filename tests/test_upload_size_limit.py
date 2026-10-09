@@ -84,7 +84,7 @@ def test_one_byte_over_limit_returns_413_and_removes_tmpfile(client, size_unknow
 
     with (
         patch.object(settings, "max_upload_mb", 1),
-        patch("academic_paper.server.tempfile.NamedTemporaryFile", side_effect=fake_ntf),
+        patch("academic_paper.services.ingest_service.tempfile.NamedTemporaryFile", side_effect=fake_ntf),
     ):
         resp = _post(client, _pdf(1024 * 1024 + 1))
     assert resp.status_code == 413

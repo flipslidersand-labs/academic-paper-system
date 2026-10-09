@@ -8,11 +8,14 @@ server.py keeps thin ``_``-prefixed wrappers that supply ``app.state`` objects.
 import asyncio
 import logging
 import os
+import re
+import tempfile
 import time
+from collections.abc import Callable
 
 from academic_paper.chunker import chunk_pages
 from academic_paper.config import settings
-from academic_paper.db import db_connection, save_chunks, update_paper_status
+from academic_paper.db import db_connection, delete_paper, save_chunks, save_paper, update_paper_status
 from academic_paper.embedder import EmbedderClient
 from academic_paper.errors import _safe_error_message
 from academic_paper.extractor import extract_text
@@ -22,6 +25,91 @@ from academic_paper.vector_store import QdrantStore, make_qdrant_id
 
 logger = logging.getLogger(__name__)
 tracer = get_tracer()
+
+_PDF_MAGIC = b"%PDF-"
+_READ_CHUNK = 1 << 20
+
+
+class UploadTooLargeError(Exception):
+    """Upload exceeds the configured max size (route maps to HTTP 413)."""
+
+
+class NotAPdfError(Exception):
+    """Upload lacks the %PDF- magic bytes (route maps to HTTP 415)."""
+
+
+class DuplicatePaperError(Exception):
+    """A paper with the same file_hash is indexed or being ingested (route maps to HTTP 409)."""
+
+    def __init__(self, status: str):
+        super().__init__(f"duplicate paper (status={status})")
+        self.status = status
+
+
+async def stream_upload_to_tmp(file, max_bytes: int) -> str:
+    """Stream an upload to a temp .pdf file, enforcing size cap and PDF magic bytes.
+
+    Returns the temp path (the caller owns cleanup). On any failure the temp file
+    is removed before the exception propagates. Raises UploadTooLargeError /
+    NotAPdfError (HTTP-independent).
+    """
+    # Reject early when the multipart part already declares an oversized length,
+    # before buffering anything.
+    if file.size is not None and file.size > max_bytes:
+        raise UploadTooLargeError
+    tmp_path: str | None = None
+    try:
+        # Stream to disk in 1 MiB chunks, enforcing the size cap as bytes arrive
+        # so an oversized body is cut off mid-transfer instead of being fully
+        # buffered in memory first.
+        header = b""
+        received = 0
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp_path = tmp.name
+            while chunk := await file.read(_READ_CHUNK):
+                received += len(chunk)
+                if received > max_bytes:
+                    raise UploadTooLargeError
+                if len(header) < len(_PDF_MAGIC):
+                    header += chunk[: len(_PDF_MAGIC) - len(header)]
+                tmp.write(chunk)
+        if not header.startswith(_PDF_MAGIC):
+            raise NotAPdfError
+        return tmp_path
+    except BaseException:
+        if tmp_path is not None:
+            unlink_quiet(tmp_path)
+        raise
+
+
+def sanitize_file_name(raw_name: str | None) -> str:
+    """Sanitize filename to prevent log injection and stored XSS (#189).
+
+    Allow only word chars, dots, hyphens, spaces; replace everything else with '_'.
+    """
+    return re.sub(r"[^\w.\- ]", "_", raw_name or "unknown.pdf")[:255]
+
+
+def register_paper(file_name: str, file_hash: str, metadata_factory: Callable[[], dict]) -> int:
+    """Duplicate-check by file_hash, then save a 'pending' paper row. Returns paper_id.
+
+    Raises DuplicatePaperError('indexed' | 'pending'). Failed rows are purged so the
+    same PDF can be re-uploaded after a partial failure (#145). Deleting a 'pending'
+    row would pull it out from under the running job and its compensating Qdrant
+    delete could wipe the new paper's shared points (#496); stale 'pending' rows from
+    a killed server are turned 'failed' at startup. ``metadata_factory`` is called
+    only after the duplicate check so metadata validation errors keep their order.
+    """
+    with db_connection(settings.academic_db) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, status FROM papers WHERE file_hash = ?", (file_hash,))
+        existing = cursor.fetchone()
+        if existing:
+            if existing["status"] in ("indexed", "pending"):
+                raise DuplicatePaperError(existing["status"])
+            # 'failed' row — purge and re-ingest
+            delete_paper(conn, existing["id"])
+        return save_paper(conn, file_name, file_hash, **metadata_factory())
 
 
 async def ingest_pipeline(

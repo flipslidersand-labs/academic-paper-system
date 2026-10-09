@@ -138,3 +138,100 @@ async def test_run_ingest_success_sets_result(tmp_path):
         )
     assert job.status == "done" and job.result["chunks"] == 4
     assert not os.path.exists(pdf)
+
+
+class _FakeUpload:
+    def __init__(self, data: bytes, size=None, filename="a.pdf"):
+        self._data = data
+        self._pos = 0
+        self.size = size
+        self.filename = filename
+
+    async def read(self, n):
+        out = self._data[self._pos : self._pos + n]
+        self._pos += n
+        return out
+
+
+@_sync
+async def test_stream_upload_ok_returns_path_with_content():
+    path = await svc.stream_upload_to_tmp(_FakeUpload(b"%PDF-1.4 body"), 1024)
+    try:
+        assert open(path, "rb").read() == b"%PDF-1.4 body"
+    finally:
+        os.unlink(path)
+
+
+@_sync
+async def test_stream_upload_not_pdf_removes_tmp():
+    created = []
+    orig = svc.tempfile.NamedTemporaryFile
+
+    def spy(**kw):
+        ctx = orig(**kw)
+        created.append(ctx.name)
+        return ctx
+
+    with patch.object(svc.tempfile, "NamedTemporaryFile", side_effect=spy), pytest.raises(svc.NotAPdfError):
+        await svc.stream_upload_to_tmp(_FakeUpload(b"hello world"), 1024)
+    assert created and not os.path.exists(created[0])
+
+
+@_sync
+async def test_stream_upload_declared_size_too_large_creates_no_file():
+    with patch.object(svc.tempfile, "NamedTemporaryFile") as ntf, pytest.raises(svc.UploadTooLargeError):
+        await svc.stream_upload_to_tmp(_FakeUpload(b"%PDF-", size=2048), 1024)
+    ntf.assert_not_called()
+
+
+@_sync
+async def test_stream_upload_streamed_size_too_large_removes_tmp():
+    created = []
+    orig = svc.tempfile.NamedTemporaryFile
+
+    def spy(**kw):
+        ctx = orig(**kw)
+        created.append(ctx.name)
+        return ctx
+
+    with patch.object(svc.tempfile, "NamedTemporaryFile", side_effect=spy), pytest.raises(svc.UploadTooLargeError):
+        await svc.stream_upload_to_tmp(_FakeUpload(b"%PDF-" + b"x" * 2000), 1024)
+    assert created and not os.path.exists(created[0])
+
+
+def test_sanitize_file_name():
+    assert svc.sanitize_file_name(None) == "unknown.pdf"
+    assert svc.sanitize_file_name("a<b>/c.pdf") == "a_b__c.pdf"
+    assert len(svc.sanitize_file_name("x" * 400)) == 255
+
+
+def _row(status):
+    return {"id": 1, "status": status}
+
+
+@pytest.mark.parametrize("status", ["indexed", "pending"])
+def test_register_paper_duplicate_raises(status):
+    with patch.object(svc, "db_connection") as dbc, patch.object(svc, "save_paper") as save:
+        dbc.return_value.__enter__.return_value.cursor.return_value.fetchone.return_value = _row(status)
+        with pytest.raises(svc.DuplicatePaperError) as ei:
+            svc.register_paper("f.pdf", "h", lambda: {})
+    assert ei.value.status == status
+    save.assert_not_called()
+
+
+def test_register_paper_new_saves_with_metadata():
+    with patch.object(svc, "db_connection") as dbc, patch.object(svc, "save_paper", return_value=11) as save:
+        dbc.return_value.__enter__.return_value.cursor.return_value.fetchone.return_value = None
+        assert svc.register_paper("f.pdf", "h", lambda: {"title": "T"}) == 11
+    assert save.call_args.kwargs == {"title": "T"}
+
+
+def test_register_paper_failed_row_is_purged():
+    with (
+        patch.object(svc, "db_connection") as dbc,
+        patch.object(svc, "save_paper", return_value=2),
+        patch.object(svc, "delete_paper") as delete,
+    ):
+        dbc.return_value.__enter__.return_value.cursor.return_value.fetchone.return_value = _row("failed")
+        assert svc.register_paper("f.pdf", "h", lambda: {}) == 2
+    assert delete.call_args.args[1] == 1
