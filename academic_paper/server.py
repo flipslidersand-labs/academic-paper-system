@@ -22,7 +22,6 @@ from academic_paper.db import (
     delete_paper,
     get_all_papers_for_scoring,
     get_paper,
-    get_summary,
     init_db,
     list_papers_filtered,
     list_summaries,
@@ -37,10 +36,14 @@ from academic_paper.extractor import hash_file
 from academic_paper.jobs import job_store
 from academic_paper.llm import get_llm_client
 from academic_paper.logging_config import configure_logging
-from academic_paper.models import PaperSummary
 from academic_paper.scorer import compute_score
 from academic_paper.services import ingest_service
 from academic_paper.services.search_service import run_search
+from academic_paper.services.summary_service import (  # noqa: F401  (_summary_response re-exported, #618)
+    _summary_response,
+    generate_summary,
+    get_cached_summary,
+)
 from academic_paper.summarizer import RAGSummarizer
 from academic_paper.telemetry import get_tracer, setup_telemetry
 from academic_paper.validators import (  # noqa: F401  (re-exported for backward compat, #614)
@@ -393,90 +396,16 @@ def get_paper_endpoint(paper_id: int):
         raise _http_exc_for(e, "Failed to get paper")
 
 
-def _summary_response(paper_id: int, model: str, summary: dict, cached: bool) -> dict:
-    """Build the summary response; summary fields come from PaperSummary.model_fields."""
-    defaults = PaperSummary().model_dump()
-    return {
-        "paper_id": paper_id,
-        "model": model,
-        **{f: summary.get(f, defaults[f]) for f in PaperSummary.model_fields},
-        "cached": cached,
-    }
-
-
 @app.get("/papers/{paper_id}/summary", dependencies=[Depends(verify_api_key)])
 async def get_summary_endpoint(paper_id: int):
-    """Return the cached summary only. GET is safe/idempotent (#140):
-    crawler or monitoring access must never trigger LLM generation or DB
-    writes. Generation lives in POST /papers/{paper_id}/summary.
-    """
-    try:
-        with db_connection(settings.academic_db) as conn:
-            paper = get_paper(conn, paper_id)
-            if paper is None:
-                raise HTTPException(status_code=404, detail="Paper not found")
-
-            cached_summary = get_summary(conn, paper_id)
-            if cached_summary is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Summary not generated yet — POST /papers/{paper_id}/summary to generate",
-                )
-            return _summary_response(paper_id, cached_summary["model"], cached_summary, True)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to get summary for paper_id=%s", paper_id)
-        raise _http_exc_for(e, "Failed to get summary")
+    """Return the cached summary only (GET is safe/idempotent, #140). Generation lives in POST."""
+    return get_cached_summary(paper_id)
 
 
 @app.post("/papers/{paper_id}/summary", dependencies=[Depends(verify_api_key)])
 async def generate_summary_endpoint(paper_id: int, force: bool = Query(False)):
     """Generate the summary (cached result is returned unless force=true)."""
-    # Read paper and cache in a short-lived connection — close before LLM await
-    # to avoid holding a WAL write-lock for the full LLM timeout (#191).
-    try:
-        with db_connection(settings.academic_db) as conn:
-            paper = get_paper(conn, paper_id)
-
-            if paper is None:
-                raise HTTPException(status_code=404, detail="Paper not found")
-
-            if not force:
-                cached_summary = get_summary(conn, paper_id)
-                if cached_summary is not None:
-                    return _summary_response(paper_id, cached_summary["model"], cached_summary, True)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to check cached summary for paper_id=%s", paper_id)
-        raise _http_exc_for(e, "Failed to check cached summary")
-
-    # Connection closed — safe to await LLM for up to 300 s without blocking writers.
-    if app.state.llm is None:
-        raise HTTPException(status_code=503, detail="LLM not configured")
-
-    if app.state.summarizer is None:
-        raise HTTPException(status_code=503, detail="Summarizer not initialized")
-
-    try:
-        with tracer.start_as_current_span("summarize") as span:
-            span.set_attribute("paper_id", paper_id)
-            summary = await app.state.summarizer.summarize(
-                paper_id, paper["file_hash"], title=paper.get("title"), file_name=paper.get("file_name")
-            )
-
-        model = app.state.llm.display_name
-
-        # Open a fresh short-lived connection just for the write.
-        with db_connection(settings.academic_db) as conn:
-            save_summary(conn, paper_id, model, summary)
-
-        return _summary_response(paper_id, model, summary, False)
-
-    except Exception as e:
-        logger.exception("Summarization error for paper_id=%s", paper_id)
-        raise _http_exc_for(e, "Summarization failed: check LLM availability")
+    return await generate_summary(paper_id, force, app.state.llm, app.state.summarizer)
 
 
 @app.post("/papers/score-all", dependencies=[Depends(verify_api_key)])
