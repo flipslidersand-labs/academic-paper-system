@@ -12,7 +12,7 @@ from academic_paper.embedder import EmbeddingCountMismatchError
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["_http_exc_for"]
+__all__ = ["_http_exc_for", "_safe_error_message"]
 
 
 def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
@@ -49,3 +49,20 @@ def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
     error_id = str(uuid.uuid4())[:8]
     logger.error("Unclassified error [%s]: %s", error_id, exc, exc_info=True)
     return HTTPException(status_code=500, detail=f"Internal error [{error_id}]")
+
+
+def _safe_error_message(exc: Exception) -> str:
+    """Short, classified error text safe to expose in job/score errors (#474).
+
+    Never includes str(exc): httpx/Qdrant/Ollama exception strings embed internal
+    URLs, and the job errors reach public Actions logs/artifacts. Classification
+    reuses _http_exc_for (details go to the logger only). Builtin TimeoutError has
+    an empty str(), so it is reported by class name.
+    """
+    if isinstance(exc, TimeoutError):
+        return "TimeoutError"
+    http_exc = _http_exc_for(exc, "")
+    if http_exc.status_code == 400:
+        # Plain ValueError (input validation): the message may carry arbitrary content.
+        return type(exc).__name__
+    return str(http_exc.detail)

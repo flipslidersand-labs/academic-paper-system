@@ -213,7 +213,7 @@ def _make_minimal_pdf() -> bytes:
 
 def test_ingest_with_metadata(client):
     """Test POST /papers/ingest stores authors/categories/source."""
-    with patch("academic_paper.server.extract_text") as mock_extract:
+    with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
         mock_extract.return_value = [{"page": 1, "text": "Test content for metadata"}]
         resp = client.post(
             "/papers/ingest?wait=true",
