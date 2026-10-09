@@ -992,7 +992,7 @@ def test_list_summaries_unexpected_error_returns_500(client):
 
 def test_get_summary_endpoint_unexpected_error_returns_500(client):
     """GET /papers/{paper_id}/summary: unclassified errors must map through _http_exc_for (#303)."""
-    with patch("academic_paper.server.get_paper", side_effect=RuntimeError("disk error")):
+    with patch("academic_paper.services.summary_service.get_paper", side_effect=RuntimeError("disk error")):
         response = client.get("/papers/1/summary")
     assert response.status_code == 500
     assert "disk error" not in response.json()["detail"]
@@ -1002,7 +1002,7 @@ def test_get_summary_endpoint_unexpected_error_returns_500(client):
 def test_generate_summary_endpoint_unexpected_error_returns_500(client):
     """POST /papers/{paper_id}/summary: unclassified errors in the cache-check step must map
     through _http_exc_for, not surface as a raw framework 500 (#303)."""
-    with patch("academic_paper.server.get_paper", side_effect=RuntimeError("disk error")):
+    with patch("academic_paper.services.summary_service.get_paper", side_effect=RuntimeError("disk error")):
         response = client.post("/papers/1/summary")
     assert response.status_code == 500
     assert "disk error" not in response.json()["detail"]
