@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# requirements.lock を pyproject.toml から再生成する (#520)。
+# requirements.lock と requirements-dev.lock を pyproject.toml から再生成する (#520, #660)。
 #
 # Usage:
 #   scripts/update-lock.sh             # 現在のピンを維持したまま再生成
 #   scripts/update-lock.sh --upgrade   # 全依存を最新版へ更新して再生成
 #
+# requirements-dev.lock は requirements.lock を制約 (-c) にして生成するため、
+# 必ず runtime lock の再生成後に dev lock を生成する。
 # lock ヘッダが "Python 3.12" 固定のため、3.12 以外では失敗させる。
 # pip-compile は pip-tools (pip install pip-tools) が提供する。
 set -euo pipefail
@@ -37,3 +39,8 @@ cd "$(dirname "$0")/.."
 # 付け外しで lock 本体は変わらず、ヘッダのコマンド行のみ変わる (#520)。
 pip-compile --generate-hashes --no-strip-extras \
   --output-file=requirements.lock "${upgrade[@]}" pyproject.toml
+
+# dev extras (pytest 等) のロック。ランタイムのピンは requirements.lock に揃える (#487, #660)。
+# --upgrade 時も dev 側のみ上がり、ランタイムは直前に再生成した lock が制約になる。
+pip-compile --generate-hashes --extra dev --no-strip-extras --allow-unsafe \
+  -c requirements.lock --output-file=requirements-dev.lock "${upgrade[@]}" pyproject.toml
