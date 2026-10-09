@@ -75,6 +75,13 @@ class Settings(BaseSettings):
             "empty elements are dropped; api_key and api_keys both empty = no auth"
         ),
     )
+    ingest_api_key: str = Field(
+        default="",
+        description=(
+            "X-API-Key limited to the ingest scope (POST /papers/ingest only once scopes are "
+            "enforced, #355); empty = not configured. Setting it alone still enables auth"
+        ),
+    )
     pdf_extract_timeout: int = Field(
         default=120,
         description=(
@@ -116,7 +123,7 @@ class Settings(BaseSettings):
             )
         return v
 
-    @field_validator("api_key", "embedding_api_key", "qdrant_api_key", "google_api_key")
+    @field_validator("api_key", "ingest_api_key", "embedding_api_key", "qdrant_api_key", "google_api_key")
     @classmethod
     def reject_placeholder_secret(cls, v: str) -> str:
         # Secrets have no fixed placeholder default (unlike the URL fields above, they
@@ -162,6 +169,11 @@ class Settings(BaseSettings):
     def accepted_api_keys(self) -> list[str]:
         """All keys that authenticate a request: api_key plus api_keys. Empty = auth disabled (#601)."""
         return ([self.api_key] if self.api_key else []) + self.api_keys_list
+
+    @property
+    def auth_enabled(self) -> bool:
+        """True if any of api_key / api_keys / ingest_api_key is set (#626)."""
+        return bool(self.accepted_api_keys or self.ingest_api_key)
 
     @property
     def preferred_categories_list(self) -> list[str]:
