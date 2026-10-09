@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from academic_paper.auth import require_scope
+from academic_paper.auth import verify_api_key
 from academic_paper.config import settings
 from academic_paper.db import (
     db_connection,
@@ -31,6 +31,7 @@ from academic_paper.extractor import hash_file
 from academic_paper.jobs import job_store
 from academic_paper.llm import get_llm_client
 from academic_paper.logging_config import configure_logging
+from academic_paper.routers.jobs import router as jobs_router
 from academic_paper.services import ingest_service
 from academic_paper.services.search_service import run_search
 from academic_paper.services.summary_service import (  # noqa: F401  (_summary_response re-exported, #618)
@@ -163,22 +164,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Academic Paper System", lifespan=lifespan)
-
-
-_require_authenticated = require_scope()  # any valid key, no scope required (#602)
-
-
-async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
-    """Require X-API-Key on write and read endpoints when API_KEY env var is set (#146).
-
-    Applied to read endpoints too (#241): paper text/search snippets are at least
-    as sensitive as the job metadata already gated behind auth (#190), so the
-    boundary must not be asymmetric.
-
-    Uses hmac.compare_digest for constant-time comparison to prevent
-    timing attacks that could leak key length / prefix (#190).
-    """
-    await _require_authenticated(x_api_key)
 
 
 # /metrics is added by Instrumentator.expose() rather than manually registered, so it
@@ -436,36 +421,11 @@ def list_summaries_endpoint(
 
 
 async def _run_summarize_all(job_id: str) -> None:
-    """Background task: summarize all indexed papers without a cached summary (#620)."""
+    """Kept for backward compat (tests import it); the /jobs router calls run_summarize_all directly (#621)."""
     await run_summarize_all(job_id, app.state.summarizer, app.state.llm, job_store)
 
 
-@app.post("/jobs/summarize-all", status_code=202, dependencies=[Depends(verify_api_key)])
-async def start_summarize_all(background_tasks: BackgroundTasks):
-    """Start a background job to summarize all papers without a cached summary."""
-    if app.state.llm is None or app.state.summarizer is None:
-        raise HTTPException(status_code=503, detail="LLM not configured")
-
-    job = await job_store.create_if_not_running(kind="summarize-all")
-    if job is None:
-        raise HTTPException(status_code=409, detail="A summarize-all job is already running")
-    background_tasks.add_task(_run_summarize_all, job.id)
-    return {"job_id": job.id, "status": job.status}
-
-
-@app.get("/jobs/{job_id}", dependencies=[Depends(verify_api_key)])
-def get_job_endpoint(job_id: str):
-    """Get status of a background job by ID."""
-    job = job_store.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return job.to_dict()
-
-
-@app.get("/jobs", dependencies=[Depends(verify_api_key)])
-def list_jobs_endpoint():
-    """List all background jobs (#190: require auth — exposes all job IDs / paper metadata)."""
-    return {"jobs": [j.to_dict() for j in job_store.list_all()]}
+app.include_router(jobs_router)
 
 
 @app.get("/search", dependencies=[Depends(verify_api_key)])
