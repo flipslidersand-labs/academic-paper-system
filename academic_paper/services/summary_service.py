@@ -7,6 +7,7 @@ error mapping are unchanged. This module has no dependency on the FastAPI app.
 """
 
 import logging
+import time
 
 from fastapi import HTTPException
 
@@ -179,3 +180,59 @@ def list_all_summaries(limit: int, offset: int) -> dict:
     except Exception as e:
         logger.exception("Failed to list summaries")
         raise _http_exc_for(e, "Failed to list summaries")
+
+
+async def run_summarize_all(job_id: str, summarizer, llm, job_store) -> None:
+    """Background task: summarize all indexed papers without a cached summary.
+
+    Job state transitions and the classified ``errors`` format (#584/#474) are
+    unchanged from the former server.py implementation.
+    """
+    job = job_store.get(job_id)
+    if job is None:
+        return
+
+    job.status = "running"
+    await job_store.persist(job)
+    try:
+        if summarizer is None:
+            job.status = "failed"
+            job.errors.append("Summarizer not initialized (LLM unavailable at job start)")
+            return
+        with db_connection(settings.academic_db) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT p.id, p.file_hash, p.title, p.file_name
+                FROM papers p
+                LEFT JOIN summaries s ON p.id = s.paper_id
+                WHERE s.paper_id IS NULL AND p.status = 'indexed'
+            """)
+            rows = cursor.fetchall()
+
+        job.total = len(rows)
+
+        model = llm.display_name
+
+        for row in rows:
+            paper_id = row[0]
+            file_hash = row[1]
+            row_title = row["title"]
+            row_file_name = row["file_name"]
+            try:
+                summary = await summarizer.summarize(paper_id, file_hash, title=row_title, file_name=row_file_name)
+                with db_connection(settings.academic_db) as conn:
+                    save_summary(conn, paper_id, model, summary)
+                job.processed += 1
+            except Exception as e:
+                logger.exception("Background summarize failed for paper_id=%s", paper_id)
+                job.failed += 1
+                job.errors.append(f"paper_id={paper_id}: {_safe_error_message(e)}")
+
+        job.status = "done"
+    except Exception as e:
+        logger.exception("Background summarize-all job=%s failed", job_id)
+        job.status = "failed"
+        job.errors.append(_safe_error_message(e))
+    finally:
+        job.finished_at = time.time()
+        await job_store.persist(job)
