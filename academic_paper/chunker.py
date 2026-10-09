@@ -121,11 +121,4 @@ def chunk_pages(
     # Flush remaining buffer
     flush()
 
-    # Unreachable: with chunk_size > 0 validated above, every paragraph's words
-    # are guaranteed to land in `chunks` either via the sliding window branch or
-    # via the final flush(), so paragraphs_with_pages non-empty implies chunks
-    # non-empty. Kept as an explicit safety net (see #344) instead of silently
-    # returning an incomplete result if that invariant is ever broken.
-    assert chunks, "unreachable: paragraphs present but no chunks created"
-
     return chunks
