@@ -77,6 +77,38 @@ def test_ensure_collection_raises_on_dimension_mismatch():
             store._ensure_collection()
 
 
+def _conflict_client(MockClient, existing_size):  # noqa: N803
+    mock_client = MagicMock()
+    MockClient.return_value = mock_client
+    mock_client.get_collections.return_value.collections = []
+    mock_client.create_collection.side_effect = UnexpectedResponse(
+        status_code=409, reason_phrase="Conflict", content=b"", headers={}
+    )
+    mock_client.get_collection.return_value.config.params.vectors.size = existing_size
+    return mock_client
+
+
+def test_ensure_collection_treats_409_as_success_when_size_matches():
+    """並行 ingest で create_collection が 409 でも、次元一致なら成功扱い・リトライなし (#647)"""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        mock_client = _conflict_client(MockClient, 768)
+
+        QdrantStore(url="http://test", collection="c", vector_size=768)._ensure_collection()
+
+        assert mock_client.create_collection.call_count == 1
+        mock_client.get_collection.assert_called_once_with("c")
+
+
+def test_ensure_collection_409_with_dimension_mismatch_raises_value_error():
+    """409 後に既存コレクションの次元が不一致なら ValueError (#647)"""
+    with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
+        _conflict_client(MockClient, 384)
+
+        store = QdrantStore(url="http://test", collection="c", vector_size=768)
+        with pytest.raises(ValueError, match="vector size 384"):
+            store._ensure_collection()
+
+
 def test_ensure_collection_passes_retry_params():
     """ensure_collection が with_retry に attempts=3 と retryable exceptions を渡すことを確認 (#266)"""
     with patch("academic_paper.vector_store.QdrantClient") as MockClient:  # noqa: N806
