@@ -325,6 +325,7 @@ async def test_summarize_falls_back_to_db_on_embed_http_failure():
 
     mock_llm = AsyncMock()
     mock_qdrant = MagicMock()
+    mock_qdrant.asearch = AsyncMock()
     mock_embedder = AsyncMock()
     mock_embedder.embed_single.side_effect = httpx.ConnectError("embedding-svc down")
 
@@ -340,7 +341,7 @@ async def test_summarize_falls_back_to_db_on_embed_http_failure():
 
     assert "objective" in result
     mock_db.assert_called_once_with(1, 5)
-    mock_qdrant.search.assert_not_called()
+    mock_qdrant.asearch.assert_not_called()  # QdrantStore uses asearch; .search is private/sync (#637)
 
 
 @pytest.mark.anyio
