@@ -166,3 +166,12 @@ def test_override_settings_fixture_restores(override_settings):
     original = get_settings().max_upload_mb
     override_settings(max_upload_mb=original + 1)
     assert config.settings.max_upload_mb == original + 1
+
+
+def test_placeholder_ingest_api_key_rejected():
+    with pytest.raises(ValidationError, match="placeholder"):
+        Settings(
+            embedding_svc_url="http://localhost:9092",
+            qdrant_url="http://localhost:6333",
+            ingest_api_key="<your-ingest-key>",
+        )

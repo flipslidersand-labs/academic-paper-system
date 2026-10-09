@@ -123,7 +123,7 @@ pip install -e ".[dev]"
 uvicorn academic_paper.server:app --reload --port 8020
 ```
 
-Key env vars: `EMBEDDING_SVC_URL`, `QDRANT_URL`, `GOOGLE_API_KEY`, `OLLAMA_URL`, `SUMMARIZE_TOTAL_TIMEOUT`, `LOG_FORMAT`  
+Key env vars: `API_KEY` / `API_KEYS` (full-scope keys), `INGEST_API_KEY` (ingest-only key; rotate by swapping it after updating the collector's `PAPER_API_KEY`), `EMBEDDING_SVC_URL`, `QDRANT_URL`, `GOOGLE_API_KEY`, `OLLAMA_URL`, `SUMMARIZE_TOTAL_TIMEOUT`, `LOG_FORMAT`  
 See `.env.example` for the full list.
 
 ### Docker Compose
