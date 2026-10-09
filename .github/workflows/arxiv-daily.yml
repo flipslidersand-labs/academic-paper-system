@@ -26,6 +26,10 @@ on:
         default: ""
         required: false
 
+# Least privilege (#650): the job only checks out code and uploads artifacts.
+permissions:
+  contents: read
+
 jobs:
   collect:
     # Runs on MINIPC self-hosted runner which has access to localhost:8020.
