@@ -952,7 +952,7 @@ def test_score_all_unexpected_db_error_returns_500(client):
 
 def test_list_papers_unexpected_error_returns_500(client):
     """GET /papers: unclassified errors must map through _http_exc_for (#276)."""
-    with patch("academic_paper.server.list_papers_filtered", side_effect=RuntimeError("disk error")):
+    with patch("academic_paper.routers.papers.list_papers_filtered", side_effect=RuntimeError("disk error")):
         response = client.get("/papers")
     assert response.status_code == 500
     assert "disk error" not in response.json()["detail"]
@@ -961,7 +961,7 @@ def test_list_papers_unexpected_error_returns_500(client):
 
 def test_get_paper_unexpected_error_returns_500(client):
     """GET /papers/{paper_id}: unclassified errors must map through _http_exc_for (#276)."""
-    with patch("academic_paper.server.get_paper", side_effect=RuntimeError("disk error")):
+    with patch("academic_paper.routers.papers.get_paper", side_effect=RuntimeError("disk error")):
         response = client.get("/papers/1")
     assert response.status_code == 500
     assert "disk error" not in response.json()["detail"]
@@ -1060,7 +1060,7 @@ def test_ingest_unexpected_exception(client):
     """POST /papers/ingest: unexpected error returns 500 with opaque message (#148)."""
     pdf_content = create_minimal_pdf()
 
-    with patch("academic_paper.server.hash_file", side_effect=RuntimeError("disk error")):
+    with patch("academic_paper.routers.papers.hash_file", side_effect=RuntimeError("disk error")):
         response = client.post(
             "/papers/ingest?wait=true",
             files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
