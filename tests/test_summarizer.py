@@ -735,3 +735,28 @@ async def test_llm_output_is_validated_and_bounded():
     assert out["method"] == '{"a": 1}'
     assert len(out["keywords"]) == MAX_KEYWORDS
     assert all(len(k) == MAX_KEYWORD_CHARS for k in out["keywords"])
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "reply",
+    [
+        'Here is the summary: {"objective": "o", "keywords": ["k"]} Hope {this} helps!',
+        'Note {draft}. ```json\n{"objective": "o", "keywords": ["k"]}\n``` (see {fig 1})',
+    ],
+)
+async def test_summarize_extracts_json_object_surrounded_by_prose(reply):
+    """Regression (#639): braces in surrounding prose must not break a valid embedded object."""
+    _, s = _injection_summarizer("t", reply)
+    result = await s.summarize(paper_id=1, file_hash="h")
+    assert result["objective"] == "o"
+    assert result["keywords"] == ["k"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("reply", ["[1, 2]", '"just a string"', "42", "null", "no json here {oops}"])
+async def test_summarize_non_object_or_unparseable_llm_reply_is_valueerror(reply):
+    """Regression (#639): non-object / unparseable replies are ValueError, never TypeError/AttributeError."""
+    _, s = _injection_summarizer("t", reply)
+    with pytest.raises(ValueError):
+        await s.summarize(paper_id=1, file_hash="h")
