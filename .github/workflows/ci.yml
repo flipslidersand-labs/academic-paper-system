@@ -45,6 +45,11 @@ jobs:
     # linux-general (ARC self-hosted) には docker socket が無く `docker build` が
     # 失敗するため、ubuntu-latest 固定のままにする（forgeの release.yml と同じ制約）。
     runs-on: ubuntu-latest
+    # Least privilege (#650). Job-level only: the reusable `test` job below
+    # needs its own token scopes (PR comment), so a top-level block would
+    # restrict it and risk startup_failure (see #341).
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
       - name: Validate docker-compose.yml (#435)
