@@ -144,7 +144,7 @@ async def test_summarize_normalizes_nested_dict_and_list_fields_to_json_strings(
     assert "日本語" in result["objective"]  # ensure_ascii=False keeps non-ASCII readable
     assert result["method"] == '["step1", "step2"]'
     assert result["results"] == "95"
-    assert result["limitations"] == "null"
+    assert result["limitations"] == ""  # null -> empty, not the string "null" (#638)
     assert result["keywords"] == ["x", "2"]
 
 
