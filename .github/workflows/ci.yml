@@ -70,6 +70,7 @@ jobs:
             -e EMBEDDING_SVC_URL=http://localhost:9092 \
             -e QDRANT_URL=http://localhost:6333 \
             -e ACADEMIC_DB=/tmp/academic.db \
+            -e API_KEY=ci-smoke \
             academic-paper-system:test
 
           ready=""
