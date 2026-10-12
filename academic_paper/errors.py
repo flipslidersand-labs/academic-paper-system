@@ -8,7 +8,7 @@ import httpx
 from fastapi import HTTPException
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
-from academic_paper.embedder import EmbeddingCountMismatchError
+from academic_paper.embedder import EmbeddingCountMismatchError, EmbeddingResponseError
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,9 @@ def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
         # Checked before the generic ValueError branch below (#336): this is an
         # upstream protocol failure, not bad client input, so it maps to 502.
         return HTTPException(status_code=502, detail="Embedding service returned a mismatched vector count")
+    if isinstance(exc, EmbeddingResponseError):
+        # Malformed 200 body from embedding-svc (#644): upstream failure -> 502.
+        return HTTPException(status_code=502, detail="Embedding service returned an invalid response")
     if isinstance(exc, (UnexpectedResponse, ResponseHandlingException)):
         return HTTPException(status_code=502, detail="Vector store returned an unexpected response")
     if isinstance(exc, sqlite3.IntegrityError):

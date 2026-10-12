@@ -6,7 +6,7 @@ import httpx
 import pytest
 import respx
 
-from academic_paper.embedder import _BATCH_MAX, EmbedderClient, EmbeddingCountMismatchError
+from academic_paper.embedder import _BATCH_MAX, EmbedderClient, EmbeddingCountMismatchError, EmbeddingResponseError
 
 
 @pytest.mark.anyio
@@ -290,6 +290,34 @@ async def test_embed_raises_on_partial_batch_mismatch():
 
         with pytest.raises(EmbeddingCountMismatchError):
             await client.embed(["a", "b", "c", "d"])
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(
+            200, content=b"<html><body>Bad gateway page</body></html>", headers={"content-type": "text/html"}
+        ),
+        httpx.Response(200, json={"detail": "no vectors key"}),
+        httpx.Response(200, json={"vectors": None}),
+    ],
+    ids=["non-json-200", "missing-vectors-key", "null-vectors"],
+)
+async def test_embed_raises_embedding_response_error_on_malformed_200(response):
+    """A 200 with a non-JSON body or without a usable 'vectors' list raises EmbeddingResponseError (#644)."""
+    client = EmbedderClient(base_url="http://localhost:9092", api_key="test-key")
+
+    with respx.mock:
+        respx.post("http://localhost:9092/embed/batch").mock(return_value=response)
+
+        with pytest.raises(EmbeddingResponseError):
+            await client.embed(["hello"])
+
+
+def test_embedding_response_error_is_not_a_value_error():
+    """EmbeddingResponseError must not be a ValueError, or _http_exc_for would map it to 400 (#644)."""
+    assert not issubclass(EmbeddingResponseError, ValueError)
 
 
 def test_embedding_timeout_default():

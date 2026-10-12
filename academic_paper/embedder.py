@@ -22,6 +22,15 @@ class EmbeddingCountMismatchError(ValueError):
     """
 
 
+class EmbeddingResponseError(Exception):
+    """Raised when embedding-svc answers 200 but the body is unusable.
+
+    Covers a non-JSON body (e.g. an HTML error page behind a proxy) and a missing
+    or non-list 'vectors' field. Deliberately not a ValueError: it is an upstream
+    protocol failure and must map to 502, not the ValueError -> 400 branch (#644).
+    """
+
+
 _EMBED_RETRYABLE = (httpx.NetworkError, httpx.TimeoutException, _RetryableStatusError)
 _BATCH_MAX = 256  # embedding-svc /embed/batch hard limit
 
@@ -94,7 +103,14 @@ class EmbedderClient:
             if response.status_code >= 500 or response.status_code == 429:
                 raise _RetryableStatusError(str(exc), request=exc.request, response=exc.response) from exc
             raise
-        vectors = response.json()["vectors"]
+        try:
+            vectors = response.json()["vectors"]
+        except (ValueError, KeyError, TypeError) as exc:
+            # ValueError covers json.JSONDecodeError / UnicodeDecodeError; TypeError
+            # covers a non-dict top-level JSON value.
+            raise EmbeddingResponseError("embedding-svc returned a non-JSON or malformed 200 response") from exc
+        if not isinstance(vectors, list):
+            raise EmbeddingResponseError("embedding-svc returned a non-list 'vectors' field")
         if len(vectors) != len(texts):
             raise EmbeddingCountMismatchError(
                 f"embedding-svc returned {len(vectors)} vectors for {len(texts)} input texts"

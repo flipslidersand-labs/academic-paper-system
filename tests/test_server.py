@@ -1048,6 +1048,16 @@ def test_http_exc_for_maps_embedding_count_mismatch_to_502():
     assert exc.status_code == 502
 
 
+def test_http_exc_for_maps_embedding_response_error_to_502():
+    """A malformed 200 from embedding-svc (non-JSON / missing vectors) is an upstream
+    protocol failure: 502, not the ValueError 400 or the catch-all 500 (#644)."""
+    from academic_paper.embedder import EmbeddingResponseError
+    from academic_paper.server import _http_exc_for
+
+    exc = _http_exc_for(EmbeddingResponseError("non-JSON body"), "fallback")
+    assert exc.status_code == 502
+
+
 def test_http_exc_for_still_maps_plain_value_error_to_400():
     """_http_exc_for keeps ordinary ValueError (input validation) at 400 (#148)."""
     from academic_paper.server import _http_exc_for
