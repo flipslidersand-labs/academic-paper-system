@@ -2,9 +2,6 @@
 
 import asyncio
 import logging
-import os
-import re
-import tempfile
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -17,32 +14,32 @@ from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from academic_paper.auth import require_scope
-from academic_paper.chunker import chunk_pages
 from academic_paper.config import settings
 from academic_paper.db import (
     db_connection,
-    delete_paper,
     get_all_papers_for_scoring,
     get_paper,
-    get_summary,
     init_db,
     list_papers_filtered,
     list_summaries,
-    save_chunks,
-    save_paper,
     save_summary,
     update_paper_score,
     update_paper_status,
 )
 from academic_paper.embedder import EmbedderClient
-from academic_paper.errors import _http_exc_for  # noqa: F401  (re-exported for backward compat, #614)
-from academic_paper.extractor import extract_text, hash_file
+from academic_paper.errors import _http_exc_for, _safe_error_message  # noqa: F401  (re-exported, #614/#615)
+from academic_paper.extractor import hash_file
 from academic_paper.jobs import job_store
 from academic_paper.llm import get_llm_client
 from academic_paper.logging_config import configure_logging
-from academic_paper.models import PaperSummary
 from academic_paper.scorer import compute_score
+from academic_paper.services import ingest_service
 from academic_paper.services.search_service import run_search
+from academic_paper.services.summary_service import (  # noqa: F401  (_summary_response re-exported, #618)
+    _summary_response,
+    generate_summary,
+    get_cached_summary,
+)
 from academic_paper.summarizer import RAGSummarizer
 from academic_paper.telemetry import get_tracer, setup_telemetry
 from academic_paper.validators import (  # noqa: F401  (re-exported for backward compat, #614)
@@ -50,7 +47,7 @@ from academic_paper.validators import (  # noqa: F401  (re-exported for backward
     _sanitize_text,
     _validate_published_date,
 )
-from academic_paper.vector_store import QdrantStore, make_qdrant_id
+from academic_paper.vector_store import QdrantStore
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +109,7 @@ async def lifespan(app: FastAPI):
     """Initialize database and services on startup."""
     configure_logging(level=settings.log_level, fmt=settings.log_format)
     # Fail closed: no API key configured and auth not explicitly disabled (#646).
-    if not settings.accepted_api_keys and not settings.auth_disabled:
+    if not settings.auth_enabled and not settings.auth_disabled:
         raise RuntimeError(
             "API_KEY / API_KEYS is not set. Refusing to start with unauthenticated endpoints; "
             "set API_KEY (or API_KEYS), or set AUTH_DISABLED=true to run without authentication explicitly (#646)."
@@ -145,7 +142,7 @@ async def lifespan(app: FastAPI):
     # (documented asyncio pitfall), and cancel it on shutdown.
     app.state.probe_task = asyncio.create_task(_probe_startup_health(app))
     await _cleanup_orphaned_ingests(app)
-    if not settings.accepted_api_keys:
+    if not settings.auth_enabled:
         logger.warning("AUTH_DISABLED=true — all endpoints (including write endpoints) are unauthenticated (#241)")
     yield
     # Graceful shutdown: wait up to 30 s for in-flight ingest tasks (#194).
@@ -193,162 +190,43 @@ async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-A
 Instrumentator().instrument(app).expose(app, dependencies=[Depends(verify_api_key)])
 
 
-def _safe_error_message(exc: Exception) -> str:
-    """Short, classified error text safe to expose in job/score errors (#474).
-
-    Never includes str(exc): httpx/Qdrant/Ollama exception strings embed internal
-    URLs, and the job errors reach public Actions logs/artifacts. Classification
-    reuses _http_exc_for (details go to the logger only). Builtin TimeoutError has
-    an empty str(), so it is reported by class name.
-    """
-    if isinstance(exc, TimeoutError):
-        return "TimeoutError"
-    http_exc = _http_exc_for(exc, "")
-    if http_exc.status_code == 400:
-        # Plain ValueError (input validation): the message may carry arbitrary content.
-        return type(exc).__name__
-    return str(http_exc.detail)
-
-
 async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_name: str) -> int:
-    """Extract → chunk → embed → Qdrant upsert for a saved paper. Returns chunk count.
-
-    Raises on extraction/chunking/embedding failure; the caller is responsible
-    for updating the paper status to 'failed'.
-    """
-    with tracer.start_as_current_span("pdf.extract"):
-        # extract_text is CPU-bound / sync I/O — run in thread pool (#149).
-        # extract_text() has no page/time limit of its own, so a malformed or
-        # huge PDF can otherwise hang the job forever (#238); bound the wait here.
-        try:
-            pages = await asyncio.wait_for(
-                asyncio.to_thread(extract_text, tmp_path), timeout=settings.pdf_extract_timeout
-            )
-        except asyncio.TimeoutError as exc:
-            raise TimeoutError(f"PDF extraction exceeded {settings.pdf_extract_timeout}s timeout (#238)") from exc
-    if not pages:
-        raise ValueError("No text extracted from PDF")
-
-    chunks_list = chunk_pages(pages, chunk_size=settings.chunk_size, overlap=settings.chunk_overlap)
-    if not chunks_list:
-        raise ValueError("No chunks generated")
-
-    chunk_texts = [chunk["text"] for chunk in chunks_list]
-    with tracer.start_as_current_span("embed.batch"):
-        embeddings = await app.state.embedder.embed(chunk_texts, mode="index")
-
-    await app.state.vector_store.aensure_collection()
-
-    points = []
-    for idx, (chunk, embedding) in enumerate(zip(chunks_list, embeddings)):
-        qdrant_id = make_qdrant_id(file_hash, idx)
-        chunk["qdrant_id"] = qdrant_id
-        points.append(
-            {
-                "id": qdrant_id,
-                "vector": embedding,
-                "payload": {
-                    "paper_id": paper_id,
-                    "chunk_index": idx,
-                    "text": chunk["text"],
-                    "file_name": file_name,
-                },
-            }
-        )
-
-    with tracer.start_as_current_span("qdrant.upsert"):
-        await app.state.vector_store.aupsert(points)
-
-    try:
-        with db_connection(settings.academic_db) as conn:
-            save_chunks(conn, paper_id, chunks_list)
-            update_paper_status(conn, paper_id, "indexed")
-    except Exception:
-        # Qdrant upsert succeeded but DB write failed — compensate by deleting
-        # the orphaned vectors so the paper can be re-ingested (#145).
-        try:
-            await app.state.vector_store.adelete_by_paper_id(paper_id)
-        except Exception as qdrant_exc:
-            logger.error("Qdrant compensation delete failed for paper_id=%s: %s", paper_id, qdrant_exc)
-        raise
-
-    return len(chunks_list)
+    """Thin wrapper: supplies app.state deps to ingest_service.ingest_pipeline (#615)."""
+    return await ingest_service.ingest_pipeline(
+        tmp_path,
+        paper_id,
+        file_hash,
+        file_name,
+        embedder=app.state.embedder,
+        vector_store=app.state.vector_store,
+    )
 
 
 async def _compensate_qdrant(paper_id: int) -> None:
-    """Best-effort: delete a paper's Qdrant vectors after a failed ingest (#471).
-
-    Upsert is sent in batches, so a mid-way failure leaves earlier batches behind.
-    A failure here is logged and swallowed so it never masks the original error.
-    """
-    try:
-        await app.state.vector_store.adelete_by_paper_id(paper_id)
-    except Exception as exc:
-        logger.error("Qdrant compensation delete failed for paper_id=%s: %s", paper_id, exc)
+    await ingest_service.compensate_qdrant(app.state.vector_store, paper_id)
 
 
 async def _mark_paper_failed(paper_id: int) -> None:
-    """Best-effort: set a paper's status to 'failed' without blocking the event loop.
-
-    update_paper_status is synchronous sqlite3 I/O with a 5s busy_timeout, so it
-    is run in a thread (#277-style). A failure here (e.g. 'database is locked')
-    is logged and swallowed rather than raised, so callers can update job status
-    first and unconditionally — a paper-status write failure must never prevent
-    the job from being marked 'failed' (#421).
-    """
-    try:
-
-        def _update() -> None:
-            with db_connection(settings.academic_db) as conn:
-                update_paper_status(conn, paper_id, "failed")
-
-        await asyncio.to_thread(_update)
-    except Exception:
-        logger.error("Failed to mark paper_id=%s as failed (job status still updated)", paper_id, exc_info=True)
+    await ingest_service.mark_paper_failed(paper_id)
 
 
-def _unlink_quiet(path: str) -> None:
-    try:
-        os.unlink(path)
-    except OSError:
-        pass
+_unlink_quiet = ingest_service.unlink_quiet
 
 
 async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str, file_name: str) -> None:
-    """Background task: run the ingest pipeline, updating job + paper status.
+    await ingest_service.run_ingest(
+        job_id,
+        tmp_path,
+        paper_id,
+        file_hash,
+        file_name,
+        embedder=app.state.embedder,
+        vector_store=app.state.vector_store,
+        job_store=job_store,
+    )
 
-    Owns ``tmp_path`` cleanup on every path, including the early return when
-    the job is gone and a failure in the initial ``persist`` (#454).
-    """
-    try:
-        job = job_store.get(job_id)
-        if job is None:
-            return
-        job.status = "running"
-        job.total = 1
-        await job_store.persist(job)
-        try:
-            chunks = await _ingest_pipeline(tmp_path, paper_id, file_hash, file_name)
-            job.result = {"paper_id": paper_id, "file_name": file_name, "chunks": chunks, "status": "indexed"}
-            job.processed = 1
-            job.status = "done"
-        except Exception as e:
-            logger.exception("Background ingest failed for paper_id=%s", paper_id)
-            # _mark_paper_failed never raises (#421): it swallows and logs its own
-            # errors, so the job attributes below always run afterward instead of
-            # being skipped by an exception from the paper-status write.
-            await _mark_paper_failed(paper_id)
-            # Upsert may have partially succeeded (batched); remove leftover vectors
-            # so a failed paper is not returned by vector search (#471).
-            await _compensate_qdrant(paper_id)
-            job.failed = 1
-            job.errors.append(f"paper_id={paper_id}: {_safe_error_message(e)}")
-            job.status = "failed"
-        finally:
-            job.finished_at = time.time()
-            await job_store.persist(job)
-    finally:
-        _unlink_quiet(tmp_path)
+
+_DUPLICATE_DETAIL = {"indexed": "File already ingested", "pending": "File is already being ingested"}
 
 
 @app.post("/papers/ingest", dependencies=[Depends(verify_api_key)])
@@ -383,63 +261,30 @@ async def ingest_paper(
     try:
         _validate_published_date(published_date)
         max_bytes = settings.max_upload_mb * 1024 * 1024
-        size_detail = f"File too large (max {settings.max_upload_mb} MB)"
-        # Reject early when the multipart part already declares an oversized length,
-        # before buffering anything.
-        if file.size is not None and file.size > max_bytes:
-            raise HTTPException(status_code=413, detail=size_detail)
-
-        # Stream to disk in 1 MiB chunks, enforcing the size cap as bytes arrive
-        # so an oversized body is cut off mid-transfer instead of being fully
-        # buffered in memory first.
-        header = b""
-        received = 0
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp_path = tmp.name
-            while chunk := await file.read(1 << 20):
-                received += len(chunk)
-                if received > max_bytes:
-                    raise HTTPException(status_code=413, detail=size_detail)
-                if len(header) < 5:
-                    header += chunk[: 5 - len(header)]
-                tmp.write(chunk)
-
-        if not header.startswith(b"%PDF-"):
+        try:
+            tmp_path = await ingest_service.stream_upload_to_tmp(file, max_bytes)
+        except ingest_service.UploadTooLargeError:
+            raise HTTPException(status_code=413, detail=f"File too large (max {settings.max_upload_mb} MB)")
+        except ingest_service.NotAPdfError:
             raise HTTPException(status_code=415, detail="Not a PDF file (missing %PDF- header)")
 
         file_hash = hash_file(tmp_path)
-        # Sanitize filename to prevent log injection and stored XSS (#189).
-        # Allow only word chars, dots, hyphens, spaces; replace everything else with '_'.
-        raw_name = file.filename or "unknown.pdf"
-        file_name = re.sub(r"[^\w.\- ]", "_", raw_name)[:255]
+        file_name = ingest_service.sanitize_file_name(file.filename)
 
-        with db_connection(settings.academic_db) as conn:
-            cursor = conn.cursor()
-            # 409 when already indexed or still being ingested ('pending'); failed rows
-            # are removed so the same PDF can be re-uploaded after a partial failure (#145).
-            # Deleting a 'pending' row would pull it out from under the running job and
-            # its compensating Qdrant delete could wipe the new paper's shared points (#496).
-            # Stale 'pending' rows from a killed server are turned 'failed' at startup.
-            cursor.execute("SELECT id, status FROM papers WHERE file_hash = ?", (file_hash,))
-            existing = cursor.fetchone()
-            if existing:
-                if existing["status"] == "indexed":
-                    raise HTTPException(status_code=409, detail="File already ingested")
-                if existing["status"] == "pending":
-                    raise HTTPException(status_code=409, detail="File is already being ingested")
-                # 'failed' row — purge and re-ingest
-                delete_paper(conn, existing["id"])
-
-            paper_id = save_paper(
-                conn,
+        try:
+            paper_id = ingest_service.register_paper(
                 file_name,
                 file_hash,
-                title=_sanitize_text(title),
-                authors=_parse_list_field(authors, "authors"),
-                categories=_parse_list_field(categories, "categories"),
-                published_date=published_date or None,
-                source=_sanitize_text(source),
+                lambda: {
+                    "title": _sanitize_text(title),
+                    "authors": _parse_list_field(authors, "authors"),
+                    "categories": _parse_list_field(categories, "categories"),
+                    "published_date": published_date or None,
+                    "source": _sanitize_text(source),
+                },
             )
+        except ingest_service.DuplicatePaperError as dup:
+            raise HTTPException(status_code=409, detail=_DUPLICATE_DETAIL[dup.status])
 
         if wait:
             try:
@@ -521,90 +366,16 @@ def get_paper_endpoint(paper_id: int):
         raise _http_exc_for(e, "Failed to get paper")
 
 
-def _summary_response(paper_id: int, model: str, summary: dict, cached: bool) -> dict:
-    """Build the summary response; summary fields come from PaperSummary.model_fields."""
-    defaults = PaperSummary().model_dump()
-    return {
-        "paper_id": paper_id,
-        "model": model,
-        **{f: summary.get(f, defaults[f]) for f in PaperSummary.model_fields},
-        "cached": cached,
-    }
-
-
 @app.get("/papers/{paper_id}/summary", dependencies=[Depends(verify_api_key)])
 async def get_summary_endpoint(paper_id: int):
-    """Return the cached summary only. GET is safe/idempotent (#140):
-    crawler or monitoring access must never trigger LLM generation or DB
-    writes. Generation lives in POST /papers/{paper_id}/summary.
-    """
-    try:
-        with db_connection(settings.academic_db) as conn:
-            paper = get_paper(conn, paper_id)
-            if paper is None:
-                raise HTTPException(status_code=404, detail="Paper not found")
-
-            cached_summary = get_summary(conn, paper_id)
-            if cached_summary is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Summary not generated yet — POST /papers/{paper_id}/summary to generate",
-                )
-            return _summary_response(paper_id, cached_summary["model"], cached_summary, True)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to get summary for paper_id=%s", paper_id)
-        raise _http_exc_for(e, "Failed to get summary")
+    """Return the cached summary only (GET is safe/idempotent, #140). Generation lives in POST."""
+    return get_cached_summary(paper_id)
 
 
 @app.post("/papers/{paper_id}/summary", dependencies=[Depends(verify_api_key)])
 async def generate_summary_endpoint(paper_id: int, force: bool = Query(False)):
     """Generate the summary (cached result is returned unless force=true)."""
-    # Read paper and cache in a short-lived connection — close before LLM await
-    # to avoid holding a WAL write-lock for the full LLM timeout (#191).
-    try:
-        with db_connection(settings.academic_db) as conn:
-            paper = get_paper(conn, paper_id)
-
-            if paper is None:
-                raise HTTPException(status_code=404, detail="Paper not found")
-
-            if not force:
-                cached_summary = get_summary(conn, paper_id)
-                if cached_summary is not None:
-                    return _summary_response(paper_id, cached_summary["model"], cached_summary, True)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to check cached summary for paper_id=%s", paper_id)
-        raise _http_exc_for(e, "Failed to check cached summary")
-
-    # Connection closed — safe to await LLM for up to 300 s without blocking writers.
-    if app.state.llm is None:
-        raise HTTPException(status_code=503, detail="LLM not configured")
-
-    if app.state.summarizer is None:
-        raise HTTPException(status_code=503, detail="Summarizer not initialized")
-
-    try:
-        with tracer.start_as_current_span("summarize") as span:
-            span.set_attribute("paper_id", paper_id)
-            summary = await app.state.summarizer.summarize(
-                paper_id, paper["file_hash"], title=paper.get("title"), file_name=paper.get("file_name")
-            )
-
-        model = app.state.llm.display_name
-
-        # Open a fresh short-lived connection just for the write.
-        with db_connection(settings.academic_db) as conn:
-            save_summary(conn, paper_id, model, summary)
-
-        return _summary_response(paper_id, model, summary, False)
-
-    except Exception as e:
-        logger.exception("Summarization error for paper_id=%s", paper_id)
-        raise _http_exc_for(e, "Summarization failed: check LLM availability")
+    return await generate_summary(paper_id, force, app.state.llm, app.state.summarizer)
 
 
 @app.post("/papers/score-all", dependencies=[Depends(verify_api_key)])

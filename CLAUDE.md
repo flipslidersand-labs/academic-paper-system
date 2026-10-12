@@ -262,8 +262,9 @@ title / authors / categories / published_date / source: 任意のメタデータ
 | `LLM_GENERATE_TIMEOUT` | 要約時の `llm.generate()` 上限秒 | `903` |
 | `SUMMARIZE_TOTAL_TIMEOUT` | `summarize()` 全体の上限秒 | `1063` |
 | `PORT` | API サーバーポート | `8020` |
-| `API_KEY` | `/health` 以外の全エンドポイントの X-API-Key（読み取り系含む。`API_KEY`/`API_KEYS` 両方空かつ `AUTH_DISABLED` 未指定なら起動拒否） | (空) |
+| `API_KEY` | `/health` 以外の全エンドポイントの X-API-Key（読み取り系含む。`API_KEY`/`API_KEYS`/`INGEST_API_KEY` 全て空かつ `AUTH_DISABLED` 未指定なら起動拒否） | (空) |
 | `AUTH_DISABLED` | `true` で認証なし起動を明示許可（既定 false, #646） | false |
+| `INGEST_API_KEY` | ingest スコープ限定の X-API-Key（#355。単独設定でも認証有効。エンドポイントへのスコープ適用は #627） | (空) |
 | `PAPER_API_KEY` | コレクタ側が送る X-API-Key（cron は repo secret 経由） | (空) |
 | `SEMANTIC_SCHOLAR_API_KEY` | `scripts/semantic_scholar_collect.py` 用 API キー（`--api-key` でも指定可。サーバー設定ではない） | (空) |
 | `DISCORD_WEBHOOK_URL` | arxiv-daily.yml の失敗/結果通知先（**repo secret 必須**。未設定だと通知が無効化され、schedule 実行の失敗は Notify ステップが exit 1 で表面化する。登録はオペレーター手動作業 #481） | (未設定) |

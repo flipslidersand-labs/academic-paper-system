@@ -2,7 +2,7 @@
 
 import httpx
 
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.http_client import client_or_temporary
 from academic_paper.retry import async_with_retry
 
@@ -35,8 +35,8 @@ class EmbedderClient:
         api_key: str | None = None,
         client: httpx.AsyncClient | None = None,
     ):
-        self.base_url = base_url or settings.embedding_svc_url
-        self.api_key = api_key or settings.embedding_api_key
+        self.base_url = base_url or get_settings().embedding_svc_url
+        self.api_key = api_key or get_settings().embedding_api_key
         # Injected persistent client (managed by lifespan); None → per-call client.
         self._client = client
 
@@ -64,7 +64,7 @@ class EmbedderClient:
         if not texts:
             return []
         results: list[list[float]] = []
-        async with client_or_temporary(self._client, timeout=settings.embedding_timeout) as client:
+        async with client_or_temporary(self._client, timeout=get_settings().embedding_timeout) as client:
             for i in range(0, len(texts), _BATCH_MAX):
                 chunk = texts[i : i + _BATCH_MAX]
                 vectors = await async_with_retry(

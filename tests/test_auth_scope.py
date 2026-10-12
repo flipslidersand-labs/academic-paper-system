@@ -73,3 +73,49 @@ def test_resolve_scopes_all_for_valid_key_none_otherwise():
     assert resolve_scopes("a", ["a", "b"]) == ALL_SCOPES
     assert resolve_scopes("c", ["a", "b"]) is None
     assert resolve_scopes(None, ["a"]) is None
+
+
+# --- ingest_api_key (#626) ---
+
+
+def test_resolve_scopes_ingest_key_only_ingest():
+    assert resolve_scopes("ing", ["full"], ["ing"]) == frozenset({Scope.INGEST})
+
+
+def test_resolve_scopes_full_key_all_scopes():
+    assert resolve_scopes("full", ["full"], ["ing"]) == ALL_SCOPES
+
+
+def test_resolve_scopes_mismatch_none():
+    assert resolve_scopes("bad", ["full"], ["ing"]) is None
+    assert resolve_scopes(None, [], []) is None
+
+
+def test_ingest_key_alone_enables_auth(c):
+    with (
+        patch.object(settings, "api_key", ""),
+        patch.object(settings, "api_keys", ""),
+        patch.object(settings, "ingest_api_key", "ing"),
+    ):
+        assert settings.auth_enabled
+        assert c.get("/any").status_code == 401
+        assert c.get("/any", headers=_h("bad")).status_code == 401
+
+
+def test_ingest_key_lacks_read_scope_403(c):
+    with (
+        patch.object(settings, "api_key", ""),
+        patch.object(settings, "api_keys", ""),
+        patch.object(settings, "ingest_api_key", "ing"),
+    ):
+        assert c.get("/any", headers=_h("ing")).status_code == 200
+        assert c.get("/read", headers=_h("ing")).status_code == 403
+
+
+def test_auth_disabled_when_nothing_set():
+    with (
+        patch.object(settings, "api_key", ""),
+        patch.object(settings, "api_keys", ""),
+        patch.object(settings, "ingest_api_key", ""),
+    ):
+        assert not settings.auth_enabled

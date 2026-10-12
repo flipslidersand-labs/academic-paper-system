@@ -61,8 +61,10 @@ def _post(client, wait):
 def test_wait_true_db_failure_compensates_and_marks_failed(client):
     delete = client.app.state.vector_store.adelete_by_paper_id
     with (
-        patch("academic_paper.server.extract_text", return_value=[{"page": 1, "text": "content"}]),
-        patch("academic_paper.server.save_chunks", side_effect=sqlite3.OperationalError("disk I/O error")),
+        patch("academic_paper.services.ingest_service.extract_text", return_value=[{"page": 1, "text": "content"}]),
+        patch(
+            "academic_paper.services.ingest_service.save_chunks", side_effect=sqlite3.OperationalError("disk I/O error")
+        ),
     ):
         resp = _post(client, wait=True)
     assert resp.status_code == 500
@@ -78,8 +80,8 @@ def test_wait_true_compensation_delete_failure_keeps_original_error(client):
     delete = client.app.state.vector_store.adelete_by_paper_id
     delete.side_effect = RuntimeError("qdrant down")
     with (
-        patch("academic_paper.server.extract_text", return_value=[{"page": 1, "text": "content"}]),
-        patch("academic_paper.server.save_chunks", side_effect=sqlite3.OperationalError("locked")),
+        patch("academic_paper.services.ingest_service.extract_text", return_value=[{"page": 1, "text": "content"}]),
+        patch("academic_paper.services.ingest_service.save_chunks", side_effect=sqlite3.OperationalError("locked")),
     ):
         resp = _post(client, wait=True)
     # Status is decided by the original DB error (500), not the delete failure.
@@ -90,8 +92,10 @@ def test_wait_true_compensation_delete_failure_keeps_original_error(client):
 def test_async_db_failure_compensates_and_job_failed(client):
     delete = client.app.state.vector_store.adelete_by_paper_id
     with (
-        patch("academic_paper.server.extract_text", return_value=[{"page": 1, "text": "content"}]),
-        patch("academic_paper.server.save_chunks", side_effect=sqlite3.OperationalError("disk I/O error")),
+        patch("academic_paper.services.ingest_service.extract_text", return_value=[{"page": 1, "text": "content"}]),
+        patch(
+            "academic_paper.services.ingest_service.save_chunks", side_effect=sqlite3.OperationalError("disk I/O error")
+        ),
     ):
         resp = _post(client, wait=False)
         assert resp.status_code == 202
@@ -105,8 +109,8 @@ def test_async_db_failure_compensates_and_job_failed(client):
 def test_async_compensation_delete_failure_still_fails_job(client):
     client.app.state.vector_store.adelete_by_paper_id.side_effect = RuntimeError("qdrant down")
     with (
-        patch("academic_paper.server.extract_text", return_value=[{"page": 1, "text": "content"}]),
-        patch("academic_paper.server.save_chunks", side_effect=sqlite3.OperationalError("locked")),
+        patch("academic_paper.services.ingest_service.extract_text", return_value=[{"page": 1, "text": "content"}]),
+        patch("academic_paper.services.ingest_service.save_chunks", side_effect=sqlite3.OperationalError("locked")),
     ):
         body = _post(client, wait=False).json()
         job = _wait_for_job(client, body["job_id"])
@@ -117,11 +121,13 @@ def test_async_compensation_delete_failure_still_fails_job(client):
 
 def test_reupload_after_compensated_failure_is_accepted(client):
     with (
-        patch("academic_paper.server.extract_text", return_value=[{"page": 1, "text": "content"}]),
-        patch("academic_paper.server.save_chunks", side_effect=sqlite3.OperationalError("disk I/O error")),
+        patch("academic_paper.services.ingest_service.extract_text", return_value=[{"page": 1, "text": "content"}]),
+        patch(
+            "academic_paper.services.ingest_service.save_chunks", side_effect=sqlite3.OperationalError("disk I/O error")
+        ),
     ):
         assert _post(client, wait=True).status_code == 500
-    with patch("academic_paper.server.extract_text", return_value=[{"page": 1, "text": "content"}]):
+    with patch("academic_paper.services.ingest_service.extract_text", return_value=[{"page": 1, "text": "content"}]):
         resp = _post(client, wait=True)
     assert resp.status_code == 200
     assert resp.json()["status"] == "indexed"

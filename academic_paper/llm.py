@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 import httpx
 from google.genai import errors as genai_errors
 
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.http_client import client_or_temporary
 from academic_paper.retry import async_with_retry
 
@@ -52,6 +52,7 @@ class GeminiClient(BaseLLMClient):
             api_key: Google API key. If None, uses settings.google_api_key
             model: Model name. If None, uses settings.gemini_model
         """
+        settings = get_settings()
         self.api_key = api_key or settings.google_api_key
         self.model = model or settings.gemini_model
         from google import genai
@@ -136,6 +137,7 @@ class OllamaClient(BaseLLMClient):
             owns_client: If True, aclose() closes ``client``. Default False:
                     an injected client is closed by whoever injected it (#498).
         """
+        settings = get_settings()
         self.base_url = base_url or settings.ollama_url
         self.model = model or settings.ollama_model
         # Persistent client injected from lifespan; None → per-call fallback.
@@ -175,7 +177,7 @@ class OllamaClient(BaseLLMClient):
         Returns:
             Generated text response
         """
-        async with client_or_temporary(self._client, timeout=settings.ollama_timeout) as client:
+        async with client_or_temporary(self._client, timeout=get_settings().ollama_timeout) as client:
             return await async_with_retry(
                 self._post,
                 client,
@@ -198,6 +200,7 @@ def get_llm_client(http_client: httpx.AsyncClient | None = None) -> BaseLLMClien
 
     ``http_client`` is injected into OllamaClient (not owned: the caller closes it).
     """
+    settings = get_settings()
     provider = settings.llm_provider
     if provider == "none":
         return None
