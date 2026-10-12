@@ -343,8 +343,10 @@ def list_papers_filtered(
     params: list = []
 
     if author:
-        conditions.append("authors LIKE ?")
-        params.append(f"%{author}%")
+        # Escape LIKE wildcards so '%' / '_' in user input match literally.
+        escaped = author.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        conditions.append("authors LIKE ? ESCAPE '\\'")
+        params.append(f"%{escaped}%")
     if category:
         # categories is a JSON array; LIKE '%cs.AI%' would also match "cs.AIS" or "stat.AI".
         conditions.append("EXISTS (SELECT 1 FROM json_each(papers.categories) WHERE value = ?)")

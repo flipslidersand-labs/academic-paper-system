@@ -7,6 +7,7 @@ holds if every single line in the lock actually carries a hash; a manual
 re-generation without `--generate-hashes` would drop it silently.
 """
 
+import re
 from pathlib import Path
 
 LOCK_FILE = Path(__file__).parent.parent / "requirements.lock"
@@ -51,3 +52,19 @@ def test_every_pinned_package_has_at_least_one_hash():
         f"`pip-compile --generate-hashes --no-strip-extras --output-file=requirements.lock "
         f"pyproject.toml` (see #436)."
     )
+
+
+DEV_LOCK_FILE = Path(__file__).parent.parent / "requirements-dev.lock"
+
+
+def test_dev_lock_has_hashes_and_is_constrained_by_runtime_lock():
+    """#660: CI は requirements-dev.lock を --require-hashes で入れる。"""
+    text = DEV_LOCK_FILE.read_text()
+    header = "\n".join(text.splitlines()[:8])
+    assert "--generate-hashes" in header
+    assert "--constraint=requirements.lock" in header
+    # 各パッケージブロック (top-level 行 + インデント/コメント行) に hash が必要
+    blocks = re.split(r"\n(?=[A-Za-z0-9])", text)[1:]
+    assert blocks, "requirements-dev.lock appears empty"
+    missing = [b.splitlines()[0] for b in blocks if "--hash=sha256:" not in b]
+    assert not missing, f"requirements-dev.lock lines missing --hash: {missing}"

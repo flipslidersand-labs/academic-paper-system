@@ -65,6 +65,27 @@ def _sanitize_paper_text(text: str) -> str:
     return _PAPER_TAG_RE.sub(lambda m: f"&lt;{m.group(1)}paper_content", text)
 
 
+def _parse_llm_json(response: str) -> object:
+    """Parse the LLM reply as JSON, tolerating prose / code fences around the object (#639).
+
+    A greedy brace-to-brace regex match breaks when the surrounding prose contains braces, so
+    try the whole reply first, then decode from each ``{`` and take the first object.
+    """
+    try:
+        return json.loads(response)
+    except json.JSONDecodeError as e:
+        first_error = e
+    decoder = json.JSONDecoder()
+    for m in re.finditer(r"\{", response):
+        try:
+            obj, _ = decoder.raw_decode(response, m.start())
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    raise ValueError(f"LLM returned invalid JSON: {first_error}")
+
+
 class RAGSummarizer:
     """Summarize academic papers using RAG (Retrieval-Augmented Generation)."""
 
@@ -256,16 +277,7 @@ Please respond ONLY with valid JSON in this exact format:
         if not response:
             raise ValueError("LLM returned empty response")
 
-        # Parse JSON response
-        try:
-            # Try to extract JSON from response
-            json_match = re.search(r"\{.*\}", response, re.DOTALL)
-            if json_match:
-                summary_data = json.loads(json_match.group())
-            else:
-                summary_data = json.loads(response)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"LLM returned invalid JSON: {str(e)}")
+        summary_data = _parse_llm_json(response)
 
         if not isinstance(summary_data, dict):
             raise ValueError("LLM returned JSON that is not an object")

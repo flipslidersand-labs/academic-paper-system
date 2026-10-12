@@ -325,6 +325,7 @@ async def test_summarize_falls_back_to_db_on_embed_http_failure():
 
     mock_llm = AsyncMock()
     mock_qdrant = MagicMock()
+    mock_qdrant.asearch = AsyncMock()
     mock_embedder = AsyncMock()
     mock_embedder.embed_single.side_effect = httpx.ConnectError("embedding-svc down")
 
@@ -340,7 +341,7 @@ async def test_summarize_falls_back_to_db_on_embed_http_failure():
 
     assert "objective" in result
     mock_db.assert_called_once_with(1, 5)
-    mock_qdrant.search.assert_not_called()
+    mock_qdrant.asearch.assert_not_called()  # QdrantStore uses asearch; .search is private/sync (#637)
 
 
 @pytest.mark.anyio
@@ -656,6 +657,35 @@ def test_paper_summary_keywords_list_items_stringified():
     assert PaperSummary(keywords=[1, "b"]).keywords == ["1", "b"]
 
 
+def test_paper_summary_null_values_become_empty_not_string_null():
+    """Regression (#638): JSON null must not be persisted as the string "null"/"None"."""
+    from academic_paper.models import PaperSummary
+
+    result = PaperSummary(objective=None, method=None, results=None, limitations=None, keywords=None).model_dump()
+    assert result == {"objective": "", "method": "", "results": "", "limitations": "", "keywords": []}
+
+
+def test_paper_summary_null_keyword_items_dropped():
+    from academic_paper.models import PaperSummary
+
+    assert PaperSummary(keywords=["a", None, "b"]).keywords == ["a", "b"]
+
+
+@pytest.mark.anyio
+async def test_summarize_null_fields_in_llm_json_become_empty():
+    """Regression (#638): LLM returning null for absent fields yields "" / [] end to end."""
+    mock_llm = AsyncMock()
+    mock_llm.generate.return_value = (
+        '{"objective": "o", "method": null, "results": null, "limitations": null, "keywords": null}'
+    )
+    mock_qdrant = MagicMock()
+    mock_qdrant.asearch = AsyncMock(return_value=[{"payload": {"paper_id": 1, "page_start": 1, "text": "t"}}])
+
+    result = await RAGSummarizer(mock_llm, mock_qdrant).summarize(paper_id=1, file_hash="abc")
+
+    assert result == {"objective": "o", "method": "", "results": "", "limitations": "", "keywords": []}
+
+
 def test_paper_summary_missing_fields_default_empty():
     from academic_paper.models import PaperSummary
 
@@ -735,3 +765,28 @@ async def test_llm_output_is_validated_and_bounded():
     assert out["method"] == '{"a": 1}'
     assert len(out["keywords"]) == MAX_KEYWORDS
     assert all(len(k) == MAX_KEYWORD_CHARS for k in out["keywords"])
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "reply",
+    [
+        'Here is the summary: {"objective": "o", "keywords": ["k"]} Hope {this} helps!',
+        'Note {draft}. ```json\n{"objective": "o", "keywords": ["k"]}\n``` (see {fig 1})',
+    ],
+)
+async def test_summarize_extracts_json_object_surrounded_by_prose(reply):
+    """Regression (#639): braces in surrounding prose must not break a valid embedded object."""
+    _, s = _injection_summarizer("t", reply)
+    result = await s.summarize(paper_id=1, file_hash="h")
+    assert result["objective"] == "o"
+    assert result["keywords"] == ["k"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("reply", ["[1, 2]", '"just a string"', "42", "null", "no json here {oops}"])
+async def test_summarize_non_object_or_unparseable_llm_reply_is_valueerror(reply):
+    """Regression (#639): non-object / unparseable replies are ValueError, never TypeError/AttributeError."""
+    _, s = _injection_summarizer("t", reply)
+    with pytest.raises(ValueError):
+        await s.summarize(paper_id=1, file_hash="h")
