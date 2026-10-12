@@ -656,6 +656,35 @@ def test_paper_summary_keywords_list_items_stringified():
     assert PaperSummary(keywords=[1, "b"]).keywords == ["1", "b"]
 
 
+def test_paper_summary_null_values_become_empty_not_string_null():
+    """Regression (#638): JSON null must not be persisted as the string "null"/"None"."""
+    from academic_paper.models import PaperSummary
+
+    result = PaperSummary(objective=None, method=None, results=None, limitations=None, keywords=None).model_dump()
+    assert result == {"objective": "", "method": "", "results": "", "limitations": "", "keywords": []}
+
+
+def test_paper_summary_null_keyword_items_dropped():
+    from academic_paper.models import PaperSummary
+
+    assert PaperSummary(keywords=["a", None, "b"]).keywords == ["a", "b"]
+
+
+@pytest.mark.anyio
+async def test_summarize_null_fields_in_llm_json_become_empty():
+    """Regression (#638): LLM returning null for absent fields yields "" / [] end to end."""
+    mock_llm = AsyncMock()
+    mock_llm.generate.return_value = (
+        '{"objective": "o", "method": null, "results": null, "limitations": null, "keywords": null}'
+    )
+    mock_qdrant = MagicMock()
+    mock_qdrant.asearch = AsyncMock(return_value=[{"payload": {"paper_id": 1, "page_start": 1, "text": "t"}}])
+
+    result = await RAGSummarizer(mock_llm, mock_qdrant).summarize(paper_id=1, file_hash="abc")
+
+    assert result == {"objective": "o", "method": "", "results": "", "limitations": "", "keywords": []}
+
+
 def test_paper_summary_missing_fields_default_empty():
     from academic_paper.models import PaperSummary
 
