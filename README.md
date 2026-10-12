@@ -19,7 +19,7 @@ PDF upload
 ## API
 
 Every endpoint except `GET /health` requires the `X-API-Key` header when the
-`API_KEY` env var is set (auth is disabled when it is unset).
+`API_KEY` env var is set (the server refuses to start when it is unset, unless `AUTH_DISABLED=true` is set explicitly).
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
@@ -55,7 +55,9 @@ Poll `GET /jobs/{job_id}` until `status` is `done` (or `failed`). On `done`:
 ```
 
 Pass `?wait=true` to process synchronously and receive the indexed result (200)
-in one call — used by the collector scripts' `--wait`-free default via polling.
+in one call. Intended for small inputs and tests. The collector scripts do not use
+it: they submit without `wait`, receive 202, and poll `GET /jobs/{job_id}`
+(see `submit_and_wait` in `scripts/ingest_client.py`).
 
 ### Search modes
 
@@ -139,6 +141,11 @@ cp .env.example .env    # configure embedding-svc, Qdrant, Gemini API key
 docker compose up -d
 curl http://localhost:8020/health
 ```
+
+Qdrant runs with API-key auth enabled (#657). Set `QDRANT_API_KEY` in `.env`
+(one value, used for both the Qdrant server and `paper-rag`); Compose refuses to
+start Qdrant if it is empty. Generate one with e.g. `openssl rand -hex 32`.
+The Qdrant image is pinned to a tag plus digest; Dependabot updates it.
 
 `qdrant_storage`/`qdrant_snapshots` are created automatically by Compose on
 first run. To reuse an existing volume on a given host instead, add a

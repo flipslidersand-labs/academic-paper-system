@@ -21,6 +21,8 @@ class PaperSummary(BaseModel):
     @classmethod
     def _coerce_text(cls, v: Any) -> Any:
         # LLM sometimes returns nested dicts/lists — keep them as JSON strings.
+        if v is None:
+            return ""
         if isinstance(v, str):
             return v
         return json.dumps(v, ensure_ascii=False)
@@ -28,6 +30,8 @@ class PaperSummary(BaseModel):
     @field_validator("keywords", mode="before")
     @classmethod
     def _coerce_keywords(cls, v: Any) -> list[str]:
+        if v is None:
+            return []
         if isinstance(v, list):
-            return [str(k) for k in v]
+            return [str(k) for k in v if k is not None]
         return [str(v)]

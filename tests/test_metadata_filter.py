@@ -86,6 +86,26 @@ def test_list_papers_filtered_by_author(temp_db):
     assert papers[0]["file_name"] == "a.pdf"
 
 
+def test_list_papers_filtered_by_author_treats_like_wildcards_literally(temp_db):
+    """'%' and '_' in the author query are literal characters, not LIKE wildcards."""
+    conn = get_connection(temp_db)
+    save_paper(conn, "a.pdf", "h1", authors=["Alice Smith"])
+    save_paper(conn, "b.pdf", "h2", authors=["Bob"])
+    conn.close()
+
+    conn = get_connection(temp_db)
+    total_pct, _ = list_papers_filtered(conn, author="%")
+    total_us, _ = list_papers_filtered(conn, author="_")
+    total_mixed, _ = list_papers_filtered(conn, author="A_ice")
+    total_backslash, _ = list_papers_filtered(conn, author="\\")
+    conn.close()
+
+    assert total_pct == 0
+    assert total_us == 0
+    assert total_mixed == 0
+    assert total_backslash == 0
+
+
 def test_list_papers_filtered_by_category(temp_db):
     """Test list_papers_filtered filters by exact category code."""
     conn = get_connection(temp_db)
