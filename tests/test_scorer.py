@@ -34,6 +34,20 @@ class TestFreshness:
         score = _freshness(d)
         assert 0.49 < score <= 0.5
 
+    @pytest.mark.parametrize(
+        "published_date",
+        [
+            (date.today() + timedelta(days=1)).isoformat(),
+            (date.today() + timedelta(days=365)).isoformat(),
+            "9999-12-31",
+        ],
+        ids=["tomorrow", "next-year", "max-date"],
+    )
+    def test_future_date_stays_within_0_to_half(self, published_date):
+        """A future published_date (negative days_old) must not push freshness above 0.5 (#663)."""
+        score = _freshness(published_date)
+        assert 0.0 <= score <= 0.5
+
 
 class TestCategoryMatch:
     def test_full_match(self):

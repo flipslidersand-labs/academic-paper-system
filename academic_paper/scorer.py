@@ -25,6 +25,9 @@ def _freshness(published_date: str | None) -> float:
         return 0.1
     try:
         days_old = (date.today() - date.fromisoformat(str(published_date)[:10])).days
+        # Future dates (negative days_old) are clamped to "today" so the result stays
+        # within the documented 0.0-0.5 range instead of exceeding 0.5 (#663).
+        days_old = max(days_old, 0)
         return round(0.5 * (0.5 ** (days_old / 30)), 4)
     except (ValueError, OverflowError):
         # Ingest now rejects non-ISO dates (#144); legacy rows may still hit this.
