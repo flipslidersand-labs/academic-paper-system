@@ -68,6 +68,13 @@ class Settings(BaseSettings):
     )
     max_upload_mb: int = Field(default=50, gt=0, description="Maximum PDF upload size in megabytes")
     api_key: str = Field(default="", description="X-API-Key for write and read endpoints; empty = no auth (#241)")
+    auth_disabled: bool = Field(
+        default=False,
+        description=(
+            "Explicitly run without authentication (AUTH_DISABLED=true). Required to start when "
+            "api_key and api_keys are both empty; otherwise startup is refused (fail-closed, #646)"
+        ),
+    )
     api_keys: str = Field(
         default="",
         description=(
