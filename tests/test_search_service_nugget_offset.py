@@ -12,7 +12,8 @@ def _hit(qid, chunk_id, text):
     return {
         "id": qid,
         "score": 0.9,
-        "payload": {"chunk_id": chunk_id, "paper_id": 1, "chunk_index": chunk_id, "text": text},
+        # Real ingest payload shape (4 keys, no chunk_id); chunk_id is resolved via chunks.qdrant_id.
+        "payload": {"paper_id": 1, "chunk_index": chunk_id, "text": text, "file_name": "t.pdf"},
     }
 
 

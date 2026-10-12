@@ -1048,6 +1048,16 @@ def test_http_exc_for_maps_embedding_count_mismatch_to_502():
     assert exc.status_code == 502
 
 
+def test_http_exc_for_maps_embedding_response_error_to_502():
+    """A malformed 200 from embedding-svc (non-JSON / missing vectors) is an upstream
+    protocol failure: 502, not the ValueError 400 or the catch-all 500 (#644)."""
+    from academic_paper.embedder import EmbeddingResponseError
+    from academic_paper.server import _http_exc_for
+
+    exc = _http_exc_for(EmbeddingResponseError("non-JSON body"), "fallback")
+    assert exc.status_code == 502
+
+
 def test_http_exc_for_still_maps_plain_value_error_to_400():
     """_http_exc_for keeps ordinary ValueError (input validation) at 400 (#148)."""
     from academic_paper.server import _http_exc_for
@@ -1352,6 +1362,13 @@ def test_summaries_and_stats_require_api_key_when_configured(client):
         assert client.get("/stats", headers={"X-API-Key": "secret-key"}).status_code != 401
 
 
+@pytest.fixture(autouse=True)
+def _auth_disabled_by_default():
+    """Existing tests run without an API key; opt out of the fail-closed startup check (#646)."""
+    with patch.object(settings, "auth_disabled", True):
+        yield
+
+
 def _lifespan_client(temp_db):
     """Build a real TestClient (runs lifespan) with I/O services mocked out,
     mirroring the `client` fixture but as a plain context manager so callers
@@ -1381,11 +1398,42 @@ def test_startup_warns_when_api_key_unset(capsys, temp_db):
     caplog's), so the startup log is asserted via captured stdout instead of caplog.
     """
     p1, p2, p3 = _lifespan_client(temp_db)
-    with patch.object(settings, "api_key", ""), p1, p2, p3:
+    with patch.object(settings, "api_key", ""), patch.object(settings, "auth_disabled", True), p1, p2, p3:
         with TestClient(app):
             pass
 
-    assert "API_KEY is not set" in capsys.readouterr().out
+    assert "AUTH_DISABLED=true" in capsys.readouterr().out
+
+
+def test_startup_refused_when_no_api_key_and_auth_not_disabled(temp_db):
+    """Regression (#646): empty API_KEY/API_KEYS without AUTH_DISABLED must fail closed."""
+    p1, p2, p3 = _lifespan_client(temp_db)
+    with (
+        patch.object(settings, "api_key", ""),
+        patch.object(settings, "api_keys", ""),
+        patch.object(settings, "auth_disabled", False),
+        p1,
+        p2,
+        p3,
+    ):
+        with pytest.raises(RuntimeError, match="AUTH_DISABLED"):
+            with TestClient(app):
+                pass
+
+
+def test_startup_ok_with_api_keys_only(capsys, temp_db):
+    p1, p2, p3 = _lifespan_client(temp_db)
+    with (
+        patch.object(settings, "api_key", ""),
+        patch.object(settings, "api_keys", "k1"),
+        patch.object(settings, "auth_disabled", False),
+        p1,
+        p2,
+        p3,
+    ):
+        with TestClient(app):
+            pass
+    assert "AUTH_DISABLED=true" not in capsys.readouterr().out
 
 
 def test_startup_no_warning_when_api_key_set(capsys, temp_db):
@@ -1395,7 +1443,7 @@ def test_startup_no_warning_when_api_key_set(capsys, temp_db):
         with TestClient(app):
             pass
 
-    assert "API_KEY is not set" not in capsys.readouterr().out
+    assert "AUTH_DISABLED=true" not in capsys.readouterr().out
 
 
 # --- lifespan graceful shutdown tests (#502) ---

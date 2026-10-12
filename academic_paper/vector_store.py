@@ -76,23 +76,32 @@ class QdrantStore:
         size=settings.embedding_dim, distance=Cosine。既存コレクションの次元が不一致なら ValueError。
         """
 
+        def _check_size():
+            existing = self.client.get_collection(self.collection).config.params.vectors
+            existing_size = getattr(existing, "size", None)
+            if existing_size is not None and existing_size != self.vector_size:
+                raise ValueError(
+                    f"Qdrant collection '{self.collection}' has vector size {existing_size}, "
+                    f"but embedding_dim is {self.vector_size}; recreate the collection or fix EMBEDDING_DIM"
+                )
+
         def _do():
             try:
                 collections = self.client.get_collections().collections
                 names = [c.name for c in collections]
                 if self.collection not in names:
-                    self.client.create_collection(
-                        collection_name=self.collection,
-                        vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE),
-                    )
-                else:
-                    existing = self.client.get_collection(self.collection).config.params.vectors
-                    existing_size = getattr(existing, "size", None)
-                    if existing_size is not None and existing_size != self.vector_size:
-                        raise ValueError(
-                            f"Qdrant collection '{self.collection}' has vector size {existing_size}, "
-                            f"but embedding_dim is {self.vector_size}; recreate the collection or fix EMBEDDING_DIM"
+                    try:
+                        self.client.create_collection(
+                            collection_name=self.collection,
+                            vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE),
                         )
+                    except UnexpectedResponse as exc:
+                        # 並行 ingest が先に作成した場合の 409 は成功扱い。次元だけ検証する (#647)
+                        if exc.status_code != 409:
+                            raise
+                        _check_size()
+                else:
+                    _check_size()
             except UnexpectedResponse as exc:
                 _reraise_qdrant_response(exc)
 
