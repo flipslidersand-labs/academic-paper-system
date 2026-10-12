@@ -1,6 +1,6 @@
 name: Lock Update
 
-# requirements.lock を週次で --upgrade し、差分があれば PR を作る (#521)。
+# requirements.lock / requirements-dev.lock を週次で --upgrade し、差分があれば PR を作る (#521)。
 # GITHUB_TOKEN で作った PR / push は CI を起動しないため、PR 作成後に
 # `gh workflow run ci.yml` (workflow_dispatch) で CI を明示起動する。
 
@@ -34,15 +34,15 @@ jobs:
       - name: Install pip-tools
         run: pip install pip-tools
 
-      - name: Regenerate requirements.lock
+      - name: Regenerate lock files
         run: scripts/update-lock.sh --upgrade
 
       - name: Detect changes
         id: diff
         run: |
-          if git diff --quiet -- requirements.lock; then
+          if git diff --quiet -- requirements.lock requirements-dev.lock; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "requirements.lock is up to date; no PR."
+            echo "lock files are up to date; no PR."
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
@@ -56,13 +56,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$BRANCH"
-          git add requirements.lock
-          git commit -m "chore(deps): update requirements.lock"
+          git add requirements.lock requirements-dev.lock
+          git commit -m "chore(deps): update requirements.lock and requirements-dev.lock"
           git push --force origin "$BRANCH"
 
           if [ -z "$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number')" ]; then
             gh pr create --base main --head "$BRANCH" \
-              --title "chore(deps): update requirements.lock" \
+              --title "chore(deps): update requirements.lock and requirements-dev.lock" \
               --body "Weekly \`scripts/update-lock.sh --upgrade\` result (lock-update workflow). CI is started explicitly via workflow_dispatch because GITHUB_TOKEN-created PRs do not trigger workflows."
           fi
 
