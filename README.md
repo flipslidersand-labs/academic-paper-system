@@ -55,7 +55,9 @@ Poll `GET /jobs/{job_id}` until `status` is `done` (or `failed`). On `done`:
 ```
 
 Pass `?wait=true` to process synchronously and receive the indexed result (200)
-in one call — used by the collector scripts' `--wait`-free default via polling.
+in one call. Intended for small inputs and tests. The collector scripts do not use
+it: they submit without `wait`, receive 202, and poll `GET /jobs/{job_id}`
+(see `submit_and_wait` in `scripts/ingest_client.py`).
 
 ### Search modes
 
