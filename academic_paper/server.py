@@ -5,40 +5,36 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
 
 import httpx
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from academic_paper.auth import require_scope
+from academic_paper.auth import Scope, require_scope, verify_api_key  # noqa: F401  (verify_api_key re-exported, #617)
 from academic_paper.config import settings
 from academic_paper.db import (
     db_connection,
-    get_all_papers_for_scoring,
-    get_paper,
     init_db,
-    list_papers_filtered,
-    list_summaries,
     save_summary,
-    update_paper_score,
     update_paper_status,
 )
 from academic_paper.embedder import EmbedderClient
 from academic_paper.errors import _http_exc_for, _safe_error_message  # noqa: F401  (re-exported, #614/#615)
-from academic_paper.extractor import hash_file
 from academic_paper.jobs import job_store
 from academic_paper.llm import get_llm_client
 from academic_paper.logging_config import configure_logging
-from academic_paper.scorer import compute_score
+from academic_paper.routers.papers import router as papers_router
 from academic_paper.services import ingest_service
 from academic_paper.services.search_service import run_search
 from academic_paper.services.summary_service import (  # noqa: F401  (_summary_response re-exported, #618)
     _summary_response,
     generate_summary,
     get_cached_summary,
+    list_all_summaries,
+    score_all,
+    score_one,
 )
 from academic_paper.summarizer import RAGSummarizer
 from academic_paper.telemetry import get_tracer, setup_telemetry
@@ -167,27 +163,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Academic Paper System", lifespan=lifespan)
 
 
-_require_authenticated = require_scope()  # any valid key, no scope required (#602)
-
-
-async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
-    """Require X-API-Key on write and read endpoints when API_KEY env var is set (#146).
-
-    Applied to read endpoints too (#241): paper text/search snippets are at least
-    as sensitive as the job metadata already gated behind auth (#190), so the
-    boundary must not be asymmetric.
-
-    Uses hmac.compare_digest for constant-time comparison to prevent
-    timing attacks that could leak key length / prefix (#190).
-    """
-    await _require_authenticated(x_api_key)
-
-
 # /metrics is added by Instrumentator.expose() rather than manually registered, so it
-# must be gated the same way as every other route: pass verify_api_key through as a
+# must be gated the same way as every other route: pass require_scope(Scope.ADMIN) as a
 # dependency (#299 — request-path counters and latency histograms are otherwise
 # readable without auth whenever API_KEY is set).
-Instrumentator().instrument(app).expose(app, dependencies=[Depends(verify_api_key)])
+Instrumentator().instrument(app).expose(app, dependencies=[Depends(require_scope(Scope.ADMIN))])
 
 
 async def _ingest_pipeline(tmp_path: str, paper_id: int, file_hash: str, file_name: str) -> int:
@@ -226,237 +206,48 @@ async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str,
     )
 
 
-_DUPLICATE_DETAIL = {"indexed": "File already ingested", "pending": "File is already being ingested"}
+app.include_router(papers_router)
 
 
-@app.post("/papers/ingest", dependencies=[Depends(verify_api_key)])
-async def ingest_paper(
-    file: UploadFile = File(...),
-    title: str | None = Form(None, max_length=1000),
-    authors: str | None = Form(None, max_length=10000),
-    categories: str | None = Form(None, max_length=2000),
-    published_date: str | None = Form(None, max_length=10),
-    source: str | None = Form(None, max_length=100),
-    wait: bool = Query(False, description="Process synchronously and return the indexed result (200)"),
-):
-    """Ingest a PDF paper with optional metadata.
-
-    Accepts the upload, deduplicates by file hash, saves a 'pending' paper row,
-    then processes (extract → chunk → embed → Qdrant upsert) in the background,
-    returning **202** with a `job_id`. Poll `GET /jobs/{job_id}` for completion;
-    on `done` the job's `result` holds `paper_id`/`chunks`.
-
-    Set `wait=true` to process synchronously and receive the indexed result (200).
-
-    Raises:
-        HTTPException 409: File already ingested, or the same file is currently
-            being ingested (existing row is 'indexed' or 'pending').
-        HTTPException 413: File exceeds the max upload size.
-        HTTPException 415: File is not a PDF (missing %PDF- magic bytes).
-        HTTPException 422: Invalid metadata (non-ISO published_date, non-string list elements).
-        HTTPException 400: Extraction / chunking / embedding error (wait=true only).
-    """
-    tmp_path: str | None = None
-    keep_tmp = False
-    try:
-        _validate_published_date(published_date)
-        max_bytes = settings.max_upload_mb * 1024 * 1024
-        try:
-            tmp_path = await ingest_service.stream_upload_to_tmp(file, max_bytes)
-        except ingest_service.UploadTooLargeError:
-            raise HTTPException(status_code=413, detail=f"File too large (max {settings.max_upload_mb} MB)")
-        except ingest_service.NotAPdfError:
-            raise HTTPException(status_code=415, detail="Not a PDF file (missing %PDF- header)")
-
-        file_hash = hash_file(tmp_path)
-        file_name = ingest_service.sanitize_file_name(file.filename)
-
-        try:
-            paper_id = ingest_service.register_paper(
-                file_name,
-                file_hash,
-                lambda: {
-                    "title": _sanitize_text(title),
-                    "authors": _parse_list_field(authors, "authors"),
-                    "categories": _parse_list_field(categories, "categories"),
-                    "published_date": published_date or None,
-                    "source": _sanitize_text(source),
-                },
-            )
-        except ingest_service.DuplicatePaperError as dup:
-            raise HTTPException(status_code=409, detail=_DUPLICATE_DETAIL[dup.status])
-
-        if wait:
-            try:
-                chunks = await _ingest_pipeline(tmp_path, paper_id, file_hash, file_name)
-            except Exception as e:
-                logger.exception("Synchronous ingest failed for paper_id=%s", paper_id)
-                await _mark_paper_failed(paper_id)
-                # _ingest_pipeline already compensates Qdrant on save_chunks failure;
-                # compensate here for embed/upsert errors that leave no Qdrant data.
-                await _compensate_qdrant(paper_id)
-                raise _http_exc_for(e, "Ingest failed: check PDF content and try again")
-            return {
-                "paper_id": paper_id,
-                "file_name": file_name,
-                "chunks": chunks,
-                "status": "indexed",
-            }
-
-        job = await job_store.create(kind="ingest")
-        keep_tmp = True  # background task now owns tmp cleanup
-        task = asyncio.create_task(_run_ingest(job.id, tmp_path, paper_id, file_hash, file_name))
-        # A task cancelled before its first step (shutdown) never enters
-        # _run_ingest's try/finally, so also unlink when the task completes (#454).
-        task.add_done_callback(lambda _t, p=tmp_path: _unlink_quiet(p))
-        active = getattr(app.state, "active_ingest_tasks", None)
-        if active is not None:
-            active.add(task)
-            task.add_done_callback(active.discard)
-        return JSONResponse(
-            status_code=202,
-            content={"job_id": job.id, "paper_id": paper_id, "status": "pending"},
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Unexpected error during paper ingest")
-        raise _http_exc_for(e, "Ingest failed unexpectedly")
-    finally:
-        if tmp_path is not None and not keep_tmp:
-            _unlink_quiet(tmp_path)
-
-
-@app.get("/papers", dependencies=[Depends(verify_api_key)])
-def list_papers_endpoint(
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    author: str | None = Query(None, description="Filter by author name (substring match)"),
-    category: str | None = Query(None, description="Filter by category code e.g. cs.AI"),
-    sort: Literal["ingested_at", "score"] = Query("ingested_at", description="Sort order"),
-):
-    """List papers with pagination, optional filters, and sort."""
-    try:
-        with db_connection(settings.academic_db) as conn:
-            total, papers = list_papers_filtered(
-                conn, limit=limit, offset=offset, author=author, category=category, sort=sort
-            )
-        return {"total": total, "papers": papers}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to list papers")
-        raise _http_exc_for(e, "Failed to list papers")
-
-
-@app.get("/papers/{paper_id}", dependencies=[Depends(verify_api_key)])
-def get_paper_endpoint(paper_id: int):
-    """Get paper details by ID."""
-    try:
-        with db_connection(settings.academic_db) as conn:
-            paper = get_paper(conn, paper_id)
-        if paper is None:
-            raise HTTPException(status_code=404, detail="Paper not found")
-        return paper
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to get paper_id=%s", paper_id)
-        raise _http_exc_for(e, "Failed to get paper")
-
-
-@app.get("/papers/{paper_id}/summary", dependencies=[Depends(verify_api_key)])
+@app.get("/papers/{paper_id}/summary", dependencies=[Depends(require_scope(Scope.READ))])
 async def get_summary_endpoint(paper_id: int):
     """Return the cached summary only (GET is safe/idempotent, #140). Generation lives in POST."""
     return get_cached_summary(paper_id)
 
 
-@app.post("/papers/{paper_id}/summary", dependencies=[Depends(verify_api_key)])
+@app.post("/papers/{paper_id}/summary", dependencies=[Depends(require_scope(Scope.ADMIN))])
 async def generate_summary_endpoint(paper_id: int, force: bool = Query(False)):
     """Generate the summary (cached result is returned unless force=true)."""
     return await generate_summary(paper_id, force, app.state.llm, app.state.summarizer)
 
 
-@app.post("/papers/score-all", dependencies=[Depends(verify_api_key)])
+@app.post("/papers/score-all", dependencies=[Depends(require_scope(Scope.ADMIN))])
 def score_all_papers():
     """Compute and store relevance scores for all papers.
 
     Score = freshness (30-day half-life, 0–0.5) + category match (0–0.5).
     Preferred categories are configured via PREFERRED_CATEGORIES env var.
-
-    A per-paper failure (e.g. compute_score/update_paper_score raising) does not
-    abort the whole run — it is counted in `failed`/`errors` and the loop moves
-    on to the next paper, mirroring the job.failed/job.errors pattern used by
-    _run_summarize_all (#276).
+    A per-paper failure is counted in `failed`/`errors` and does not abort the run (#276).
 
     Returns:
         JSON with total, scored, failed counts and per-paper errors.
     """
-    preferred = settings.preferred_categories_list
-    try:
-        with db_connection(settings.academic_db) as conn:
-            papers = get_all_papers_for_scoring(conn)
-            scored = 0
-            failed = 0
-            errors: list[str] = []
-            for paper in papers:
-                try:
-                    score = compute_score(paper, preferred)
-                    update_paper_score(conn, paper["id"], score)
-                    scored += 1
-                except Exception as e:
-                    logger.exception("Scoring failed for paper_id=%s", paper.get("id"))
-                    failed += 1
-                    errors.append(f"paper_id={paper.get('id')}: {_safe_error_message(e)}")
-        return {
-            "total": len(papers),
-            "scored": scored,
-            "failed": failed,
-            "errors": errors,
-            "preferred_categories": preferred,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("score_all_papers failed unexpectedly")
-        raise _http_exc_for(e, "Scoring failed unexpectedly")
+    return score_all()
 
 
-@app.post("/papers/{paper_id}/score", dependencies=[Depends(verify_api_key)])
+@app.post("/papers/{paper_id}/score", dependencies=[Depends(require_scope(Scope.ADMIN))])
 def score_paper(paper_id: int):
     """Compute and store relevance score for a single paper."""
-    try:
-        with db_connection(settings.academic_db) as conn:
-            paper = get_paper(conn, paper_id)
-            if paper is None:
-                raise HTTPException(status_code=404, detail="Paper not found")
-            preferred = settings.preferred_categories_list
-            score = compute_score(paper, preferred)
-            update_paper_score(conn, paper_id, score)
-        return {"paper_id": paper_id, "score": score}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to score paper_id=%s", paper_id)
-        raise _http_exc_for(e, "Scoring failed")
+    return score_one(paper_id)
 
 
-@app.get("/summaries", dependencies=[Depends(verify_api_key)])
+@app.get("/summaries", dependencies=[Depends(require_scope(Scope.READ))])
 def list_summaries_endpoint(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
     """List all paper summaries with associated paper metadata."""
-    try:
-        with db_connection(settings.academic_db) as conn:
-            total, summaries = list_summaries(conn, limit=limit, offset=offset)
-        return {"total": total, "summaries": summaries}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to list summaries")
-        raise _http_exc_for(e, "Failed to list summaries")
+    return list_all_summaries(limit, offset)
 
 
 async def _run_summarize_all(job_id: str) -> None:
@@ -513,7 +304,7 @@ async def _run_summarize_all(job_id: str) -> None:
         await job_store.persist(job)
 
 
-@app.post("/jobs/summarize-all", status_code=202, dependencies=[Depends(verify_api_key)])
+@app.post("/jobs/summarize-all", status_code=202, dependencies=[Depends(require_scope(Scope.ADMIN))])
 async def start_summarize_all(background_tasks: BackgroundTasks):
     """Start a background job to summarize all papers without a cached summary."""
     if app.state.llm is None or app.state.summarizer is None:
@@ -526,7 +317,7 @@ async def start_summarize_all(background_tasks: BackgroundTasks):
     return {"job_id": job.id, "status": job.status}
 
 
-@app.get("/jobs/{job_id}", dependencies=[Depends(verify_api_key)])
+@app.get("/jobs/{job_id}", dependencies=[Depends(require_scope(Scope.READ))])
 def get_job_endpoint(job_id: str):
     """Get status of a background job by ID."""
     job = job_store.get(job_id)
@@ -535,13 +326,13 @@ def get_job_endpoint(job_id: str):
     return job.to_dict()
 
 
-@app.get("/jobs", dependencies=[Depends(verify_api_key)])
+@app.get("/jobs", dependencies=[Depends(require_scope(Scope.READ))])
 def list_jobs_endpoint():
     """List all background jobs (#190: require auth — exposes all job IDs / paper metadata)."""
     return {"jobs": [j.to_dict() for j in job_store.list_all()]}
 
 
-@app.get("/search", dependencies=[Depends(verify_api_key)])
+@app.get("/search", dependencies=[Depends(require_scope(Scope.READ))])
 async def search(
     q: str = Query(..., min_length=1, max_length=1000),
     mode: str = Query("hybrid", pattern="^(vector|keyword|hybrid|nugget)$"),
@@ -606,7 +397,7 @@ async def health():
     return JSONResponse(content={"status": overall, **status}, status_code=http_status)
 
 
-@app.get("/stats", dependencies=[Depends(verify_api_key)])
+@app.get("/stats", dependencies=[Depends(require_scope(Scope.READ))])
 def stats():
     """DB統計情報"""
     try:
