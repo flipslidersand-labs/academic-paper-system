@@ -435,31 +435,24 @@ def search_fts(
     ``MATCH`` so arbitrary user input is treated as literal terms.
     """
     match_query = escape_fts5_query(query)
+    conditions: list[str] = ["chunks_fts MATCH ?"]
+    params: list = [match_query]
+    if paper_id is not None:
+        conditions.append("c.paper_id = ?")
+        params.append(paper_id)
+    params.append(limit)
     cursor = conn.cursor()
-    if paper_id is None:
-        cursor.execute(
-            """
-            SELECT c.id as chunk_id, c.paper_id, c.chunk_index, c.page_start, c.text, bm25(chunks_fts) as rank
-            FROM chunks_fts
-            JOIN chunks c ON chunks_fts.rowid = c.id
-            WHERE chunks_fts MATCH ?
-            ORDER BY rank
-            LIMIT ?
+    cursor.execute(
+        f"""
+        SELECT c.id as chunk_id, c.paper_id, c.chunk_index, c.page_start, c.text, bm25(chunks_fts) as rank
+        FROM chunks_fts
+        JOIN chunks c ON chunks_fts.rowid = c.id
+        WHERE {" AND ".join(conditions)}
+        ORDER BY rank
+        LIMIT ?
         """,
-            (match_query, limit),
-        )
-    else:
-        cursor.execute(
-            """
-            SELECT c.id as chunk_id, c.paper_id, c.chunk_index, c.page_start, c.text, bm25(chunks_fts) as rank
-            FROM chunks_fts
-            JOIN chunks c ON chunks_fts.rowid = c.id
-            WHERE chunks_fts MATCH ? AND c.paper_id = ?
-            ORDER BY rank
-            LIMIT ?
-        """,
-            (match_query, paper_id, limit),
-        )
+        params,
+    )
     return [dict(row) for row in cursor.fetchall()]
 
 
