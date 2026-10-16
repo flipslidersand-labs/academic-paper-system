@@ -12,6 +12,10 @@ logger = logging.getLogger(__name__)
 
 JobStatus = Literal["pending", "running", "done", "failed"]
 
+# Max finished (finished_at set) jobs kept in memory; older ones are evicted from
+# _jobs/_persist_locks but stay in SQLite (#751).
+DEFAULT_MAX_FINISHED_JOBS = 1000
+
 
 @dataclass
 class Job:
@@ -42,7 +46,8 @@ class Job:
 
 
 class JobStore:
-    def __init__(self) -> None:
+    def __init__(self, max_finished_jobs: int = DEFAULT_MAX_FINISHED_JOBS) -> None:
+        self._max_finished_jobs = max_finished_jobs
         self._jobs: dict[str, Job] = {}
         self._db_path: str | None = None
         self._lock = threading.Lock()
@@ -65,6 +70,7 @@ class JobStore:
         with self._lock:
             for job in jobs:
                 self._jobs[job.id] = job
+        self._evict_finished()
 
     def _load_and_reconcile_jobs(self, db_path: str) -> list[Job]:
         """Synchronous helper for init(): read jobs and reconcile stale in-flight rows."""
@@ -136,7 +142,7 @@ class JobStore:
         job = Job(id=str(uuid.uuid4()), status="pending", kind=kind)
         with self._lock:
             self._jobs[job.id] = job
-        await self.persist(job)
+        await self._persist_or_rollback(job)
         return job
 
     def get(self, job_id: str) -> Job | None:
@@ -161,8 +167,39 @@ class JobStore:
                 return None
             job = Job(id=str(uuid.uuid4()), status="pending", kind=kind)
             self._jobs[job.id] = job
-        await self.persist(job)
+        await self._persist_or_rollback(job)
         return job
+
+    async def _persist_or_rollback(self, job: Job) -> None:
+        """persist() a newly registered job; on failure undo the registration (#720).
+
+        Otherwise the pending job would stay in _jobs forever and make
+        create_if_not_running() return None (HTTP 409) until restart.
+        """
+        try:
+            await self.persist(job)
+        except BaseException:
+            with self._lock:
+                self._jobs.pop(job.id, None)
+                self._persist_locks.pop(job.id, None)
+            raise
+
+    def _evict_finished(self) -> None:
+        """Drop the oldest finished jobs (and their persist locks) beyond the cap (#751).
+
+        Evicted jobs remain in SQLite. Pending/running jobs are never evicted.
+        """
+        with self._lock:
+            finished = [j for j in self._jobs.values() if j.finished_at is not None]
+            excess = len(finished) - self._max_finished_jobs
+            if excess <= 0:
+                return
+            finished.sort(key=lambda j: j.finished_at)
+            for j in finished[:excess]:
+                del self._jobs[j.id]
+                lock = self._persist_locks.get(j.id)
+                if lock is None or not lock.locked():
+                    self._persist_locks.pop(j.id, None)
 
     async def persist(self, job: Job) -> None:
         """Persist job state to SQLite (call on status transitions).
@@ -180,6 +217,12 @@ class JobStore:
         lock = self._persist_locks.setdefault(job.id, asyncio.Lock())
         async with lock:
             await asyncio.to_thread(self._persist, job)
+        if job.finished_at is not None:
+            self._evict_finished()
+            with self._lock:
+                # Late persist of an already-evicted job must not re-leak its lock (#751).
+                if job.id not in self._jobs and not lock.locked():
+                    self._persist_locks.pop(job.id, None)
 
 
 job_store = JobStore()
