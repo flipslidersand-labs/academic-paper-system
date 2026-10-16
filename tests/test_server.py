@@ -923,7 +923,7 @@ def test_score_all_partial_failure_continues(client, temp_db):
             raise RuntimeError("boom")
         return real_compute_score(paper, preferred)
 
-    with patch("academic_paper.server.compute_score", side_effect=flaky_compute_score):
+    with patch("academic_paper.services.summary_service.compute_score", side_effect=flaky_compute_score):
         response = client.post("/papers/score-all")
 
     assert response.status_code == 200
@@ -943,7 +943,9 @@ def test_score_all_unexpected_db_error_returns_500(client):
     scoring) is an unclassified error and must be wrapped by _http_exc_for
     with an opaque error-id, not surfaced as a raw framework 500 (#276).
     """
-    with patch("academic_paper.server.get_all_papers_for_scoring", side_effect=RuntimeError("db down")):
+    with patch(
+        "academic_paper.services.summary_service.get_all_papers_for_scoring", side_effect=RuntimeError("db down")
+    ):
         response = client.post("/papers/score-all")
     assert response.status_code == 500
     assert "db down" not in response.json()["detail"]
@@ -952,7 +954,7 @@ def test_score_all_unexpected_db_error_returns_500(client):
 
 def test_list_papers_unexpected_error_returns_500(client):
     """GET /papers: unclassified errors must map through _http_exc_for (#276)."""
-    with patch("academic_paper.server.list_papers_filtered", side_effect=RuntimeError("disk error")):
+    with patch("academic_paper.routers.papers.list_papers_filtered", side_effect=RuntimeError("disk error")):
         response = client.get("/papers")
     assert response.status_code == 500
     assert "disk error" not in response.json()["detail"]
@@ -961,7 +963,7 @@ def test_list_papers_unexpected_error_returns_500(client):
 
 def test_get_paper_unexpected_error_returns_500(client):
     """GET /papers/{paper_id}: unclassified errors must map through _http_exc_for (#276)."""
-    with patch("academic_paper.server.get_paper", side_effect=RuntimeError("disk error")):
+    with patch("academic_paper.routers.papers.get_paper", side_effect=RuntimeError("disk error")):
         response = client.get("/papers/1")
     assert response.status_code == 500
     assert "disk error" not in response.json()["detail"]
@@ -974,7 +976,7 @@ def test_score_paper_unexpected_error_returns_500(client, temp_db):
     paper_id = save_paper(conn, "paper.pdf", "hash_sc_err")
     conn.close()
 
-    with patch("academic_paper.server.compute_score", side_effect=RuntimeError("boom")):
+    with patch("academic_paper.services.summary_service.compute_score", side_effect=RuntimeError("boom")):
         response = client.post(f"/papers/{paper_id}/score")
     assert response.status_code == 500
     assert "boom" not in response.json()["detail"]
@@ -983,7 +985,7 @@ def test_score_paper_unexpected_error_returns_500(client, temp_db):
 
 def test_list_summaries_unexpected_error_returns_500(client):
     """GET /summaries: unclassified errors must map through _http_exc_for (#276)."""
-    with patch("academic_paper.server.list_summaries", side_effect=RuntimeError("disk error")):
+    with patch("academic_paper.services.summary_service.list_summaries", side_effect=RuntimeError("disk error")):
         response = client.get("/summaries")
     assert response.status_code == 500
     assert "disk error" not in response.json()["detail"]
@@ -1070,7 +1072,7 @@ def test_ingest_unexpected_exception(client):
     """POST /papers/ingest: unexpected error returns 500 with opaque message (#148)."""
     pdf_content = create_minimal_pdf()
 
-    with patch("academic_paper.server.hash_file", side_effect=RuntimeError("disk error")):
+    with patch("academic_paper.routers.papers.hash_file", side_effect=RuntimeError("disk error")):
         response = client.post(
             "/papers/ingest?wait=true",
             files={"file": ("test.pdf", BytesIO(pdf_content), "application/pdf")},
@@ -1655,3 +1657,49 @@ def test_run_ingest_unlinks_tmpfile_when_persist_fails(tmp_path):
     ):
         asyncio.run(_run_ingest("j", str(pdf), 1, "h", "f.pdf"))
     assert not pdf.exists()
+
+
+# --- scope separation per route (#627, parent #355) ---
+
+_SCOPED_ROUTES = [
+    ("post", "/papers/ingest", "ingest"),
+    ("get", "/papers", "read"),
+    ("get", "/papers/p1", "read"),
+    ("get", "/papers/p1/summary", "read"),
+    ("get", "/summaries", "read"),
+    ("get", "/search?q=x", "read"),
+    ("get", "/stats", "read"),
+    ("get", "/jobs", "read"),
+    ("get", "/jobs/j1", "read"),
+    ("post", "/papers/p1/summary", "admin"),
+    ("post", "/papers/p1/score", "admin"),
+    ("post", "/papers/score-all", "admin"),
+    ("post", "/jobs/summarize-all", "admin"),
+    ("get", "/metrics", "admin"),
+]
+
+
+@pytest.mark.parametrize(("method", "path", "scope"), _SCOPED_ROUTES)
+def test_ingest_key_scope_per_route(client, method, path, scope):
+    with (
+        patch.object(settings, "api_key", "full-key"),
+        patch.object(settings, "api_keys", ""),
+        patch.object(settings, "ingest_api_key", "ing-key"),
+    ):
+        r = getattr(client, method)(path, headers={"X-API-Key": "ing-key"})
+        if scope == "ingest":
+            assert r.status_code not in (401, 403)
+        else:
+            assert r.status_code == 403
+
+
+@pytest.mark.parametrize(("method", "path", "scope"), _SCOPED_ROUTES)
+def test_full_key_and_bad_key_per_route(client, method, path, scope):
+    with (
+        patch.object(settings, "api_key", "full-key"),
+        patch.object(settings, "api_keys", ""),
+        patch.object(settings, "ingest_api_key", "ing-key"),
+    ):
+        assert getattr(client, method)(path, headers={"X-API-Key": "full-key"}).status_code not in (401, 403)
+        assert getattr(client, method)(path, headers={"X-API-Key": "bad"}).status_code == 401
+        assert getattr(client, method)(path).status_code == 401
