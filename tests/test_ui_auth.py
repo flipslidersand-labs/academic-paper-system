@@ -39,3 +39,12 @@ def test_api_data_endpoints_require_key_while_ui_shell_is_static(temp_db):
             assert client.get(path, headers={"X-API-Key": "secret-key"}).status_code != 401, path
         # The static shell holds no data (browser navigation cannot send X-API-Key).
         assert client.get("/ui/").status_code == 200
+
+
+def test_frontend_list_load_checks_response_and_drops_stale():  # #722
+    html = INDEX.read_text(encoding="utf-8")
+    body = html[html.index("async loadPapers()") : html.index("toggleSort() {")]
+    assert "!r.ok" in body
+    assert "data.papers ?? []" in body and "data.total ?? 0" in body
+    assert "_listSeq" in body
+    assert "listError" in html
