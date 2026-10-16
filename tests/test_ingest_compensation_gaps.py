@@ -85,7 +85,9 @@ def test_pipeline_compensation_failure_keeps_original_exception_and_logs(caplog)
         _run_pipeline(store, embedder)
     store.adelete_by_paper_id.assert_awaited_once_with(3)
     assert any(
-        "compensation delete failed" in r.getMessage() and "paper_id=3" in r.getMessage() and "qdrant down" in r.getMessage()
+        "compensation delete failed" in r.getMessage()
+        and "paper_id=3" in r.getMessage()
+        and "qdrant down" in r.getMessage()
         for r in caplog.records
     )
 
