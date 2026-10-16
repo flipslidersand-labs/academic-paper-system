@@ -11,8 +11,9 @@ from urllib.request import Request, urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from academic_paper.db import arxiv_id_from_file_name  # noqa: E402
 from cli_utils import auth_headers  # noqa: E402
+
+from academic_paper.db import arxiv_id_from_file_name  # noqa: E402
 
 # Prebuilt Tailwind CSS (no runtime CDN script, #649). Rebuild when classes in this file change:
 #   npx tailwindcss@3.4.17 -c frontend/tailwind.config.js --content scripts/generate_portfolio.py \
