@@ -35,7 +35,7 @@ Warning  FailedMount  mount.nfs: access denied by server while mounting ...
    古いIDのままセッションを張ろうとして 409 Conflict でクラッシュループする。
 2. runner pod は kind クラスタの docker bridge（例: `172.23.0.0/16`）上で動くが、
    ホストの UFW ファイアウォールは NFS ポート(111/2049/20048)を LAN サブネット
-   （例: `192.168.68.0/22`）にしか許可していなかった。
+   （例: `192.168.0.0/24`）にしか許可していなかった。
 3. ファイアウォールを通過しても、`/etc/exports` のクライアントACLが同様に
    LANサブネットのみだったため "access denied by server" で拒否され続けた。
 
