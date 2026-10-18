@@ -160,3 +160,18 @@ def test_wait_true_embed_failure_with_delete_failure_keeps_original_status(clien
             resp = _post_wait(client)
     assert resp.status_code == 503  # original error wins, not the delete failure
     assert any("compensation delete failed" in r.getMessage() for r in caplog.records)
+
+
+def test_async_job_create_failure_marks_paper_failed_and_allows_reupload(client):
+    # #719: failure after save_paper but before the background task starts must not leave a pending orphan.
+    with patch.object(job_store, "create", side_effect=RuntimeError("jobs db down")):
+        resp = client.post(
+            "/papers/ingest",
+            files={"file": ("gap.pdf", BytesIO(PDF), "application/pdf")},
+        )
+    assert resp.status_code >= 500
+    papers = client.get("/papers").json()
+    items = papers["papers"] if isinstance(papers, dict) else papers
+    assert [p["status"] for p in items] == ["failed"]
+    with patch("academic_paper.services.ingest_service.extract_text", return_value=_PAGES):
+        assert _post_wait(client).status_code == 200
