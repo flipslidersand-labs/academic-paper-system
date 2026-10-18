@@ -69,11 +69,12 @@ async def ingest_paper(
         except ingest_service.NotAPdfError:
             raise HTTPException(status_code=415, detail="Not a PDF file (missing %PDF- header)")
 
-        file_hash = hash_file(tmp_path)
+        file_hash = await asyncio.to_thread(hash_file, tmp_path)
         file_name = ingest_service.sanitize_file_name(file.filename)
 
         try:
-            paper_id = ingest_service.register_paper(
+            paper_id = await asyncio.to_thread(
+                ingest_service.register_paper,
                 file_name,
                 file_hash,
                 lambda: {

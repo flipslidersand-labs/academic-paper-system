@@ -88,8 +88,16 @@ async def _cleanup_orphaned_ingests(app: FastAPI) -> None:
     partially-uploaded vectors are also cleaned up so the file can be re-ingested.
     """
     try:
-        with db_connection(settings.academic_db) as conn:
-            stuck_ids = list_paper_ids_by_status(conn, "pending")
+
+        def _list_stuck() -> list:
+            with db_connection(settings.academic_db) as conn:
+                return list_paper_ids_by_status(conn, "pending")
+
+        def _mark_failed(pid: int) -> None:
+            with db_connection(settings.academic_db) as conn:
+                update_paper_status(conn, pid, "failed")
+
+        stuck_ids = await asyncio.to_thread(_list_stuck)
         if not stuck_ids:
             return
         logger.warning("Startup: found %d papers stuck in 'pending'; cleaning up Qdrant vectors", len(stuck_ids))
@@ -98,8 +106,7 @@ async def _cleanup_orphaned_ingests(app: FastAPI) -> None:
                 await app.state.vector_store.adelete_by_paper_id(paper_id)
             except Exception as exc:
                 logger.warning("Startup cleanup: Qdrant delete failed for paper_id=%s: %s", paper_id, exc)
-            with db_connection(settings.academic_db) as conn:
-                update_paper_status(conn, paper_id, "failed")
+            await asyncio.to_thread(_mark_failed, paper_id)
     except Exception as exc:
         logger.warning("Startup cleanup failed (non-fatal): %s", exc)
 

@@ -5,6 +5,8 @@ import server.py. Declaration order is preserved: ``/papers/score-all`` stays be
 the ``/papers/{paper_id}/...`` routes.
 """
 
+import asyncio
+
 from fastapi import APIRouter, Depends, Query, Request
 
 from academic_paper.auth import Scope, require_scope
@@ -22,7 +24,7 @@ router = APIRouter()
 @router.get("/papers/{paper_id}/summary", dependencies=[Depends(require_scope(Scope.READ))])
 async def get_summary_endpoint(paper_id: int):
     """Return the cached summary only (GET is safe/idempotent, #140). Generation lives in POST."""
-    return get_cached_summary(paper_id)
+    return await asyncio.to_thread(get_cached_summary, paper_id)
 
 
 @router.post("/papers/{paper_id}/summary", dependencies=[Depends(require_scope(Scope.ADMIN))])
