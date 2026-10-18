@@ -154,3 +154,66 @@ def test_list_all_summaries_empty(_db):
     from academic_paper.services.summary_service import list_all_summaries
 
     assert list_all_summaries(20, 0) == {"total": 0, "summaries": []}
+
+
+# --- run_summarize_all (#620) ------------------------------------------------
+
+
+def _indexed_papers(db, n):
+    from academic_paper.db import update_paper_status
+
+    conn = get_connection(db)
+    ids = []
+    for i in range(n):
+        pid = save_paper(conn, f"j{i}.pdf", f"hj{i}")
+        update_paper_status(conn, pid, "indexed")
+        ids.append(pid)
+    conn.close()
+    return ids
+
+
+def _run_all(db, summarizer, llm):
+    from academic_paper.jobs import job_store
+    from academic_paper.services.summary_service import run_summarize_all
+
+    job_store._db_path = db
+
+    async def go():
+        job = await job_store.create(kind="summarize-all")
+        await run_summarize_all(job.id, summarizer, llm, job_store)
+        return job
+
+    return asyncio.run(go())
+
+
+def test_run_all_success(_db, llm, summarizer):
+    _indexed_papers(_db, 2)
+    job = _run_all(_db, summarizer, llm)
+    assert (job.status, job.total, job.processed, job.failed, job.errors) == ("done", 2, 2, 0, [])
+    assert job.finished_at is not None
+
+
+def test_run_all_partial_failure_collects_classified_errors(_db, llm, summarizer):
+    _indexed_papers(_db, 2)
+    summarizer.summarize = AsyncMock(side_effect=[SUMMARY, TimeoutError()])
+    job = _run_all(_db, summarizer, llm)
+    assert (job.status, job.processed, job.failed) == ("done", 1, 1)
+    assert job.errors[0].endswith(": TimeoutError")
+
+
+def test_run_all_summarizer_none_fails(_db, llm):
+    job = _run_all(_db, None, llm)
+    assert job.status == "failed"
+    assert "Summarizer not initialized" in job.errors[0]
+    assert job.finished_at is not None
+
+
+def test_run_all_cancel_still_persists_finished_at(_db, llm, summarizer):
+    _indexed_papers(_db, 1)
+    summarizer.summarize = AsyncMock(side_effect=asyncio.CancelledError())
+    with pytest.raises(asyncio.CancelledError):
+        _run_all(_db, summarizer, llm)
+    from academic_paper.jobs import job_store
+
+    (job,) = job_store.list_all()
+    assert job.finished_at is not None
