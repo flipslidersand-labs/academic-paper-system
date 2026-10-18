@@ -103,7 +103,10 @@ def fetch_papers(
     reported via the second tuple element so callers can distinguish
     "no results" from "search API down" (exit-code false success, #133).
     """
-    filter_parts = [f"title.search:{query}"]
+    # "," (AND) and "|" (OR) are filter syntax in OpenAlex; strip them from the
+    # user query so it stays a single title.search term (#744).
+    safe_query = " ".join(query.replace(",", " ").replace("|", " ").split())
+    filter_parts = [f"title.search:{safe_query}"]
     if from_date:
         filter_parts.append(f"from_publication_date:{from_date}")
     if until_date:
