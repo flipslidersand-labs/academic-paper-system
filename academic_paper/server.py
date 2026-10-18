@@ -2,12 +2,11 @@
 
 import asyncio
 import logging
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -17,7 +16,6 @@ from academic_paper.config import settings
 from academic_paper.db import (
     db_connection,
     init_db,
-    save_summary,
     update_paper_status,
 )
 from academic_paper.embedder import EmbedderClient
@@ -25,7 +23,9 @@ from academic_paper.errors import _http_exc_for, _safe_error_message  # noqa: F4
 from academic_paper.jobs import job_store
 from academic_paper.llm import get_llm_client
 from academic_paper.logging_config import configure_logging
+from academic_paper.routers.jobs import router as jobs_router
 from academic_paper.routers.papers import router as papers_router
+from academic_paper.routers.summary import router as summary_router
 from academic_paper.services import ingest_service
 from academic_paper.services.search_service import run_search
 from academic_paper.services.summary_service import (  # noqa: F401  (_summary_response re-exported, #618)
@@ -33,6 +33,7 @@ from academic_paper.services.summary_service import (  # noqa: F401  (_summary_r
     generate_summary,
     get_cached_summary,
     list_all_summaries,
+    run_summarize_all,
     score_all,
     score_one,
 )
@@ -207,129 +208,13 @@ async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str,
 
 
 app.include_router(papers_router)
-
-
-@app.get("/papers/{paper_id}/summary", dependencies=[Depends(require_scope(Scope.READ))])
-async def get_summary_endpoint(paper_id: int):
-    """Return the cached summary only (GET is safe/idempotent, #140). Generation lives in POST."""
-    return get_cached_summary(paper_id)
-
-
-@app.post("/papers/{paper_id}/summary", dependencies=[Depends(require_scope(Scope.ADMIN))])
-async def generate_summary_endpoint(paper_id: int, force: bool = Query(False)):
-    """Generate the summary (cached result is returned unless force=true)."""
-    return await generate_summary(paper_id, force, app.state.llm, app.state.summarizer)
-
-
-@app.post("/papers/score-all", dependencies=[Depends(require_scope(Scope.ADMIN))])
-def score_all_papers():
-    """Compute and store relevance scores for all papers.
-
-    Score = freshness (30-day half-life, 0–0.5) + category match (0–0.5).
-    Preferred categories are configured via PREFERRED_CATEGORIES env var.
-    A per-paper failure is counted in `failed`/`errors` and does not abort the run (#276).
-
-    Returns:
-        JSON with total, scored, failed counts and per-paper errors.
-    """
-    return score_all()
-
-
-@app.post("/papers/{paper_id}/score", dependencies=[Depends(require_scope(Scope.ADMIN))])
-def score_paper(paper_id: int):
-    """Compute and store relevance score for a single paper."""
-    return score_one(paper_id)
-
-
-@app.get("/summaries", dependencies=[Depends(require_scope(Scope.READ))])
-def list_summaries_endpoint(
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-):
-    """List all paper summaries with associated paper metadata."""
-    return list_all_summaries(limit, offset)
+app.include_router(jobs_router)
+app.include_router(summary_router)
 
 
 async def _run_summarize_all(job_id: str) -> None:
-    """Background task: summarize all indexed papers without a cached summary."""
-    job = job_store.get(job_id)
-    if job is None:
-        return
-
-    job.status = "running"
-    await job_store.persist(job)
-    try:
-        if app.state.summarizer is None:
-            job.status = "failed"
-            job.errors.append("Summarizer not initialized (LLM unavailable at job start)")
-            return
-        with db_connection(settings.academic_db) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT p.id, p.file_hash, p.title, p.file_name
-                FROM papers p
-                LEFT JOIN summaries s ON p.id = s.paper_id
-                WHERE s.paper_id IS NULL AND p.status = 'indexed'
-            """)
-            rows = cursor.fetchall()
-
-        job.total = len(rows)
-
-        model = app.state.llm.display_name
-
-        for row in rows:
-            paper_id = row[0]
-            file_hash = row[1]
-            row_title = row["title"]
-            row_file_name = row["file_name"]
-            try:
-                summary = await app.state.summarizer.summarize(
-                    paper_id, file_hash, title=row_title, file_name=row_file_name
-                )
-                with db_connection(settings.academic_db) as conn:
-                    save_summary(conn, paper_id, model, summary)
-                job.processed += 1
-            except Exception as e:
-                logger.exception("Background summarize failed for paper_id=%s", paper_id)
-                job.failed += 1
-                job.errors.append(f"paper_id={paper_id}: {_safe_error_message(e)}")
-
-        job.status = "done"
-    except Exception as e:
-        logger.exception("Background summarize-all job=%s failed", job_id)
-        job.status = "failed"
-        job.errors.append(_safe_error_message(e))
-    finally:
-        job.finished_at = time.time()
-        await job_store.persist(job)
-
-
-@app.post("/jobs/summarize-all", status_code=202, dependencies=[Depends(require_scope(Scope.ADMIN))])
-async def start_summarize_all(background_tasks: BackgroundTasks):
-    """Start a background job to summarize all papers without a cached summary."""
-    if app.state.llm is None or app.state.summarizer is None:
-        raise HTTPException(status_code=503, detail="LLM not configured")
-
-    job = await job_store.create_if_not_running(kind="summarize-all")
-    if job is None:
-        raise HTTPException(status_code=409, detail="A summarize-all job is already running")
-    background_tasks.add_task(_run_summarize_all, job.id)
-    return {"job_id": job.id, "status": job.status}
-
-
-@app.get("/jobs/{job_id}", dependencies=[Depends(require_scope(Scope.READ))])
-def get_job_endpoint(job_id: str):
-    """Get status of a background job by ID."""
-    job = job_store.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return job.to_dict()
-
-
-@app.get("/jobs", dependencies=[Depends(require_scope(Scope.READ))])
-def list_jobs_endpoint():
-    """List all background jobs (#190: require auth — exposes all job IDs / paper metadata)."""
-    return {"jobs": [j.to_dict() for j in job_store.list_all()]}
+    """Background task: summarize all indexed papers without a cached summary (#620)."""
+    await run_summarize_all(job_id, app.state.summarizer, app.state.llm, job_store)
 
 
 @app.get("/search", dependencies=[Depends(require_scope(Scope.READ))])
