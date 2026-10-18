@@ -28,6 +28,7 @@ import argparse
 import io
 import sys
 import threading
+import time
 from urllib.parse import quote
 
 import defusedxml.ElementTree as ET  # noqa: N817 (matches stdlib ET convention)
@@ -42,7 +43,14 @@ from academic_paper.retry import with_retry
 ARXIV_API = "https://export.arxiv.org/api/query"
 ARXIV_PDF_BASE = "https://arxiv.org/pdf"
 FETCH_FACTOR = 5  # multiply max_results when date-filtering to fill the target
-_ARXIV_RETRYABLE = (httpx.TimeoutException, httpx.NetworkError)
+_RETRY_AFTER_MAX = 30.0  # cap on honoring a Retry-After header (seconds)
+
+
+class _RetryableStatusError(httpx.HTTPStatusError):
+    """429 / 5xx responses: transient, so retried. Other 4xx fail immediately (#724)."""
+
+
+_ARXIV_RETRYABLE = (httpx.TimeoutException, httpx.NetworkError, _RetryableStatusError)
 
 
 def _date_to_arxiv(date_str: str, end_of_day: bool = False) -> str:
@@ -90,7 +98,18 @@ def fetch_papers(
 
     def _fetch():
         r = httpx.get(url, timeout=timeout)
-        r.raise_for_status()
+        try:
+            r.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if r.status_code == 429 or r.status_code >= 500:
+                if r.status_code == 429:
+                    # with_retry only does exponential backoff; honor Retry-After here.
+                    try:
+                        time.sleep(min(float(r.headers.get("Retry-After", 0)), _RETRY_AFTER_MAX))
+                    except ValueError:
+                        pass  # HTTP-date form: fall back to with_retry backoff
+                raise _RetryableStatusError(str(exc), request=exc.request, response=exc.response) from exc
+            raise
         return r
 
     resp = with_retry(_fetch, attempts=3, base_delay=2.0, exceptions=_ARXIV_RETRYABLE)
