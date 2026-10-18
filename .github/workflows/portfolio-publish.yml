@@ -5,6 +5,12 @@ on:
     - cron: "0 1 * * 0" # 10:00 JST Sunday
   workflow_dispatch:
 
+# Serialize cron and manual runs: both push to main on the same persistent
+# runner workspace (#654). Queue instead of cancelling a publish in progress.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: [self-hosted, minipc]
