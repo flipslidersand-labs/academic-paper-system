@@ -20,6 +20,7 @@ permissions:
 
 env:
   BRANCH: chore/update-requirements-lock
+  PIP_TOOLS_VERSION: "7.6.2"
 
 jobs:
   update:
@@ -32,7 +33,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install pip-tools
-        run: pip install pip-tools
+        run: pip install "pip-tools==${PIP_TOOLS_VERSION}"
 
       - name: Regenerate lock files
         run: scripts/update-lock.sh --upgrade
