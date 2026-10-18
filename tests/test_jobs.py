@@ -201,6 +201,31 @@ def test_list_jobs_includes_completed(client):
     assert jobs[0]["status"] == "done"
 
 
+def _seed_jobs(n):
+    for i in range(n):
+        job_store._jobs[f"j{i}"] = Job(id=f"j{i}", status="done", started_at=1000.0 + i)
+
+
+def test_list_jobs_newest_first_and_total(client):
+    _seed_jobs(5)
+    body = client.get("/jobs").json()
+    assert body["total"] == 5
+    assert [j["id"] for j in body["jobs"]] == ["j4", "j3", "j2", "j1", "j0"]
+
+
+def test_list_jobs_limit_offset(client):
+    _seed_jobs(5)
+    body = client.get("/jobs", params={"limit": 2, "offset": 1}).json()
+    assert body["total"] == 5
+    assert [j["id"] for j in body["jobs"]] == ["j3", "j2"]
+    assert client.get("/jobs", params={"offset": 10}).json()["jobs"] == []
+
+
+@pytest.mark.parametrize("params", [{"limit": 0}, {"limit": 101}, {"offset": -1}])
+def test_list_jobs_out_of_range_422(client, params):
+    assert client.get("/jobs", params=params).status_code == 422
+
+
 def test_summarize_all_records_per_paper_errors(client, temp_db, mock_summarizer):
     """POST /jobs/summarize-all records failed papers and still completes the job."""
     conn = get_connection(temp_db)
