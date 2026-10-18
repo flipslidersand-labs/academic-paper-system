@@ -169,14 +169,11 @@ def test_pubmed_metadata_parses_valid_xml_and_skips_articles_without_pmc_id():
 
 
 @respx.mock
-def test_pubmed_metadata_malformed_xml_returns_empty_and_logs(capsys):
+def test_pubmed_metadata_malformed_xml_raises():
     respx.get(pubmed_collect.EFETCH_URL).mock(return_value=httpx.Response(200, content=b"<pmc-articleset><article>"))
 
-    with httpx.Client() as client:
-        papers = pubmed_collect.fetch_paper_metadata(["1"], client=client)
-
-    assert papers == []
-    assert "XML parse error" in capsys.readouterr().err
+    with httpx.Client() as client, pytest.raises(pubmed_collect.ET.ParseError):
+        pubmed_collect.fetch_paper_metadata(["1"], client=client)
 
 
 @respx.mock
