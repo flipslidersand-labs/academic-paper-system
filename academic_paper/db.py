@@ -393,6 +393,28 @@ def get_all_papers_for_scoring(conn: sqlite3.Connection) -> list[dict]:
     return [_decode_json_fields(row, ("categories",)) for row in cursor.fetchall()]
 
 
+def list_paper_ids_by_status(conn: sqlite3.Connection, status: str) -> list[int]:
+    """Return IDs of all papers with the given status."""
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM papers WHERE status = ?", (status,))
+    return [row[0] for row in cursor.fetchall()]
+
+
+def get_paper_by_hash(conn: sqlite3.Connection, file_hash: str) -> dict | None:
+    """Return ``{"id", "status"}`` of the paper with this file_hash, or None."""
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, status FROM papers WHERE file_hash = ?", (file_hash,))
+    row = cursor.fetchone()
+    return {"id": row["id"], "status": row["status"]} if row is not None else None
+
+
+def count_rows(conn: sqlite3.Connection) -> dict[str, int]:
+    """Return row counts of the papers and chunks tables."""
+    papers = conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
+    chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    return {"papers": papers, "chunks": chunks}
+
+
 def get_paper(conn: sqlite3.Connection, paper_id: int) -> dict | None:
     """Get a specific paper by ID."""
     cursor = conn.cursor()

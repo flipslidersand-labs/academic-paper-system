@@ -15,7 +15,14 @@ from collections.abc import Callable
 
 from academic_paper.chunker import chunk_pages
 from academic_paper.config import settings
-from academic_paper.db import db_connection, delete_paper, save_chunks, save_paper, update_paper_status
+from academic_paper.db import (
+    db_connection,
+    delete_paper,
+    get_paper_by_hash,
+    save_chunks,
+    save_paper,
+    update_paper_status,
+)
 from academic_paper.embedder import EmbedderClient
 from academic_paper.errors import PdfExtractionError, _safe_error_message
 from academic_paper.extractor import extract_text
@@ -101,9 +108,7 @@ def register_paper(file_name: str, file_hash: str, metadata_factory: Callable[[]
     only after the duplicate check so metadata validation errors keep their order.
     """
     with db_connection(settings.academic_db) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, status FROM papers WHERE file_hash = ?", (file_hash,))
-        existing = cursor.fetchone()
+        existing = get_paper_by_hash(conn, file_hash)
         if existing:
             if existing["status"] in ("indexed", "pending"):
                 raise DuplicatePaperError(existing["status"])
