@@ -590,6 +590,17 @@ def upsert_job(
     conn.commit()
 
 
+def load_job(conn: sqlite3.Connection, job_id: str) -> dict | None:
+    """Load one job row by ID, or None if absent (#774: evicted jobs stay in SQLite)."""
+    row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    if row is None:
+        return None
+    d = dict(row)
+    d["errors"] = json.loads(d["errors"])
+    d["result"] = json.loads(d["result"]) if d.get("result") else None
+    return d
+
+
 def load_all_jobs(conn: sqlite3.Connection) -> list[dict]:
     """Load all job rows ordered by start time (oldest first)."""
     cursor = conn.cursor()
