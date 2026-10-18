@@ -1653,8 +1653,8 @@ def test_run_ingest_unlinks_tmpfile_when_persist_fails(tmp_path):
     with (
         patch("academic_paper.server.job_store.get", return_value=job),
         patch("academic_paper.server.job_store.persist", AsyncMock(side_effect=RuntimeError("db"))),
-        pytest.raises(RuntimeError),
     ):
+        # persist 失敗はログ化して握る (#725)。例外は伝播せず、tmp も消える。
         asyncio.run(_run_ingest("j", str(pdf), 1, "h", "f.pdf"))
     assert not pdf.exists()
 
