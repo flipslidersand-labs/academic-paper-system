@@ -50,6 +50,9 @@ jobs:
     # restrict it and risk startup_failure (see #341).
     permissions:
       contents: read
+    # Cap runner occupancy (#652). Default is 360 min; a hung build/smoke test
+    # should fail well before that.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Validate docker-compose.yml (#435)
