@@ -10,6 +10,7 @@ from qdrant_client.http.exceptions import ApiException, ResponseHandlingExceptio
 
 from academic_paper.config import get_settings
 from academic_paper.embedder import EmbedderClient
+from academic_paper.http_status import is_client_error
 from academic_paper.llm import BaseLLMClient, LLMOutputError
 from academic_paper.models import PaperSummary
 from academic_paper.vector_store import QdrantStore
@@ -32,14 +33,6 @@ def _summary_json_example() -> str:
             example = json.dumps(field.description, ensure_ascii=False)
         lines.append(f"    {json.dumps(name)}: {example}")
     return "{\n" + ",\n".join(lines) + "\n}"
-
-
-def _is_permanent_client_error(status_code: int | None) -> bool:
-    """4xx responses (bad API key, missing collection, dimension mismatch, ...) are
-    standing configuration mistakes, not transient outages — silently falling back
-    to the DB chunk order would hide them indefinitely (#305).
-    """
-    return status_code is not None and 400 <= status_code < 500
 
 
 SYSTEM_PROMPT = """You are an expert academic paper analyzer.
@@ -171,7 +164,7 @@ class RAGSummarizer:
                 timeout=get_settings().qdrant_timeout,
             )
         except UnexpectedResponse as e:
-            if _is_permanent_client_error(e.status_code):
+            if is_client_error(e.status_code):
                 # A 4xx from Qdrant (bad API key, missing collection,
                 # dimension mismatch, ...) is a standing misconfiguration,
                 # not a transient outage — must propagate instead of silently
@@ -207,7 +200,7 @@ class RAGSummarizer:
                     self.embedder.embed_single(query_text, mode="search"), timeout=get_settings().embedding_timeout
                 )
             except httpx.HTTPStatusError as e:
-                if _is_permanent_client_error(e.response.status_code):
+                if is_client_error(e.response.status_code):
                     # A 401/403/404/etc. from embedding-svc is a standing
                     # misconfiguration (bad API key, wrong URL, ...), not a
                     # transient outage — must propagate instead of silently
