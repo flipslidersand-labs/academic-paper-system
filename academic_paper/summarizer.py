@@ -10,7 +10,7 @@ from qdrant_client.http.exceptions import ApiException, ResponseHandlingExceptio
 
 from academic_paper.config import get_settings
 from academic_paper.embedder import EmbedderClient
-from academic_paper.llm import BaseLLMClient
+from academic_paper.llm import BaseLLMClient, LLMOutputError
 from academic_paper.models import PaperSummary
 from academic_paper.vector_store import QdrantStore
 
@@ -83,7 +83,7 @@ def _parse_llm_json(response: str) -> object:
             continue
         if isinstance(obj, dict):
             return obj
-    raise ValueError(f"LLM returned invalid JSON: {first_error}")
+    raise LLMOutputError(f"LLM returned invalid JSON: {first_error}")
 
 
 class RAGSummarizer:
@@ -275,12 +275,12 @@ Please respond ONLY with valid JSON in this exact format:
         )
 
         if not response:
-            raise ValueError("LLM returned empty response")
+            raise LLMOutputError("LLM returned empty response")
 
         summary_data = _parse_llm_json(response)
 
         if not isinstance(summary_data, dict):
-            raise ValueError("LLM returned JSON that is not an object")
+            raise LLMOutputError("LLM returned JSON that is not an object")
 
         # Normalize/validate via PaperSummary (nested dicts -> JSON strings, etc.)
         result = PaperSummary(**summary_data).model_dump()
