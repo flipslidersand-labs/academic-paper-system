@@ -124,5 +124,6 @@ def extract_nuggets(
     else:
         combined = bm25
 
-    ranked = sorted(zip(combined, sentences), reverse=True)
-    return " ".join(s for _, s in ranked[:top_k])
+    # 同点は文書順(先頭文優先)。選択後は文書順に並べて連結する。
+    top = sorted(range(len(sentences)), key=lambda i: (-combined[i], i))[:top_k]
+    return " ".join(sentences[i] for i in sorted(top))
