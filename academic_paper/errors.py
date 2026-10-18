@@ -13,7 +13,11 @@ from academic_paper.llm import LLMOutputError
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["_http_exc_for", "_safe_error_message"]
+__all__ = ["PdfExtractionError", "_http_exc_for", "_safe_error_message"]
+
+
+class PdfExtractionError(ValueError):
+    """pdfplumber/pdfminer could not parse the PDF (corrupt/encrypted): client input -> 400 (#729)."""
 
 
 def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
@@ -70,6 +74,8 @@ def _safe_error_message(exc: Exception) -> str:
     """
     if isinstance(exc, TimeoutError):
         return "TimeoutError"
+    if isinstance(exc, PdfExtractionError):
+        return "Failed to extract text from PDF"
     http_exc = _http_exc_for(exc, "")
     if http_exc.status_code == 400:
         # Plain ValueError (input validation): the message may carry arbitrary content.
