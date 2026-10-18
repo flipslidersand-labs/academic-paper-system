@@ -602,3 +602,26 @@ async def test_eviction_never_drops_active_jobs(temp_db):
 
     assert active.id in store._jobs
     assert sum(j.finished_at is not None for j in store._jobs.values()) == 1
+
+
+@pytest.mark.anyio
+async def test_get_or_load_returns_evicted_job_from_db(temp_db):
+    """Evicted finished jobs are gone from memory but still readable via the DB (#774)."""
+    store = JobStore(max_finished_jobs=1)
+    store._db_path = temp_db
+    ids = []
+    for i in range(3):
+        job = await store.create(kind="ingest")
+        job.status = "done"
+        job.finished_at = 1000.0 + i
+        job.result = {"paper_id": i}
+        await store.persist(job)
+        ids.append(job.id)
+
+    assert store.get(ids[0]) is None
+    loaded = await store.get_or_load(ids[0])
+    assert loaded is not None
+    assert (loaded.id, loaded.status, loaded.result) == (ids[0], "done", {"paper_id": 0})
+    assert store.get(ids[0]) is None  # not re-cached
+    assert (await store.get_or_load(ids[2])) is store.get(ids[2])  # in-memory path
+    assert await store.get_or_load("missing-id") is None

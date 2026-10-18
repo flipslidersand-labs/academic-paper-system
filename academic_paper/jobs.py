@@ -149,6 +149,34 @@ class JobStore:
         with self._lock:
             return self._jobs.get(job_id)
 
+    async def get_or_load(self, job_id: str) -> Job | None:
+        """In-memory job, else the SQLite row of an evicted finished job (#774). Not re-cached."""
+        job = self.get(job_id)
+        if job is not None or not self._db_path:
+            return job
+        return await asyncio.to_thread(self._load_from_db, self._db_path, job_id)
+
+    @staticmethod
+    def _load_from_db(db_path: str, job_id: str) -> Job | None:
+        from academic_paper.db import db_connection, load_job
+
+        with db_connection(db_path) as conn:
+            row = load_job(conn, job_id)
+        if row is None:
+            return None
+        return Job(
+            id=row["id"],
+            status=row["status"],
+            kind=row.get("kind", ""),
+            total=row["total"],
+            processed=row["processed"],
+            failed=row["failed"],
+            errors=list(row["errors"]),
+            started_at=row["started_at"],
+            finished_at=row["finished_at"],
+            result=row.get("result"),
+        )
+
     def list_all(self) -> list[Job]:
         with self._lock:
             return list(self._jobs.values())

@@ -28,9 +28,9 @@ async def start_summarize_all(request: Request, background_tasks: BackgroundTask
 
 
 @router.get("/jobs/{job_id}", dependencies=[Depends(require_scope(Scope.READ))])
-def get_job_endpoint(job_id: str):
-    """Get status of a background job by ID."""
-    job = job_store.get(job_id)
+async def get_job_endpoint(job_id: str):
+    """Get status of a background job by ID (evicted finished jobs are read from SQLite, #774)."""
+    job = await job_store.get_or_load(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return job.to_dict()
