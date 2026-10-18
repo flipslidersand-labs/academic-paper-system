@@ -175,3 +175,50 @@ def test_placeholder_ingest_api_key_rejected():
             qdrant_url="http://localhost:6333",
             ingest_api_key="<your-ingest-key>",
         )
+
+
+_OK = {"embedding_svc_url": "http://localhost:9092", "qdrant_url": "http://localhost:6333"}
+
+
+@pytest.mark.parametrize("field", ["pdf_extract_timeout", "llm_generate_timeout", "summarize_total_timeout"])
+@pytest.mark.parametrize("bad", [0, -1])
+def test_timeouts_reject_non_positive(field, bad):
+    with pytest.raises(ValidationError):
+        Settings(**_OK, **{field: bad})
+
+
+def test_timeouts_derived_defaults_match_previous_constants():
+    s = Settings(**_OK)
+    assert s.llm_generate_timeout == 903
+    assert s.summarize_total_timeout == 1063
+
+
+def test_timeouts_derived_follow_ollama_timeout():
+    s = Settings(**_OK, ollama_timeout=100, embedding_timeout=10, qdrant_timeout=5)
+    assert s.llm_generate_timeout == 303
+    assert s.summarize_total_timeout == 10 + 5 + 303 + 10
+
+
+def test_llm_generate_timeout_below_floor_rejected():
+    with pytest.raises(ValidationError, match="llm_generate_timeout"):
+        Settings(**_OK, ollama_timeout=300, llm_generate_timeout=902)
+
+
+def test_summarize_total_timeout_below_floor_rejected():
+    with pytest.raises(ValidationError, match="summarize_total_timeout"):
+        Settings(**_OK, summarize_total_timeout=1062)
+
+
+def test_explicit_timeouts_at_or_above_floor_accepted():
+    s = Settings(**_OK, llm_generate_timeout=1000, summarize_total_timeout=2000)
+    assert (s.llm_generate_timeout, s.summarize_total_timeout) == (1000, 2000)
+
+
+def test_placeholder_helper_whole_vs_partial():
+    from academic_paper.config import _reject_placeholder
+
+    assert _reject_placeholder("abc<def", whole=True) == "abc<def"
+    with pytest.raises(ValueError, match="placeholder"):
+        _reject_placeholder("abc<def", whole=False)
+    with pytest.raises(ValueError, match="placeholder"):
+        _reject_placeholder("<key>", whole=True)

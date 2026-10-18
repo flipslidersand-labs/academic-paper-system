@@ -11,6 +11,21 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _PLACEHOLDER_RE = re.compile(r"^<.+>$")
 
 
+def _reject_placeholder(value: str, *, whole: bool) -> str:
+    """Raise ValueError if ``value`` looks like an unfilled ``<...>`` placeholder (#732).
+
+    whole=False (URLs): any "<" is a placeholder, since the defaults embed "<internal-host>".
+    whole=True (secrets): only a full "<...>" value is rejected, because a real random secret
+    may legitimately contain "<" somewhere in the middle (#331).
+    """
+    bad = _PLACEHOLDER_RE.match(value) if whole else "<" in value
+    if bad:
+        raise ValueError(
+            f"Invalid value {value!r}: contains placeholder. Set the corresponding environment variable before starting."
+        )
+    return value
+
+
 class Settings(BaseSettings):
     """Configuration settings for academic paper system."""
 
@@ -91,71 +106,74 @@ class Settings(BaseSettings):
     )
     pdf_extract_timeout: int = Field(
         default=120,
+        gt=0,
         description=(
             "Max seconds for extract_text() before the ingest job is failed (#238); "
             "there is no page-count cap, only wall-clock, so malformed/huge PDFs can't hang a job forever"
         ),
     )
-    llm_generate_timeout: int = Field(
-        default=903,
+    llm_generate_timeout: int | None = Field(
+        default=None,
+        gt=0,
         description=(
             "Ceiling in seconds for RAGSummarizer's llm.generate() call (#237). "
             "OllamaClient.generate() retries up to 3x on transient errors (#311), each "
             "attempt bounded by ollama_timeout, so the worst case is "
-            "ollama_timeout * 3 + backoff(1s + 2s). This must stay >= that worst case "
-            "(currently 300*3+3=903 with the defaults below) so the outer wait_for never "
-            "fires before the retries have a chance to run — a tighter value silently "
-            "defeats the retry by cancelling after the first attempt's timeout."
+            "ollama_timeout * 3 + backoff(1s + 2s). Unset = derived as ollama_timeout*3+3 "
+            "(903 with defaults). An explicit value below that is rejected, since a tighter "
+            "value silently defeats the retry by cancelling after the first attempt's timeout (#651)."
         ),
     )
-    summarize_total_timeout: int = Field(
-        default=1063,
+    summarize_total_timeout: int | None = Field(
+        default=None,
         gt=0,
         description=(
             "Overall ceiling in seconds for RAGSummarizer.summarize() (#269); the embedding, "
             "Qdrant and LLM wait_for calls inside it are awaited sequentially, so their timeouts "
-            "stack in the worst case instead of applying independently. This bounds the whole "
-            "call regardless of that stacking — default is embedding_timeout + qdrant_timeout + "
-            "llm_generate_timeout with a small margin for the DB fallback path."
+            "stack in the worst case. Unset = derived as embedding_timeout + qdrant_timeout + "
+            "llm_generate_timeout + 10 (1063 with defaults); an explicit value below that is rejected (#651)."
         ),
     )
 
     @field_validator("embedding_svc_url", "qdrant_url")
     @classmethod
     def reject_placeholder_url(cls, v: str) -> str:
-        if "<" in v:
-            raise ValueError(
-                f"Invalid value {v!r}: contains placeholder. "
-                "Set the corresponding environment variable before starting."
-            )
-        return v
+        return _reject_placeholder(v, whole=False)
 
     @field_validator("api_key", "ingest_api_key", "embedding_api_key", "qdrant_api_key", "google_api_key")
     @classmethod
     def reject_placeholder_secret(cls, v: str) -> str:
-        # Secrets have no fixed placeholder default (unlike the URL fields above, they
-        # default to "") and can be arbitrary random strings, so only reject values that
-        # are themselves a whole "<...>" placeholder (e.g. "<your-api-key>") rather than
-        # any value that merely contains "<" — a real secret may happen to include that
-        # character (#331).
-        if _PLACEHOLDER_RE.match(v):
-            raise ValueError(
-                f"Invalid value {v!r}: contains placeholder. "
-                "Set the corresponding environment variable before starting."
-            )
-        return v
+        return _reject_placeholder(v, whole=True)
 
     @field_validator("api_keys")
     @classmethod
     def reject_placeholder_api_keys(cls, v: str) -> str:
-        # Same whole-"<...>" placeholder rule as api_key, applied per element (#601).
+        # Same whole-"<...>" rule as api_key, applied per element (#601).
         for item in v.split(","):
-            if _PLACEHOLDER_RE.match(item.strip()):
-                raise ValueError(
-                    f"Invalid value {item.strip()!r}: contains placeholder. "
-                    "Set the corresponding environment variable before starting."
-                )
+            _reject_placeholder(item.strip(), whole=True)
         return v
+
+    @model_validator(mode="after")
+    def derive_timeouts(self) -> "Settings":
+        """Fill unset llm_generate_timeout / summarize_total_timeout; reject explicit values below the floor (#651)."""
+        llm_floor = self.ollama_timeout * 3 + 3
+        if self.llm_generate_timeout is None:
+            self.llm_generate_timeout = llm_floor
+        elif self.llm_generate_timeout < llm_floor:
+            raise ValueError(
+                f"llm_generate_timeout ({self.llm_generate_timeout}) must be >= ollama_timeout*3+3 ({llm_floor}); "
+                "otherwise the Ollama retries are cancelled early. Raise LLM_GENERATE_TIMEOUT or unset it."
+            )
+        total_floor = self.embedding_timeout + self.qdrant_timeout + self.llm_generate_timeout + 10
+        if self.summarize_total_timeout is None:
+            self.summarize_total_timeout = total_floor
+        elif self.summarize_total_timeout < total_floor:
+            raise ValueError(
+                f"summarize_total_timeout ({self.summarize_total_timeout}) must be >= embedding_timeout + "
+                f"qdrant_timeout + llm_generate_timeout + 10 ({total_floor}). "
+                "Raise SUMMARIZE_TOTAL_TIMEOUT or unset it."
+            )
+        return self
 
     @model_validator(mode="after")
     def check_chunk_overlap(self) -> "Settings":
