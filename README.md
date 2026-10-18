@@ -14,11 +14,11 @@ PDF upload
   → Gemini / Ollama structured summarization
 ```
 
-**Stack:** FastAPI · pdfplumber · Qdrant · SQLite FTS5 · Google Generative AI · Ollama · OpenTelemetry
+**Stack:** FastAPI · pdfplumber · Qdrant · SQLite FTS5 · Google Generative AI · Ollama · OpenTelemetry · Prometheus (`prometheus-fastapi-instrumentator`)
 
 ## API
 
-Every endpoint except `GET /health` requires the `X-API-Key` header when the
+Every endpoint except `GET /health` and the static UI at `/ui` requires the `X-API-Key` header when the
 `API_KEY` env var is set (the server refuses to start when it is unset, unless `AUTH_DISABLED=true` is set explicitly).
 
 | Method | Path | Auth | Description |
@@ -37,6 +37,8 @@ Every endpoint except `GET /health` requires the `X-API-Key` header when the
 | `GET` | `/search` | yes | Hybrid search (`mode=hybrid\|vector\|keyword`) |
 | `GET` | `/health` | no | Qdrant / embedding-svc reachability (**503** when degraded) |
 | `GET` | `/stats` | yes | Counts: `papers`, `chunks`, `qdrant_points` |
+| `GET` | `/metrics` | yes (**admin** scope) | Prometheus metrics (`prometheus-fastapi-instrumentator`). Requires a full-scope key (`API_KEY`/`API_KEYS`); `INGEST_API_KEY` gets 403 |
+| `GET` | `/ui/` | no | Static frontend (`frontend/`, mounted only when that directory exists). Serves HTML/JS without a key; the page asks for the API key and sends it as `X-API-Key` on its API calls |
 
 ### Ingestion (async)
 
@@ -115,7 +117,15 @@ summarization (`POST /jobs/summarize-all`) and scoring (`POST /papers/score-all`
   ```
 
   `.github/workflows/portfolio-publish.yml` regenerates and commits `docs/`
-  weekly (Sunday 10:00 JST).
+  weekly (Sunday 10:00 JST). It runs `git add docs/`, so every file under `docs/`
+  is committed by that job.
+
+## CI workflows (dependencies & security)
+
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `.github/workflows/lock-update.yml` | weekly cron (Mon 03:00 JST) + manual | Runs `scripts/update-lock.sh --upgrade` and opens a PR with the new `requirements.lock`. CI is started explicitly via `workflow_dispatch`, because pushes made with `GITHUB_TOKEN` do not trigger workflows |
+| `.github/workflows/vuln-scan.yml` | push, pull_request, weekly cron (Mon 03:00 UTC), manual | `pip-audit` on the hash-pinned `requirements.lock` plus a Trivy scan of the Docker image (#350) |
 
 ## Setup
 
