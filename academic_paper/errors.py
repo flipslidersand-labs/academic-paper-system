@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
 from academic_paper.embedder import EmbeddingCountMismatchError, EmbeddingResponseError
+from academic_paper.llm import LLMOutputError
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
 
     - Dependency-unavailable (httpx connect/timeout, Qdrant HTTP errors) → 502/503
     - EmbeddingCountMismatchError (embedding-svc returned a mismatched vector count) → 502
+    - LLMOutputError (empty / malformed LLM reply) → 502
     - sqlite3.IntegrityError (file_hash UNIQUE violation) → 409
     - ValueError from input validation (no text, no chunks) → 400
     - Everything else → 500 with opaque error-id (details go to logger only)
@@ -39,6 +41,10 @@ def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
         # Checked before the generic ValueError branch below (#336): this is an
         # upstream protocol failure, not bad client input, so it maps to 502.
         return HTTPException(status_code=502, detail="Embedding service returned a mismatched vector count")
+    if isinstance(exc, LLMOutputError):
+        # Upstream LLM returned unusable output (#730): not client input -> 502,
+        # checked before the generic ValueError branch.
+        return HTTPException(status_code=502, detail="LLM returned an invalid response")
     if isinstance(exc, EmbeddingResponseError):
         # Malformed 200 body from embedding-svc (#644): upstream failure -> 502.
         return HTTPException(status_code=502, detail="Embedding service returned an invalid response")

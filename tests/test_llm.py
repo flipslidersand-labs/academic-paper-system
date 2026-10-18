@@ -4,7 +4,7 @@ import httpx
 import pytest
 from google.genai import errors as genai_errors
 
-from academic_paper.llm import GeminiClient, OllamaClient, get_llm_client
+from academic_paper.llm import GeminiClient, LLMOutputError, OllamaClient, get_llm_client
 
 
 @pytest.mark.anyio
@@ -42,7 +42,7 @@ async def test_gemini_client_generate_raises_when_text_is_none():
         mock_client_instance.models.generate_content.return_value = mock_response
 
         client = GeminiClient(api_key="test-key")
-        with pytest.raises(ValueError, match="finish_reason=SAFETY"):
+        with pytest.raises(LLMOutputError, match="finish_reason=SAFETY"):
             await client.generate("Test prompt")
 
 

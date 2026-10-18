@@ -7,6 +7,7 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.models import Distance, FieldCondition, Filter, FilterSelector, MatchValue, PointStruct, VectorParams
 
 from academic_paper.config import get_settings
+from academic_paper.http_status import is_client_error
 from academic_paper.retry import raise_if_cancelled, to_thread_cancellable, with_retry
 
 PAPER_NS = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
@@ -22,7 +23,7 @@ class _RetryableQdrantError(Exception):
 
 def _reraise_qdrant_response(exc: UnexpectedResponse) -> None:
     """Translate UnexpectedResponse into a retryable error, or re-raise 4xx as non-retryable."""
-    if exc.status_code is not None and 400 <= exc.status_code < 500:
+    if is_client_error(exc.status_code):
         raise exc
     raise _RetryableQdrantError(str(exc)) from exc
 

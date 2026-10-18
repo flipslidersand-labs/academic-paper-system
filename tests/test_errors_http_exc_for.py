@@ -9,6 +9,7 @@ from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedR
 
 from academic_paper.embedder import EmbeddingCountMismatchError, EmbeddingResponseError
 from academic_paper.errors import _http_exc_for, _safe_error_message
+from academic_paper.llm import LLMOutputError
 
 _REQ = httpx.Request("GET", "http://internal-host:9999/x")
 
@@ -28,6 +29,7 @@ def _unexpected():
         (TimeoutError(), 504, "fb"),
         (EmbeddingCountMismatchError("x"), 502, "Embedding service returned a mismatched vector count"),
         (EmbeddingResponseError("x"), 502, "Embedding service returned an invalid response"),
+        (LLMOutputError("empty"), 502, "LLM returned an invalid response"),
         (_unexpected(), 502, "Vector store returned an unexpected response"),
         (ResponseHandlingException(Exception("boom")), 502, "Vector store returned an unexpected response"),
         (sqlite3.IntegrityError("UNIQUE constraint failed"), 409, "Conflict: duplicate record"),
@@ -80,3 +82,12 @@ def test_safe_error_message_hides_internals():
     assert _safe_error_message(httpx.ConnectError("http://internal:1", request=_REQ)) == "Upstream service unavailable"
     msg = _safe_error_message(RuntimeError("http://internal:1"))
     assert msg.startswith("Internal error [") and "internal" not in msg
+
+
+def test_llm_output_error_is_upstream_failure_not_client_error():
+    """#730: LLMOutputError (a ValueError subclass) maps to 502; plain ValueError stays 400."""
+    assert isinstance(LLMOutputError("x"), ValueError)
+    assert _http_exc_for(LLMOutputError("x"), "fb").status_code == 502
+    assert _http_exc_for(ValueError("x"), "fb").status_code == 400
+    # job/score error text is the classified detail, not the bare class name
+    assert _safe_error_message(LLMOutputError("secret http://internal")) == "LLM returned an invalid response"
