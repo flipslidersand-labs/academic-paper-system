@@ -97,15 +97,14 @@ def fetch_paper_metadata(
     resp = client.get(EFETCH_URL, params=params, timeout=timeout)
     resp.raise_for_status()
 
+    # ParseError propagates so main() records fetch_error and exits 1 instead of
+    # silently ingesting 0 papers (#721).
+    root = ET.fromstring(resp.content)
     papers: list[dict] = []
-    try:
-        root = ET.fromstring(resp.content)
-        for article in root.findall(".//article"):
-            meta = _parse_article(article)
-            if meta:
-                papers.append(meta)
-    except ET.ParseError as exc:
-        print(f"[pubmed] XML parse error: {exc}", file=sys.stderr)
+    for article in root.findall(".//article"):
+        meta = _parse_article(article)
+        if meta:
+            papers.append(meta)
     return papers
 
 
@@ -243,16 +242,25 @@ def main() -> None:
         try:
             papers = fetch_paper_metadata(pmc_ids, client=shared_client, api_key=api_key)
         except Exception as exc:
-            print(f"[pubmed] ERROR fetching metadata: {_safe_error(exc)}", file=sys.stderr)
+            err = _safe_error(exc)
+            print(f"[pubmed] ERROR fetching metadata: {err}", file=sys.stderr)
+            write_summary(args.summary_file, fetched=0, fetch_error=err)
             sys.exit(1)
 
         print(f"[pubmed] parsed {len(papers)} articles")
+        fetch_error: str | None = None
+        if len(papers) < len(pmc_ids):
+            fetch_error = f"parsed {len(papers)} of {len(pmc_ids)} requested articles"
+            print(f"[pubmed] WARNING: {fetch_error}", file=sys.stderr)
+            if not papers:
+                write_summary(args.summary_file, fetched=0, fetch_error=fetch_error)
+                sys.exit(1)
 
         def _ingest(client, paper):
             time.sleep(0.34)  # respect PMC rate limit (3 req/sec default)
             return ingest_paper(client, paper, args.api_url, poll_timeout=args.poll_timeout)
 
-        run_collect("PubMed", papers, _ingest, args.summary_file)
+        run_collect("PubMed", papers, _ingest, args.summary_file, fetch_error=fetch_error)
 
 
 if __name__ == "__main__":
