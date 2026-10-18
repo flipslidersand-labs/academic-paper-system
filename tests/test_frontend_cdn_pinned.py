@@ -17,3 +17,16 @@ def test_external_scripts_pinned_with_sri():
         assert re.search(r"@\d+\.\d+\.\d+/", tag), f"CDN URL must pin an exact version: {tag}"
         assert 'integrity="sha384-' in tag, f"missing SRI: {tag}"
         assert 'crossorigin="anonymous"' in tag, f"missing crossorigin: {tag}"
+
+
+def test_portfolio_has_no_runtime_cdn_script():
+    """#649: generate_portfolio must inline prebuilt CSS instead of loading the Tailwind play CDN."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+    import generate_portfolio
+
+    out = generate_portfolio.build_html([], {}, "2026-08-31")
+    assert "cdn.tailwindcss.com" not in out
+    assert "<script" not in out
+    assert ".max-w-3xl" in out

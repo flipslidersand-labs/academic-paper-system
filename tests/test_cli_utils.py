@@ -73,3 +73,12 @@ class TestCheckDateOrder:
     def test_missing_until_date_skips_check(self):
         parser = self._parser()
         check_date_order(parser, "2025-01-01", "")
+
+
+def test_auth_headers_shared_helper(monkeypatch):
+    from cli_utils import auth_headers
+
+    monkeypatch.delenv("PAPER_API_KEY", raising=False)
+    assert auth_headers() == {}
+    monkeypatch.setenv("PAPER_API_KEY", "k")
+    assert auth_headers() == {"X-API-Key": "k"}

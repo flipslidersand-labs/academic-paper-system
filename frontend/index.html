@@ -62,6 +62,7 @@
 
     <!-- Loading -->
     <div x-show="loading" class="text-center py-16 text-gray-600 text-sm">読み込み中...</div>
+    <div x-show="listError" x-text="listError" class="text-center py-4 text-red-400 text-sm"></div>
 
     <!-- Search results -->
     <div x-show="!loading && searchResults.length > 0">
@@ -213,6 +214,8 @@
         modal: { open: false, loading: false, summary: null, title: '', error: '' },
         apiKey: '',
         authError: false,
+        listError: '',
+        _listSeq: 0,
 
         // API key (X-API-Key) is kept in localStorage and sent on every API call (#386).
         // The /ui shell itself is public; all data endpoints enforce the key server-side.
@@ -239,6 +242,7 @@
         async loadStats() {
           try {
             const r = await this.apiFetch('/stats');
+            if (!r.ok) return;
             this.stats = await r.json();
           } catch (_) {}
         },
@@ -246,16 +250,26 @@
         async loadPapers() {
           this.loading = true;
           this.searchResults = [];
+          this.listError = '';
+          const seq = ++this._listSeq;  // drop stale responses when requests overlap (#722)
           try {
             const p = new URLSearchParams({ limit: this.limit, offset: this.offset, sort: this.sort });
             if (this.filterAuthor) p.set('author', this.filterAuthor);
             if (this.filterCategory) p.set('category', this.filterCategory);
             const r = await this.apiFetch('/papers?' + p);
+            if (seq !== this._listSeq) return;
+            if (!r.ok) {
+              this.listError = r.status === 401 ? '認証エラー: API キーを確認してください' : '論文一覧の取得に失敗しました (' + r.status + ')';
+              return;
+            }
             const data = await r.json();
-            this.papers = data.papers;
-            this.total = data.total;
-          } catch (_) {}
-          finally { this.loading = false; }
+            if (seq !== this._listSeq) return;
+            this.papers = data.papers ?? [];
+            this.total = data.total ?? 0;
+          } catch (_) {
+            if (seq === this._listSeq) this.listError = '論文一覧の取得に失敗しました';
+          }
+          finally { if (seq === this._listSeq) this.loading = false; }
         },
 
         toggleSort() {

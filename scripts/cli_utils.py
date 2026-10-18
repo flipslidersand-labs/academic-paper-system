@@ -6,6 +6,7 @@ and --max accepted 0 or negative values.
 """
 
 import argparse
+import os
 from datetime import date
 
 MAX_RESULTS_CAP = 500
@@ -37,3 +38,9 @@ def check_date_order(parser: argparse.ArgumentParser, from_date: str, until_date
     """parser.error() when both dates are given and from > until."""
     if from_date and until_date and from_date > until_date:
         parser.error(f"--from-date ({from_date}) must be on or before --until-date ({until_date})")
+
+
+def auth_headers() -> dict:
+    """X-API-Key header from PAPER_API_KEY, or {} when auth is not configured (#183, #418, #645)."""
+    api_key = os.environ.get("PAPER_API_KEY", "")
+    return {"X-API-Key": api_key} if api_key else {}
