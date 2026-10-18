@@ -73,7 +73,7 @@ uvicorn academic_paper.server:app --reload --port 8020
 | GET | `/summaries` | 要 | 要約一覧 (論文メタデータ付き、limit 1-100 / offset) |
 | POST | `/jobs/summarize-all` | 要 | 要約未生成の indexed 論文を一括要約するバックグラウンドジョブ開始 (202 `{job_id, status}`) |
 | GET | `/jobs/{job_id}` | 要 | ジョブ状態取得 |
-| GET | `/jobs` | 要 | ジョブ一覧 |
+| GET | `/jobs` | 要 | ジョブ一覧（新しい順・`limit`(1-100,既定20)/`offset`、`{total, jobs}`。メモリ上のジョブのみ） |
 | GET | `/search` | 要 | 検索 (`mode=hybrid/vector/keyword/nugget`) |
 | GET | `/health` | 不要 | Qdrant / embedding-svc 疎通確認 (両方正常で 200、障害時 503) |
 | GET | `/stats` | 要 | DB 統計 (`papers`/`chunks`/`qdrant_points`) |
