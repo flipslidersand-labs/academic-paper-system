@@ -140,6 +140,41 @@ async def test_run_ingest_success_sets_result(tmp_path):
     assert not os.path.exists(pdf)
 
 
+@_sync
+async def test_run_ingest_running_persist_failure_marks_paper_and_job_failed(tmp_path):
+    """running 化 persist が落ちても paper=failed・job 終端になり固着しない (#725)。"""
+    pdf = tmp_path / "a.pdf"
+    pdf.write_bytes(b"%PDF-")
+    job = Job(id="j", status="pending", kind="ingest")
+    embedder, store = _deps()
+    js = _job_store(job)
+    js.persist = AsyncMock(side_effect=[sqlite3.OperationalError("database is locked"), None])
+    with (
+        patch.object(svc, "ingest_pipeline", AsyncMock(return_value=1)) as pipeline,
+        patch.object(svc, "mark_paper_failed", AsyncMock()) as mark,
+    ):
+        await svc.run_ingest("j", str(pdf), 9, "h", "f.pdf", embedder=embedder, vector_store=store, job_store=js)
+    pipeline.assert_not_awaited()
+    assert job.status == "failed" and job.failed == 1 and job.finished_at is not None
+    assert job.errors
+    mark.assert_awaited_once_with(9)
+    assert not os.path.exists(pdf)
+
+
+@_sync
+async def test_run_ingest_final_persist_failure_is_swallowed(tmp_path):
+    pdf = tmp_path / "a.pdf"
+    pdf.write_bytes(b"%PDF-")
+    job = Job(id="j", status="pending", kind="ingest")
+    embedder, store = _deps()
+    js = _job_store(job)
+    js.persist = AsyncMock(side_effect=[None, sqlite3.OperationalError("database is locked")])
+    with patch.object(svc, "ingest_pipeline", AsyncMock(return_value=2)):
+        await svc.run_ingest("j", str(pdf), 9, "h", "f.pdf", embedder=embedder, vector_store=store, job_store=js)
+    assert job.status == "done" and job.finished_at is not None
+    assert not os.path.exists(pdf)
+
+
 class _FakeUpload:
     def __init__(self, data: bytes, size=None, filename="a.pdf"):
         self._data = data
