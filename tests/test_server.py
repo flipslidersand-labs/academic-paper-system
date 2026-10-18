@@ -1703,3 +1703,19 @@ def test_full_key_and_bad_key_per_route(client, method, path, scope):
         assert getattr(client, method)(path, headers={"X-API-Key": "full-key"}).status_code not in (401, 403)
         assert getattr(client, method)(path, headers={"X-API-Key": "bad"}).status_code == 401
         assert getattr(client, method)(path).status_code == 401
+
+
+def test_docs_endpoints_disabled_by_default_648():
+    """#648: /docs, /redoc, /openapi.json are 404 unless ENABLE_DOCS=true."""
+    client = TestClient(app)
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert client.get(path).status_code == 404, path
+    assert app.docs_url is None and app.redoc_url is None and app.openapi_url is None
+
+
+def test_docs_kwargs_enable_docs_648():
+    """#648: ENABLE_DOCS=true leaves the FastAPI defaults; false disables all three."""
+    from academic_paper.server import _docs_kwargs
+
+    assert _docs_kwargs(True) == {}
+    assert _docs_kwargs(False) == {"docs_url": None, "redoc_url": None, "openapi_url": None}

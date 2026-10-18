@@ -48,3 +48,33 @@ def test_frontend_list_load_checks_response_and_drops_stale():  # #722
     assert "data.papers ?? []" in body and "data.total ?? 0" in body
     assert "_listSeq" in body
     assert "listError" in html
+
+
+def test_security_headers_on_ui_and_api_734(temp_db):
+    client = _client(temp_db)
+    for path in ("/ui/", "/health"):
+        r = client.get(path)
+        assert r.headers["X-Content-Type-Options"] == "nosniff", path
+        assert r.headers["X-Frame-Options"] == "DENY", path
+        assert r.headers["Referrer-Policy"] == "no-referrer", path
+    assert "Content-Security-Policy" not in client.get("/health").headers
+
+
+def test_ui_csp_matches_index_html_734(temp_db):
+    import base64
+    import hashlib
+
+    csp = _client(temp_db).get("/ui/").headers["Content-Security-Policy"]
+    assert "frame-ancestors 'none'" in csp
+    assert "default-src 'self'" in csp
+    assert "connect-src 'self'" in csp
+    html = INDEX.read_text(encoding="utf-8")
+    # Only the CDN Alpine script is external; allow-listed host must be exactly that.
+    assert set(re.findall(r'<script[^>]*\bsrc="(https?://[^"/]+)', html)) == {"https://cdn.jsdelivr.net"}
+    assert "https://cdn.jsdelivr.net" in csp
+    # Every inline <script> block is allowed by hash (no 'unsafe-inline' for scripts).
+    script_src = next(d for d in csp.split(";") if d.strip().startswith("script-src"))
+    assert "'unsafe-inline'" not in script_src
+    for body in re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", html, flags=re.S):
+        digest = base64.b64encode(hashlib.sha256(body.encode()).digest()).decode()
+        assert f"'sha256-{digest}'" in script_src
