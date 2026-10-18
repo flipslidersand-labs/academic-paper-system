@@ -552,3 +552,76 @@ async def test_create_before_init_raises():
     store = JobStore()
     with pytest.raises(RuntimeError, match="init\\(\\) must be awaited"):
         await store.create(kind="ingest")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("method", ["create", "create_if_not_running"])
+async def test_persist_failure_on_create_rolls_back_registration(temp_db, method):
+    """A failing persist must not leave a pending job that blocks later creates with 409 (#720)."""
+    store = JobStore()
+    store._db_path = temp_db
+    with patch.object(store, "_persist", side_effect=RuntimeError("db down")):
+        with pytest.raises(RuntimeError, match="db down"):
+            await getattr(store, method)(kind="summarize-all")
+    assert store._jobs == {}
+    assert store._persist_locks == {}
+
+    job = await store.create_if_not_running(kind="summarize-all")
+    assert job is not None
+
+
+@pytest.mark.anyio
+async def test_finished_jobs_evicted_beyond_cap_and_locks_released(temp_db):
+    """In-memory finished jobs and _persist_locks plateau at the cap; DB keeps all (#751)."""
+    store = JobStore(max_finished_jobs=3)
+    store._db_path = temp_db
+    ids = []
+    for i in range(6):
+        job = await store.create(kind="ingest")
+        job.status = "done"
+        job.finished_at = 1000.0 + i
+        await store.persist(job)
+        ids.append(job.id)
+
+    assert set(store._jobs) == set(ids[3:])
+    assert set(store._persist_locks) <= set(ids[3:])
+    conn = get_connection(temp_db)
+    assert {r["id"] for r in load_all_jobs(conn)} == set(ids)
+
+
+@pytest.mark.anyio
+async def test_eviction_never_drops_active_jobs(temp_db):
+    store = JobStore(max_finished_jobs=1)
+    store._db_path = temp_db
+    active = await store.create(kind="summarize-all")
+    for i in range(3):
+        job = await store.create(kind="ingest")
+        job.status = "done"
+        job.finished_at = 1000.0 + i
+        await store.persist(job)
+
+    assert active.id in store._jobs
+    assert sum(j.finished_at is not None for j in store._jobs.values()) == 1
+
+
+@pytest.mark.anyio
+async def test_get_or_load_returns_evicted_job_from_db(temp_db):
+    """Evicted finished jobs are gone from memory but still readable via the DB (#774)."""
+    store = JobStore(max_finished_jobs=1)
+    store._db_path = temp_db
+    ids = []
+    for i in range(3):
+        job = await store.create(kind="ingest")
+        job.status = "done"
+        job.finished_at = 1000.0 + i
+        job.result = {"paper_id": i}
+        await store.persist(job)
+        ids.append(job.id)
+
+    assert store.get(ids[0]) is None
+    loaded = await store.get_or_load(ids[0])
+    assert loaded is not None
+    assert (loaded.id, loaded.status, loaded.result) == (ids[0], "done", {"paper_id": 0})
+    assert store.get(ids[0]) is None  # not re-cached
+    assert (await store.get_or_load(ids[2])) is store.get(ids[2])  # in-memory path
+    assert await store.get_or_load("missing-id") is None
