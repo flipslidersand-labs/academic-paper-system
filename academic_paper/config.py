@@ -82,6 +82,10 @@ class Settings(BaseSettings):
         default="cs.AI,cs.LG,cs.CL", description="Comma-separated preferred arXiv categories for scoring"
     )
     max_upload_mb: int = Field(default=50, gt=0, description="Maximum PDF upload size in megabytes")
+    enable_docs: bool = Field(
+        default=False,
+        description="Expose /docs, /redoc and /openapi.json (ENABLE_DOCS=true). Off by default: they are unauthenticated (#648)",
+    )
     api_key: str = Field(default="", description="X-API-Key for write and read endpoints; empty = no auth (#241)")
     auth_disabled: bool = Field(
         default=False,
