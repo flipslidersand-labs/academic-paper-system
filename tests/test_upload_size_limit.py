@@ -91,3 +91,23 @@ def test_one_byte_over_limit_returns_413_and_removes_tmpfile(client, size_unknow
     assert "too large" in resp.json()["detail"].lower()
     assert "path" in captured
     assert not os.path.exists(captured["path"])
+
+
+def test_corrupt_pdf_extraction_failure_returns_400(client, size_unknown):
+    """#729: pdfminer errors on a header-only PDF map to 400, not an opaque 500."""
+    resp = _post(client, b"%PDF-1.4\ngarbage")
+    assert resp.status_code == 400, resp.text
+    assert "Internal error" not in resp.text
+
+
+@pytest.mark.anyio
+async def test_corrupt_pdf_pipeline_error_is_readable_in_job_errors(tmp_path):
+    """#729: async job.errors uses _safe_error_message(exc); it must be classified, not 'ValueError'."""
+    from academic_paper.errors import PdfExtractionError, _safe_error_message
+    from academic_paper.services.ingest_service import ingest_pipeline
+
+    bad = tmp_path / "bad.pdf"
+    bad.write_bytes(b"%PDF-1.4\ngarbage")
+    with pytest.raises(PdfExtractionError) as ei:
+        await ingest_pipeline(str(bad), 1, "h", "bad.pdf", embedder=MagicMock(), vector_store=MagicMock())
+    assert _safe_error_message(ei.value) == "Failed to extract text from PDF"
