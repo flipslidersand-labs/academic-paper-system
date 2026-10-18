@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -23,6 +23,7 @@ from academic_paper.errors import _http_exc_for, _safe_error_message  # noqa: F4
 from academic_paper.jobs import job_store
 from academic_paper.llm import get_llm_client
 from academic_paper.logging_config import configure_logging
+from academic_paper.routers.jobs import router as jobs_router
 from academic_paper.routers.papers import router as papers_router
 from academic_paper.services import ingest_service
 from academic_paper.services.search_service import run_search
@@ -206,6 +207,7 @@ async def _run_ingest(job_id: str, tmp_path: str, paper_id: int, file_hash: str,
 
 
 app.include_router(papers_router)
+app.include_router(jobs_router)
 
 
 @app.get("/papers/{paper_id}/summary", dependencies=[Depends(require_scope(Scope.READ))])
@@ -252,34 +254,6 @@ def list_summaries_endpoint(
 async def _run_summarize_all(job_id: str) -> None:
     """Background task: summarize all indexed papers without a cached summary (#620)."""
     await run_summarize_all(job_id, app.state.summarizer, app.state.llm, job_store)
-
-
-@app.post("/jobs/summarize-all", status_code=202, dependencies=[Depends(require_scope(Scope.ADMIN))])
-async def start_summarize_all(background_tasks: BackgroundTasks):
-    """Start a background job to summarize all papers without a cached summary."""
-    if app.state.llm is None or app.state.summarizer is None:
-        raise HTTPException(status_code=503, detail="LLM not configured")
-
-    job = await job_store.create_if_not_running(kind="summarize-all")
-    if job is None:
-        raise HTTPException(status_code=409, detail="A summarize-all job is already running")
-    background_tasks.add_task(_run_summarize_all, job.id)
-    return {"job_id": job.id, "status": job.status}
-
-
-@app.get("/jobs/{job_id}", dependencies=[Depends(require_scope(Scope.READ))])
-def get_job_endpoint(job_id: str):
-    """Get status of a background job by ID."""
-    job = job_store.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return job.to_dict()
-
-
-@app.get("/jobs", dependencies=[Depends(require_scope(Scope.READ))])
-def list_jobs_endpoint():
-    """List all background jobs (#190: require auth — exposes all job IDs / paper metadata)."""
-    return {"jobs": [j.to_dict() for j in job_store.list_all()]}
 
 
 @app.get("/search", dependencies=[Depends(require_scope(Scope.READ))])
