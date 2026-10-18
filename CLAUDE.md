@@ -59,6 +59,8 @@ uvicorn academic_paper.server:app --reload --port 8020
 詳細なスキーマ (リクエスト/レスポンスの全フィールド) は起動中サーバーの `/docs` (OpenAPI) を参照 (既定は無効。無認証で全エンドポイントを列挙できるため、`ENABLE_DOCS=true` のときだけ `/docs`・`/redoc`・`/openapi.json` を公開, #648)。正本は `academic_paper/server.py`。
 以下の表は全エンドポイントの一覧、続く節は注意点のみを記す。
 
+セキュリティヘッダ: 全応答に `X-Content-Type-Options: nosniff` / `X-Frame-Options: DENY` / `Referrer-Policy: no-referrer`、`/ui` 配下には CSP（インライン script は index.html から算出した sha256 で許可、Alpine CDN 版のため `'unsafe-eval'` を含む, #734）を付与する。
+
 認証: `API_KEY` 環境変数が設定されている場合、「要」のエンドポイントは `X-API-Key` ヘッダーが必須 (不一致は 401)。`API_KEY`/`API_KEYS` が両方空で `AUTH_DISABLED=true` も未指定なら起動拒否 (fail-closed, #646)。認証なしで動かすには `AUTH_DISABLED=true` を明示する。
 
 | Method | Path | 認証 | 概要 |

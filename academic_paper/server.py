@@ -1,12 +1,15 @@
 """FastAPI server for academic paper ingestion and retrieval."""
 
 import asyncio
+import base64
+import hashlib
 import logging
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -309,5 +312,45 @@ def stats():
 
 # Serve frontend at /ui — must be mounted after all API routes
 _frontend_dir = Path(__file__).parent.parent / "frontend"
+
+
+def _inline_script_hashes(html: str) -> list[str]:
+    """CSP 'sha256-...' sources for each inline <script> block, so no 'unsafe-inline' is needed."""
+    blocks = re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", html, flags=re.S)
+    return [f"'sha256-{base64.b64encode(hashlib.sha256(b.encode()).digest()).decode()}'" for b in blocks]
+
+
+def _ui_csp(index_html: str) -> str:
+    # Alpine's CDN build evaluates x-* expressions via new Function, hence 'unsafe-eval' (#734);
+    # migrating to @alpinejs/csp would remove it. style-src keeps 'unsafe-inline' for the <style> block.
+    script_src = " ".join(["'self'", "https://cdn.jsdelivr.net", "'unsafe-eval'", *_inline_script_hashes(index_html)])
+    return (
+        f"default-src 'self'; script-src {script_src}; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    )
+
+
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+}
+_ui_csp_value = (
+    _ui_csp(_index.read_text(encoding="utf-8")) if (_index := _frontend_dir / "index.html").exists() else None
+)
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    """nosniff / frame / referrer headers on every response; CSP on the /ui shell (#734)."""
+    response = await call_next(request)
+    for name, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    path = request.url.path
+    if _ui_csp_value and (path == "/ui" or path.startswith("/ui/")):
+        response.headers.setdefault("Content-Security-Policy", _ui_csp_value)
+    return response
+
+
 if _frontend_dir.exists():
     app.mount("/ui", StaticFiles(directory=str(_frontend_dir), html=True), name="ui")
