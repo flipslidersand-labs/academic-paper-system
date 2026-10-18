@@ -8,9 +8,12 @@ import pytest
 from academic_paper.db import (
     _migrate_add_columns,
     arxiv_id_from_file_name,
+    count_rows,
     get_chunks,
     get_connection,
+    get_paper_by_hash,
     init_db,
+    list_paper_ids_by_status,
     list_papers_filtered,
     save_chunks,
     save_paper,
@@ -413,3 +416,33 @@ def test_save_summary_roundtrip_get_and_list(temp_db):
     assert got["model"] == "mdl2" and got["objective"] == "new" and got["method"] == ""
     assert got["keywords"] is not None
     conn.close()
+
+
+def test_list_paper_ids_by_status(temp_db):
+    conn = get_connection(temp_db)
+    a = save_paper(conn, "a.pdf", "ha")
+    b = save_paper(conn, "b.pdf", "hb")
+    conn.execute("UPDATE papers SET status = 'indexed' WHERE id = ?", (b,))
+    conn.commit()
+    assert list_paper_ids_by_status(conn, "pending") == [a]
+    assert list_paper_ids_by_status(conn, "indexed") == [b]
+    assert list_paper_ids_by_status(conn, "failed") == []
+
+
+def test_get_paper_by_hash(temp_db):
+    conn = get_connection(temp_db)
+    pid = save_paper(conn, "a.pdf", "ha")
+    assert get_paper_by_hash(conn, "ha") == {"id": pid, "status": "pending"}
+    assert get_paper_by_hash(conn, "missing") is None
+
+
+def test_count_rows(temp_db):
+    conn = get_connection(temp_db)
+    assert count_rows(conn) == {"papers": 0, "chunks": 0}
+    pid = save_paper(conn, "a.pdf", "ha")
+    save_chunks(
+        conn,
+        pid,
+        [{"chunk_index": 0, "page_start": 1, "page_end": 1, "text": "x", "token_count": 1, "qdrant_id": "q0"}],
+    )
+    assert count_rows(conn) == {"papers": 1, "chunks": 1}

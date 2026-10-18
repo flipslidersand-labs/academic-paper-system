@@ -17,8 +17,10 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from academic_paper.auth import Scope, require_scope, verify_api_key  # noqa: F401  (verify_api_key re-exported, #617)
 from academic_paper.config import settings
 from academic_paper.db import (
+    count_rows,
     db_connection,
     init_db,
+    list_paper_ids_by_status,
     update_paper_status,
 )
 from academic_paper.embedder import EmbedderClient
@@ -87,9 +89,7 @@ async def _cleanup_orphaned_ingests(app: FastAPI) -> None:
     """
     try:
         with db_connection(settings.academic_db) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id FROM papers WHERE status = 'pending'")
-            stuck_ids = [row[0] for row in cursor.fetchall()]
+            stuck_ids = list_paper_ids_by_status(conn, "pending")
         if not stuck_ids:
             return
         logger.warning("Startup: found %d papers stuck in 'pending'; cleaning up Qdrant vectors", len(stuck_ids))
@@ -296,13 +296,12 @@ def stats():
     """DB統計情報"""
     try:
         with db_connection(settings.academic_db) as conn:
-            papers = conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
-            chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+            counts = count_rows(conn)
             try:
                 qdrant_points = app.state.vector_store.count_points()
             except Exception:
                 qdrant_points = -1
-        return {"papers": papers, "chunks": chunks, "qdrant_points": qdrant_points}
+        return {**counts, "qdrant_points": qdrant_points}
     except HTTPException:
         raise
     except Exception as e:
