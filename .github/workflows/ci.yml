@@ -19,7 +19,7 @@ jobs:
     # Bumped 2026-09-17 (#341): fcccf3f5 -> 7669aed3 (adds PR coverage-diff
     # comment to python-test.yml, then removes job-level permissions that
     # caused org-wide startup_failure). CI green confirmed before merge.
-    uses: flipslidersand-labs/qa-workflows/.github/workflows/python-test.yml@7669aed39abdc5fcd01bbc1456e7fc7954dcd52c
+    uses: flipslidersand-labs/qa-workflows/.github/workflows/python-test.yml@a9c4a221a4aabccf8128fa4b9ffabe9989bb8b56
     with:
       # scripts/ は academic_paper と合算計測される (pyproject.toml
       # [tool.coverage.run] source, #240)。合算実測は約76%。実測との差が
