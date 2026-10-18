@@ -14,6 +14,15 @@ _OLLAMA_RETRYABLE = (httpx.NetworkError, httpx.TimeoutException)
 GEMINI_MODEL = "gemini-2.0-flash"  # default for settings.gemini_model
 
 
+class LLMOutputError(ValueError):
+    """Raised when the upstream LLM returns an empty, unparsable or malformed reply.
+
+    A ValueError subclass (existing callers/tests keep working) but an upstream failure,
+    not bad client input: errors._http_exc_for maps it to 502 before the ValueError -> 400
+    branch (#730).
+    """
+
+
 class BaseLLMClient(ABC):
     """Abstract base class for LLM clients."""
 
@@ -97,7 +106,7 @@ class GeminiClient(BaseLLMClient):
             # BaseLLMClient.generate promises str, so fail with a descriptive error (#473).
             candidates = getattr(response, "candidates", None) or []
             finish_reason = getattr(candidates[0], "finish_reason", None) if candidates else None
-            raise ValueError(f"Gemini returned no text (finish_reason={finish_reason})")
+            raise LLMOutputError(f"Gemini returned no text (finish_reason={finish_reason})")
         return text
 
     @property
