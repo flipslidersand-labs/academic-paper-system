@@ -106,20 +106,25 @@ async def ingest_paper(
                 "status": "indexed",
             }
 
-        job = await job_store.create(kind="ingest")
-        keep_tmp = True  # background task now owns tmp cleanup
-        task = asyncio.create_task(
-            ingest_service.run_ingest(
-                job.id,
-                tmp_path,
-                paper_id,
-                file_hash,
-                file_name,
-                embedder=state.embedder,
-                vector_store=state.vector_store,
-                job_store=job_store,
+        try:
+            job = await job_store.create(kind="ingest")
+            task = asyncio.create_task(
+                ingest_service.run_ingest(
+                    job.id,
+                    tmp_path,
+                    paper_id,
+                    file_hash,
+                    file_name,
+                    embedder=state.embedder,
+                    vector_store=state.vector_store,
+                    job_store=job_store,
+                )
             )
-        )
+        except Exception:
+            # No background task owns the paper: don't leave a pending orphan that 409s re-uploads (#719).
+            await ingest_service.mark_paper_failed(paper_id)
+            raise
+        keep_tmp = True  # background task now owns tmp cleanup
         # A task cancelled before its first step (shutdown) never enters
         # _run_ingest's try/finally, so also unlink when the task completes (#454).
         task.add_done_callback(lambda _t, p=tmp_path: ingest_service.unlink_quiet(p))
