@@ -6,6 +6,7 @@ server.py's summary handlers stay thin FastAPI shims: they pass ``app.state.llm`
 error mapping are unchanged. This module has no dependency on the FastAPI app.
 """
 
+import asyncio
 import logging
 import time
 
@@ -66,21 +67,33 @@ def get_cached_summary(paper_id: int) -> dict:
         raise _http_exc_for(e, "Failed to get summary")
 
 
+def _read_paper_and_cache(paper_id: int, force: bool) -> tuple[dict, dict | None]:
+    """Sync DB read for generate_summary (run via asyncio.to_thread, #742).
+
+    Opens its own short-lived connection inside the worker thread. Raises 404
+    when the paper is missing; returns (paper, cached_summary_or_None).
+    """
+    with db_connection(settings.academic_db) as conn:
+        paper = get_paper(conn, paper_id)
+        if paper is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        cached_summary = None if force else get_summary(conn, paper_id)
+        return paper, cached_summary
+
+
+def _save_summary_row(paper_id: int, model: str, summary: dict) -> None:
+    with db_connection(settings.academic_db) as conn:
+        save_summary(conn, paper_id, model, summary)
+
+
 async def generate_summary(paper_id: int, force: bool, llm, summarizer) -> dict:
     """Generate the summary (cached result is returned unless force=True)."""
     # Read paper and cache in a short-lived connection — close before LLM await
     # to avoid holding a WAL write-lock for the full LLM timeout (#191).
     try:
-        with db_connection(settings.academic_db) as conn:
-            paper = get_paper(conn, paper_id)
-
-            if paper is None:
-                raise HTTPException(status_code=404, detail="Paper not found")
-
-            if not force:
-                cached_summary = get_summary(conn, paper_id)
-                if cached_summary is not None:
-                    return _summary_response(paper_id, cached_summary["model"], cached_summary, True)
+        paper, cached_summary = await asyncio.to_thread(_read_paper_and_cache, paper_id, force)
+        if cached_summary is not None:
+            return _summary_response(paper_id, cached_summary["model"], cached_summary, True)
     except HTTPException:
         raise
     except Exception as e:
@@ -104,8 +117,7 @@ async def generate_summary(paper_id: int, force: bool, llm, summarizer) -> dict:
         model = llm.display_name
 
         # Open a fresh short-lived connection just for the write.
-        with db_connection(settings.academic_db) as conn:
-            save_summary(conn, paper_id, model, summary)
+        await asyncio.to_thread(_save_summary_row, paper_id, model, summary)
 
         return _summary_response(paper_id, model, summary, False)
 
@@ -182,6 +194,19 @@ def list_all_summaries(limit: int, offset: int) -> dict:
         raise _http_exc_for(e, "Failed to list summaries")
 
 
+def _select_unsummarized() -> list:
+    """Sync SELECT of indexed papers lacking a summary (run via asyncio.to_thread, #742)."""
+    with db_connection(settings.academic_db) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT p.id, p.file_hash, p.title, p.file_name
+            FROM papers p
+            LEFT JOIN summaries s ON p.id = s.paper_id
+            WHERE s.paper_id IS NULL AND p.status = 'indexed'
+        """)
+        return cursor.fetchall()
+
+
 async def run_summarize_all(job_id: str, summarizer, llm, job_store) -> None:
     """Background task: summarize all indexed papers without a cached summary.
 
@@ -201,15 +226,7 @@ async def run_summarize_all(job_id: str, summarizer, llm, job_store) -> None:
             job.status = "failed"
             job.errors.append("Summarizer not initialized (LLM unavailable at job start)")
             return
-        with db_connection(settings.academic_db) as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT p.id, p.file_hash, p.title, p.file_name
-                FROM papers p
-                LEFT JOIN summaries s ON p.id = s.paper_id
-                WHERE s.paper_id IS NULL AND p.status = 'indexed'
-            """)
-            rows = cursor.fetchall()
+        rows = await asyncio.to_thread(_select_unsummarized)
 
         job.total = len(rows)
 
@@ -222,8 +239,7 @@ async def run_summarize_all(job_id: str, summarizer, llm, job_store) -> None:
             row_file_name = row["file_name"]
             try:
                 summary = await summarizer.summarize(paper_id, file_hash, title=row_title, file_name=row_file_name)
-                with db_connection(settings.academic_db) as conn:
-                    save_summary(conn, paper_id, model, summary)
+                await asyncio.to_thread(_save_summary_row, paper_id, model, summary)
                 job.processed += 1
             except Exception as e:
                 logger.exception("Background summarize failed for paper_id=%s", paper_id)

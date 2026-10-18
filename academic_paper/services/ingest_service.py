@@ -79,7 +79,7 @@ async def stream_upload_to_tmp(file, max_bytes: int) -> str:
                     raise UploadTooLargeError
                 if len(header) < len(_PDF_MAGIC):
                     header += chunk[: len(_PDF_MAGIC) - len(header)]
-                tmp.write(chunk)
+                await asyncio.to_thread(tmp.write, chunk)
         if not header.startswith(_PDF_MAGIC):
             raise NotAPdfError
         return tmp_path
