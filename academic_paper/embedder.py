@@ -4,6 +4,7 @@ import httpx
 
 from academic_paper.config import get_settings
 from academic_paper.http_client import client_or_temporary
+from academic_paper.http_status import is_retryable_status
 from academic_paper.retry import async_with_retry
 
 
@@ -100,7 +101,7 @@ class EmbedderClient:
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            if response.status_code >= 500 or response.status_code == 429:
+            if is_retryable_status(response.status_code):
                 raise _RetryableStatusError(str(exc), request=exc.request, response=exc.response) from exc
             raise
         try:

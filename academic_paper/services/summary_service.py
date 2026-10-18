@@ -192,9 +192,11 @@ async def run_summarize_all(job_id: str, summarizer, llm, job_store) -> None:
     if job is None:
         return
 
-    job.status = "running"
-    await job_store.persist(job)
     try:
+        # running 化の persist も try 内に置く: 失敗しても except/finally で job を
+        # 終端状態にし、実行中扱いのまま 409 が続かないようにする (#642)。
+        job.status = "running"
+        await job_store.persist(job)
         if summarizer is None:
             job.status = "failed"
             job.errors.append("Summarizer not initialized (LLM unavailable at job start)")
@@ -235,4 +237,8 @@ async def run_summarize_all(job_id: str, summarizer, llm, job_store) -> None:
         job.errors.append(_safe_error_message(e))
     finally:
         job.finished_at = time.time()
-        await job_store.persist(job)
+        try:
+            await job_store.persist(job)
+        except Exception:
+            # in-memory の job は既に終端状態。ここで投げても状態は変わらない (#642)。
+            logger.error("Failed to persist final state of job=%s", job_id, exc_info=True)

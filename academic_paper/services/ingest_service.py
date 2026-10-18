@@ -244,10 +244,12 @@ async def run_ingest(
         job = job_store.get(job_id)
         if job is None:
             return
-        job.status = "running"
-        job.total = 1
-        await job_store.persist(job)
         try:
+            # running 化の persist もここで包む: 失敗しても except で paper/job を
+            # 終端状態にし、paper が pending・job が running のまま固着しない (#725)。
+            job.status = "running"
+            job.total = 1
+            await job_store.persist(job)
             chunks = await ingest_pipeline(
                 tmp_path, paper_id, file_hash, file_name, embedder=embedder, vector_store=vector_store
             )
@@ -268,6 +270,10 @@ async def run_ingest(
             job.status = "failed"
         finally:
             job.finished_at = time.time()
-            await job_store.persist(job)
+            try:
+                await job_store.persist(job)
+            except Exception:
+                # in-memory の job は既に終端状態。ここで投げるとタスク例外が未取得で落ちるだけ (#725)。
+                logger.error("Failed to persist final state of job=%s", job_id, exc_info=True)
     finally:
         unlink_quiet(tmp_path)

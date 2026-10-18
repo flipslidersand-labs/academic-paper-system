@@ -4,7 +4,7 @@ Path, status code and OpenAPI are unchanged. require_scope (#627) is applied per
 import server.py. ``/jobs/summarize-all`` is declared before ``/jobs/{job_id}``.
 """
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 
 from academic_paper.auth import Scope, require_scope
 from academic_paper.jobs import job_store
@@ -37,6 +37,14 @@ async def get_job_endpoint(job_id: str):
 
 
 @router.get("/jobs", dependencies=[Depends(require_scope(Scope.READ))])
-def list_jobs_endpoint():
-    """List all background jobs (#190: require auth — exposes all job IDs / paper metadata)."""
-    return {"jobs": [j.to_dict() for j in job_store.list_all()]}
+def list_jobs_endpoint(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """List background jobs, newest first, with pagination (#190 auth, #752 paging).
+
+    Covers in-memory jobs only; finished jobs evicted to SQLite are out of scope (fetch via GET /jobs/{id}).
+    """
+    # reversed() first so jobs with equal started_at keep newest-created first (sorted is stable).
+    jobs = sorted(reversed(job_store.list_all()), key=lambda j: j.started_at, reverse=True)
+    return {"total": len(jobs), "jobs": [j.to_dict() for j in jobs[offset : offset + limit]]}

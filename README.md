@@ -32,7 +32,7 @@ Every endpoint except `GET /health` and the static UI at `/ui` requires the `X-A
 | `POST` | `/papers/{id}/score` | yes | Compute and store the relevance score for one paper |
 | `GET` | `/summaries` | yes | List summaries with paper metadata (`limit`/`offset`) |
 | `POST` | `/jobs/summarize-all` | yes | Start a background job that summarizes papers (**202 + `job_id`**) |
-| `GET` | `/jobs` | yes | List background jobs |
+| `GET` | `/jobs` | yes | List background jobs, newest first (`limit`/`offset`, in-memory jobs only; returns `total` + `jobs`) |
 | `GET` | `/jobs/{id}` | yes | Poll a background job; `done` carries `result.paper_id`/`result.chunks` |
 | `GET` | `/search` | yes | Hybrid search (`mode=hybrid\|vector\|keyword`) |
 | `GET` | `/health` | no | Qdrant / embedding-svc reachability (**503** when degraded) |

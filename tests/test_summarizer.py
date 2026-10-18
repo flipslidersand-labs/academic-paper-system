@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from academic_paper.llm import LLMOutputError
 from academic_paper.summarizer import SYSTEM_PROMPT, RAGSummarizer
 
 
@@ -79,7 +80,7 @@ async def test_summarize_raises_on_invalid_json():
     summarizer = RAGSummarizer(mock_llm, mock_qdrant)
 
     # Should raise ValueError
-    with pytest.raises(ValueError, match="LLM returned invalid JSON"):
+    with pytest.raises(LLMOutputError, match="LLM returned invalid JSON"):
         await summarizer.summarize(paper_id=1, file_hash="abc123")
 
 
@@ -95,7 +96,7 @@ async def test_summarize_raises_valueerror_on_empty_llm_response(empty):
 
     summarizer = RAGSummarizer(mock_llm, mock_qdrant)
 
-    with pytest.raises(ValueError, match="LLM returned empty response"):
+    with pytest.raises(LLMOutputError, match="LLM returned empty response"):
         await summarizer.summarize(paper_id=1, file_hash="abc123")
 
 

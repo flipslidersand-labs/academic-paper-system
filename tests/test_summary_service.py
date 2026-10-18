@@ -1,6 +1,7 @@
 """Unit tests for academic_paper/services/summary_service.py (FastAPI not booted, #618)."""
 
 import asyncio
+import sqlite3
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -184,6 +185,51 @@ def _run_all(db, summarizer, llm):
         return job
 
     return asyncio.run(go())
+
+
+def test_run_all_running_persist_failure_marks_job_failed(_db, llm, summarizer):
+    """running 化 persist が落ちても job は終端状態になる (#642)。"""
+    from academic_paper.jobs import job_store
+    from academic_paper.services.summary_service import run_summarize_all
+
+    job_store._db_path = _db
+
+    async def go():
+        job = await job_store.create(kind="summarize-all")
+        real = job_store.persist
+        calls = {"n": 0}
+
+        async def flaky(j):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise sqlite3.OperationalError("database is locked")
+            await real(j)
+
+        with patch.object(job_store, "persist", flaky):
+            await run_summarize_all(job.id, summarizer, llm, job_store)
+        return job
+
+    job = asyncio.run(go())
+    assert job.status == "failed" and job.finished_at is not None
+    assert job.errors
+    # 固着していなければ新規ジョブを作れる (= POST が 409 にならない)
+    assert asyncio.run(job_store.create_if_not_running(kind="summarize-all")) is not None
+
+
+def test_run_all_final_persist_failure_is_swallowed(_db, llm, summarizer):
+    from academic_paper.jobs import job_store
+    from academic_paper.services.summary_service import run_summarize_all
+
+    job_store._db_path = _db
+
+    async def go():
+        job = await job_store.create(kind="summarize-all")
+        with patch.object(job_store, "persist", AsyncMock(side_effect=sqlite3.OperationalError("locked"))):
+            await run_summarize_all(job.id, summarizer, llm, job_store)
+        return job
+
+    job = asyncio.run(go())
+    assert job.status in ("done", "failed") and job.finished_at is not None
 
 
 def test_run_all_success(_db, llm, summarizer):
