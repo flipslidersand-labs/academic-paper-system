@@ -6,17 +6,11 @@ reaches `done` or `failed`, so collectors count ingested/failed accurately
 without hitting a client-side timeout mid-processing.
 """
 
-import os
 import time
 from typing import BinaryIO
 
 import httpx
-
-
-def _auth_headers() -> dict:
-    """X-API-Key header from PAPER_API_KEY, or {} when auth is not configured (#183)."""
-    api_key = os.environ.get("PAPER_API_KEY", "")
-    return {"X-API-Key": api_key} if api_key else {}
+from cli_utils import auth_headers
 
 
 def submit_and_wait(
@@ -57,7 +51,7 @@ def submit_and_wait(
         f"{api_url}/papers/ingest",
         files={"file": (file_name, pdf_data, "application/pdf")},
         data=metadata,
-        headers=_auth_headers(),
+        headers=auth_headers(),
         timeout=submit_timeout,
     )
     if resp.status_code == 409:
@@ -69,7 +63,7 @@ def submit_and_wait(
     paper_id = body.get("paper_id")
     deadline = time.monotonic() + poll_timeout
     while True:
-        jresp = client.get(f"{api_url}/jobs/{job_id}", headers=_auth_headers(), timeout=submit_timeout)
+        jresp = client.get(f"{api_url}/jobs/{job_id}", headers=auth_headers(), timeout=submit_timeout)
         jresp.raise_for_status()
         job = jresp.json()
         status = job["status"]

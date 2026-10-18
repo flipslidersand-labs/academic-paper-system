@@ -9,19 +9,16 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-
-def _auth_headers() -> dict:
-    """X-API-Key header from PAPER_API_KEY, or {} when auth is not configured (#418).
-
-    Matches scripts/ingest_client.py's _auth_headers() convention.
-    """
-    api_key = os.environ.get("PAPER_API_KEY", "")
-    return {"X-API-Key": api_key} if api_key else {}
-
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from cli_utils import auth_headers  # noqa: E402
+
 from academic_paper.db import arxiv_id_from_file_name  # noqa: E402
+
+# Prebuilt Tailwind CSS (no runtime CDN script, #649). Rebuild when classes in this file change:
+#   npx tailwindcss@3.4.17 -c frontend/tailwind.config.js --content scripts/generate_portfolio.py \
+#     -i frontend/tailwind.input.css -o scripts/portfolio.css --minify
+PORTFOLIO_CSS = (Path(__file__).resolve().parent / "portfolio.css").read_text(encoding="utf-8")
 
 # GITHUB_REPOSITORY is set automatically in Actions runs; the constant fallback
 # covers local/manual runs so this doesn't go stale on the next org move (#434).
@@ -34,7 +31,7 @@ def fetch_all(url: str) -> list:
     limit = 100
     offset = 0
     while True:
-        req = Request(f"{url}&limit={limit}&offset={offset}", headers=_auth_headers())
+        req = Request(f"{url}&limit={limit}&offset={offset}", headers=auth_headers())
         try:
             resp = urlopen(req, timeout=15)
             data = json.loads(resp.read())
@@ -130,8 +127,8 @@ def build_html(papers: list, summaries_by_id: dict, updated: str) -> str:
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Papers — @flipslidersand</title>
-  <script src="https://cdn.tailwindcss.com"></script>
   <style>
+{PORTFOLIO_CSS}
     .line-clamp-3 {{ display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }}
   </style>
 </head>
