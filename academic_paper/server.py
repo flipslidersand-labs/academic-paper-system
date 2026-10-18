@@ -161,7 +161,13 @@ async def lifespan(app: FastAPI):
     await app.state.vector_store.aclose()
 
 
-app = FastAPI(title="Academic Paper System", lifespan=lifespan)
+# /docs, /redoc and /openapi.json are unauthenticated and enumerate every endpoint, so they
+# are off unless ENABLE_DOCS=true is set explicitly (#648).
+def _docs_kwargs(enabled: bool) -> dict[str, None]:
+    return {} if enabled else {"docs_url": None, "redoc_url": None, "openapi_url": None}
+
+
+app = FastAPI(title="Academic Paper System", lifespan=lifespan, **_docs_kwargs(settings.enable_docs))
 
 
 # /metrics is added by Instrumentator.expose() rather than manually registered, so it
