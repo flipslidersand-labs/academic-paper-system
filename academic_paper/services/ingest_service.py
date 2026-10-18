@@ -17,7 +17,7 @@ from academic_paper.chunker import chunk_pages
 from academic_paper.config import settings
 from academic_paper.db import db_connection, delete_paper, save_chunks, save_paper, update_paper_status
 from academic_paper.embedder import EmbedderClient
-from academic_paper.errors import _safe_error_message
+from academic_paper.errors import PdfExtractionError, _safe_error_message
 from academic_paper.extractor import extract_text
 from academic_paper.jobs import JobStore
 from academic_paper.telemetry import get_tracer
@@ -136,6 +136,9 @@ async def ingest_pipeline(
             )
         except asyncio.TimeoutError as exc:
             raise TimeoutError(f"PDF extraction exceeded {settings.pdf_extract_timeout}s timeout (#238)") from exc
+        except Exception as exc:
+            # Corrupt/encrypted PDFs raise pdfminer errors (not ValueError): classify as 400 (#729).
+            raise PdfExtractionError("Failed to extract text from PDF") from exc
     if not pages:
         raise ValueError("No text extracted from PDF")
 
