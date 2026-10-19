@@ -405,9 +405,7 @@ academic-paper-system/
 ├── docker-compose.yml       # コンテナオーケストレーション
 ├── Dockerfile               # コンテナイメージ
 ├── .github/workflows/
-│   ├── ci.yml                # GitHub Actions CI
-│   ├── arxiv-daily.yml       # arXiv 論文の日次自動収集
-│   └── portfolio-publish.yml # ポートフォリオページの自動公開
+│   └── ci.yml                # GitHub Actions CI(定期実行は非公開の ops リポへ移設)
 ├── README.md                # プロジェクト説明
 ├── .env.example             # 環境変数テンプレート
 └── CLAUDE.md               # このファイル

@@ -98,7 +98,7 @@ All collectors accept `--api-url` (default `http://localhost:8020`) and
 for the full option list. When `API_KEY` is set on the server, export the same
 value as `PAPER_API_KEY` for the scripts.
 
-`.github/workflows/arxiv-daily.yml` runs them daily (cron `0 0 * * *`, 09:00 JST)
+the daily collection job (cron `0 0 * * *`, 09:00 JST; see "Scheduled jobs" below) runs them
 on a self-hosted runner that can reach `localhost:8020`, then triggers bulk
 summarization (`POST /jobs/summarize-all`) and scoring (`POST /papers/score-all`).
 
@@ -116,9 +116,8 @@ summarization (`POST /jobs/summarize-all`) and scoring (`POST /papers/score-all`
   python scripts/generate_portfolio.py --api-url http://localhost:8020 --output-dir docs
   ```
 
-  `.github/workflows/portfolio-publish.yml` regenerates and commits `docs/`
-  weekly (Sunday 10:00 JST). It runs `git add docs/`, so every file under `docs/`
-  is committed by that job.
+  The weekly publish job now lives in the private ops repo (see "Scheduled jobs" below);
+  it no longer commits `docs/` here.
 
 ## CI workflows (dependencies & security)
 
@@ -218,3 +217,9 @@ MIT
 - `.github/workflows/license-check.yml` enforces an SPDX-style allow-list with
   `pip-licenses` for both runtime and dev installs; `fpdf2` is the sole listed exception.
   Adding another copyleft package makes the check fail.
+
+## Scheduled jobs
+
+The daily arXiv collection, the weekly portfolio publish and their watchdog run from a private ops repo on a
+self-hosted runner. This public repo has no self-hosted runner and no `runs-on` pointing at one: public CI uses
+GitHub-hosted runners only (repo-compass ADR-010).
