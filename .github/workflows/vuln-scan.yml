@@ -54,7 +54,7 @@ jobs:
   trivy-image:
     # `docker build` needs a docker socket, which linux-general (ARC) lacks —
     # keep ubuntu-latest, same constraint as ci.yml's docker-build job.
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.GATE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
