@@ -489,6 +489,45 @@ def test_health_embedding_svc_auth_failure_degraded(client):
         assert data["embedding_svc"] == "error"
 
 
+def test_search_hybrid_embedding_401_returns_502(client):
+    """Regression (#792): embedding-svc 401 must surface as 502 with a cause, not an opaque 500."""
+    import httpx as _httpx
+
+    req = _httpx.Request("POST", "http://embed.test/embed/batch")
+    resp = _httpx.Response(401, request=req)
+    client.app.state.embedder.embed_single = AsyncMock(
+        side_effect=_httpx.HTTPStatusError("401", request=req, response=resp)
+    )
+    response = client.get("/search", params={"q": "x", "mode": "hybrid"})
+    assert response.status_code == 502
+    assert "authentication" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "status,reason",
+    [(200, "ok"), (401, "unauthorized"), (403, "unauthorized"), (503, "error"), ("connect", "unreachable")],
+)
+def test_health_embedding_svc_reason(client, status, reason):
+    """/health reports embedding_svc_reason: ok / unauthorized / unreachable / error (#793)."""
+    import httpx as _httpx
+
+    client.app.state.vector_store.aping = AsyncMock(return_value=None)
+    client.app.state.embedder = EmbedderClient(base_url="http://embed.test", api_key="secret-k")
+    get = AsyncMock()
+    if status == "connect":
+        get.side_effect = _httpx.ConnectError("refused")
+    else:
+        get.return_value = _mock_embedding_response(status)
+    with patch("academic_paper.server.httpx.AsyncClient") as mock_httpx:
+        mock_httpx.return_value.__aenter__.return_value.get = get
+        response = client.get("/health")
+    data = response.json()
+    assert data["embedding_svc_reason"] == reason
+    assert data["embedding_svc"] == ("ok" if reason == "ok" else "error")
+    assert response.status_code == (200 if reason == "ok" else 503)
+    assert "secret-k" not in response.text
+
+
 def test_stats_qdrant_error(client):
     """Test GET /stats returns qdrant_points=-1 when Qdrant collection is unavailable."""
     client.app.state.vector_store.count_points = MagicMock(side_effect=Exception("Connection failed"))
