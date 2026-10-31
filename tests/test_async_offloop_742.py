@@ -165,6 +165,59 @@ def test_ingest_hash_file_and_register_paper_run_off_loop(temp_db, override_sett
     assert register_tids and loop_tid not in register_tids
 
 
+def test_health_responds_while_db_call_is_blocked(monkeypatch):
+    """#742/#783: a blocked sync DB call must not stall the event loop, so /health still answers.
+
+    Verified by ordering, not elapsed time: the DB stand-in blocks on a threading.Event that is
+    only released *after* /health has returned. If the DB call ran on the loop thread, /health
+    could not be served and the test would hang on the safety timeout (and fail), never flake
+    on a timing threshold. No lifespan is run (as in test_server's `client` fixture), so no real
+    embedder / Qdrant / DB is touched; the API key is a test-only dummy.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    import httpx
+
+    from academic_paper.config import settings
+    from academic_paper.routers import summary as summary_router
+    from academic_paper.server import app
+
+    release = threading.Event()
+    db_entered = threading.Event()
+    events: list[str] = []
+
+    def blocking_get_cached_summary(paper_id):
+        db_entered.set()
+        assert release.wait(timeout=10), "DB stand-in was never released"
+        events.append("db_done")
+        return {"paper_id": paper_id}
+
+    monkeypatch.setattr(summary_router, "get_cached_summary", blocking_get_cached_summary)
+    app.state.vector_store = MagicMock(aping=AsyncMock(return_value=None))
+    app.state.embedder = MagicMock(health=AsyncMock(return_value=None))
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as http:
+            db_task = asyncio.create_task(http.get("/papers/1/summary", headers={"X-API-Key": "test-dummy-key"}))
+            # Wait (without blocking the loop) until the DB stand-in is really inside its blocking call.
+            while not db_entered.is_set():
+                await asyncio.sleep(0.01)
+            health = await asyncio.wait_for(http.get("/health"), timeout=5)
+            events.append("health_done")
+            assert not db_task.done()  # DB call is still blocked when /health has already answered
+            release.set()
+            db_resp = await asyncio.wait_for(db_task, timeout=5)
+            return health, db_resp
+
+    with patch.object(settings, "api_key", "test-dummy-key"), patch.object(settings, "auth_disabled", False):
+        health, db_resp = asyncio.run(run())
+
+    assert health.status_code == 200
+    assert db_resp.status_code == 200
+    assert events == ["health_done", "db_done"]
+
+
 def test_run_summarize_all_db_calls_run_off_loop(temp_db, override_settings, monkeypatch):
     from academic_paper.db import update_paper_status
     from academic_paper.jobs import job_store
