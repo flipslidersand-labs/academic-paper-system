@@ -307,16 +307,17 @@ def test_portfolio_fetch_all_stops_on_empty_batch(monkeypatch):
     assert generate_portfolio.fetch_all("http://api.example/summaries?") == []
 
 
-def test_portfolio_fetch_all_returns_partial_results_on_url_error(monkeypatch, capsys):
+def test_portfolio_fetch_all_exits_1_on_url_error(monkeypatch, capsys):
     def _raise(req, timeout=15):
         raise URLError("connection refused")
 
     monkeypatch.setattr(generate_portfolio, "urlopen", _raise)
 
-    items = generate_portfolio.fetch_all("http://api.example/papers?sort=score")
+    with pytest.raises(SystemExit) as exc:
+        generate_portfolio.fetch_all("http://api.example/papers?sort=score")
 
-    assert items == []
-    assert "[warn] fetch failed" in capsys.readouterr().err
+    assert exc.value.code == 1
+    assert "fetch failed" in capsys.readouterr().err
 
 
 def test_portfolio_fetch_all_sends_x_api_key_when_env_set(monkeypatch):
