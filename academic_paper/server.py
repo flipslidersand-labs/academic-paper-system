@@ -279,7 +279,7 @@ async def search(
 @app.get("/health")
 async def health():
     """Qdrant / embedding-svc 疎通チェック。全アップストリーム障害時は HTTP 503 を返す (#195)。"""
-    status = {"qdrant": "ok", "embedding_svc": "ok"}
+    status = {"qdrant": "ok", "embedding_svc": "ok", "embedding_svc_reason": "ok"}
     overall = "ok"
 
     try:
@@ -290,8 +290,15 @@ async def health():
 
     try:
         await app.state.embedder.health()
-    except Exception:
+    except Exception as exc:
         status["embedding_svc"] = "error"
+        # Distinguish a rejected key (hybrid/ingest dead) from an unreachable host (#793).
+        if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (401, 403):
+            status["embedding_svc_reason"] = "unauthorized"
+        elif isinstance(exc, httpx.TransportError):
+            status["embedding_svc_reason"] = "unreachable"
+        else:
+            status["embedding_svc_reason"] = "error"
         overall = "degraded"
 
     http_status = 503 if overall == "degraded" else 200

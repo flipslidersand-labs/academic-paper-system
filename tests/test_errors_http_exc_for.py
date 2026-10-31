@@ -91,3 +91,13 @@ def test_llm_output_error_is_upstream_failure_not_client_error():
     assert _http_exc_for(ValueError("x"), "fb").status_code == 400
     # job/score error text is the classified detail, not the bare class name
     assert _safe_error_message(LLMOutputError("secret http://internal")) == "LLM returned an invalid response"
+
+
+@pytest.mark.parametrize("code", [401, 403])
+def test_embedding_svc_auth_rejection_maps_to_502(code):
+    """embedding-svc 401/403 (key rejected) -> 502 with a cause, not an opaque 500 (#792)."""
+    exc = httpx.HTTPStatusError("denied", request=_REQ, response=httpx.Response(code, request=_REQ))
+    http_exc = _http_exc_for(exc, "fb")
+    assert http_exc.status_code == 502
+    assert "authentication" in http_exc.detail
+    assert "EMBEDDING_API_KEY" in http_exc.detail
