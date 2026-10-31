@@ -30,6 +30,12 @@ def _http_exc_for(exc: Exception, fallback_msg: str) -> HTTPException:
     - ValueError from input validation (no text, no chunks) → 400
     - Everything else → 500 with opaque error-id (details go to logger only)
     """
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (401, 403):
+        # embedding-svc rejected our API key (#792): a config problem the operator must fix,
+        # not an unclassified 500. The key value is never included.
+        return HTTPException(
+            status_code=502, detail="Embedding service rejected authentication (check EMBEDDING_API_KEY)"
+        )
     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
         return HTTPException(status_code=503, detail="Upstream service unavailable")
     if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)):
