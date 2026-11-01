@@ -178,7 +178,7 @@ def test_health_responds_while_db_call_is_blocked(monkeypatch):
 
     import httpx
 
-    from academic_paper.config import settings
+    from academic_paper.config import get_settings
     from academic_paper.routers import summary as summary_router
     from academic_paper.server import app
 
@@ -210,7 +210,10 @@ def test_health_responds_while_db_call_is_blocked(monkeypatch):
             db_resp = await asyncio.wait_for(db_task, timeout=5)
             return health, db_resp
 
-    with patch.object(settings, "api_key", "test-dummy-key"), patch.object(settings, "auth_disabled", False):
+    with (
+        patch.object(get_settings(), "api_key", "test-dummy-key"),
+        patch.object(get_settings(), "auth_disabled", False),
+    ):
         health, db_resp = asyncio.run(run())
 
     assert health.status_code == 200
