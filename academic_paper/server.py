@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from academic_paper.auth import Scope, require_scope, verify_api_key  # noqa: F401  (verify_api_key re-exported, #617)
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.db import (
     count_rows,
     db_connection,
@@ -66,7 +66,7 @@ async def _probe_startup_health(app: FastAPI) -> None:
     except Exception:
         logger.warning(
             "Startup probe: Qdrant unreachable at %s — ingest/search will fail until available",
-            settings.qdrant_url,
+            get_settings().qdrant_url,
         )
 
     try:
@@ -90,11 +90,11 @@ async def _cleanup_orphaned_ingests(app: FastAPI) -> None:
     try:
 
         def _list_stuck() -> list:
-            with db_connection(settings.academic_db) as conn:
+            with db_connection(get_settings().academic_db) as conn:
                 return list_paper_ids_by_status(conn, "pending")
 
         def _mark_failed(pid: int) -> None:
-            with db_connection(settings.academic_db) as conn:
+            with db_connection(get_settings().academic_db) as conn:
                 update_paper_status(conn, pid, "failed")
 
         stuck_ids = await asyncio.to_thread(_list_stuck)
@@ -114,29 +114,30 @@ async def _cleanup_orphaned_ingests(app: FastAPI) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize database and services on startup."""
-    configure_logging(level=settings.log_level, fmt=settings.log_format)
+    s = get_settings()
+    configure_logging(level=s.log_level, fmt=s.log_format)
     # Fail closed: no API key configured and auth not explicitly disabled (#646).
-    if not settings.auth_enabled and not settings.auth_disabled:
+    if not s.auth_enabled and not s.auth_disabled:
         raise RuntimeError(
             "API_KEY / API_KEYS is not set. Refusing to start with unauthenticated endpoints; "
             "set API_KEY (or API_KEYS), or set AUTH_DISABLED=true to run without authentication explicitly (#646)."
         )
-    setup_telemetry(app, settings.otel_endpoint)
-    init_db(settings.academic_db)
-    await job_store.init(settings.academic_db)
+    setup_telemetry(app, s.otel_endpoint)
+    init_db(s.academic_db)
+    await job_store.init(s.academic_db)
     # Separate clients: embedding batches can take 60–120 s for large PDFs
     # (EMBEDDING_TIMEOUT); Qdrant calls are fast point operations (QDRANT_TIMEOUT).
     # Using qdrant_timeout for both caused ReadTimeout on big ingest batches (#153).
-    embed_client = httpx.AsyncClient(timeout=settings.embedding_timeout)
+    embed_client = httpx.AsyncClient(timeout=s.embedding_timeout)
     app.state.embedder = EmbedderClient(client=embed_client)
     app.state.vector_store = QdrantStore()
     # Ollama gets a lifespan-managed persistent AsyncClient so TCP connections are
     # reused across summarize-all iterations (#192). The client is injected (not
     # owned by the LLM client), so this lifespan closes it.
     ollama_http_client: httpx.AsyncClient | None = None
-    provider = settings.llm_provider
-    if provider == "ollama" or (provider == "auto" and not settings.google_api_key and settings.ollama_url):
-        ollama_http_client = httpx.AsyncClient(timeout=settings.ollama_timeout)
+    provider = s.llm_provider
+    if provider == "ollama" or (provider == "auto" and not s.google_api_key and s.ollama_url):
+        ollama_http_client = httpx.AsyncClient(timeout=s.ollama_timeout)
     llm_client = get_llm_client(http_client=ollama_http_client)
     app.state.llm = llm_client
     if llm_client is not None:
@@ -149,7 +150,7 @@ async def lifespan(app: FastAPI):
     # (documented asyncio pitfall), and cancel it on shutdown.
     app.state.probe_task = asyncio.create_task(_probe_startup_health(app))
     await _cleanup_orphaned_ingests(app)
-    if not settings.auth_enabled:
+    if not s.auth_enabled:
         logger.warning("AUTH_DISABLED=true — all endpoints (including write endpoints) are unauthenticated (#241)")
     yield
     # Graceful shutdown: wait up to 30 s for in-flight ingest tasks (#194).
@@ -177,7 +178,7 @@ def _docs_kwargs(enabled: bool) -> dict[str, None]:
     return {} if enabled else {"docs_url": None, "redoc_url": None, "openapi_url": None}
 
 
-app = FastAPI(title="Academic Paper System", lifespan=lifespan, **_docs_kwargs(settings.enable_docs))
+app = FastAPI(title="Academic Paper System", lifespan=lifespan, **_docs_kwargs(get_settings().enable_docs))
 
 
 # /metrics is added by Instrumentator.expose() rather than manually registered, so it
@@ -258,7 +259,7 @@ async def search(
     context length by ~68% while maintaining Recall@5.
     """
     try:
-        with db_connection(settings.academic_db) as conn:
+        with db_connection(get_settings().academic_db) as conn:
             return await run_search(
                 conn,
                 app.state.embedder,
@@ -309,7 +310,7 @@ async def health():
 def stats():
     """DB統計情報"""
     try:
-        with db_connection(settings.academic_db) as conn:
+        with db_connection(get_settings().academic_db) as conn:
             counts = count_rows(conn)
             try:
                 qdrant_points = app.state.vector_store.count_points()
