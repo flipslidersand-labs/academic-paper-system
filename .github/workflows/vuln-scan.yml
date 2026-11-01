@@ -3,11 +3,12 @@ name: Vulnerability Scan
 # #350: dependency CVE scan (pip-audit) + Docker image scan (Trivy).
 # Separate workflow (not ci.yml) so it doesn't collide with concurrent ci.yml edits.
 #
-# Mode: WARN-ONLY by default. The existing tree already has known findings
-# (pip-audit: urllib3 2.7.0 x3; Trivy HIGH: 7 Debian pkgs + urllib3 x2), so a
-# blocking gate would turn every PR red on day one. Flip to blocking without a
-# code change by setting the repo/org variable VULN_SCAN_ENFORCE=true once the
-# baseline is cleaned up (e.g. after the weekly lock update lands urllib3>=2.8.0).
+# Mode: WARN-ONLY until VULN_SCAN_ENFORCE=true is set (repo/org variable; no code change).
+# Baseline as of 2026-11-01: pip-audit 0 findings (#798), Trivy 0 fixable CRITICAL/HIGH
+# (#799), so enforcing no longer turns every PR red. To enforce (#733): set the variable,
+# then add pip-audit / trivy-image to the required checks of the main ruleset (#427).
+# New findings after that fail the job; a CVE with no fix yet is skipped by
+# --ignore-unfixed, and an accepted fixable one goes in .trivyignore with a dated reason.
 
 on:
   push:
