@@ -12,7 +12,7 @@ import time
 
 from fastapi import HTTPException
 
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.db import (
     db_connection,
     get_all_papers_for_scoring,
@@ -48,7 +48,7 @@ def get_cached_summary(paper_id: int) -> dict:
     writes. Generation lives in generate_summary().
     """
     try:
-        with db_connection(settings.academic_db) as conn:
+        with db_connection(get_settings().academic_db) as conn:
             paper = get_paper(conn, paper_id)
             if paper is None:
                 raise HTTPException(status_code=404, detail="Paper not found")
@@ -73,7 +73,7 @@ def _read_paper_and_cache(paper_id: int, force: bool) -> tuple[dict, dict | None
     Opens its own short-lived connection inside the worker thread. Raises 404
     when the paper is missing; returns (paper, cached_summary_or_None).
     """
-    with db_connection(settings.academic_db) as conn:
+    with db_connection(get_settings().academic_db) as conn:
         paper = get_paper(conn, paper_id)
         if paper is None:
             raise HTTPException(status_code=404, detail="Paper not found")
@@ -82,7 +82,7 @@ def _read_paper_and_cache(paper_id: int, force: bool) -> tuple[dict, dict | None
 
 
 def _save_summary_row(paper_id: int, model: str, summary: dict) -> None:
-    with db_connection(settings.academic_db) as conn:
+    with db_connection(get_settings().academic_db) as conn:
         save_summary(conn, paper_id, model, summary)
 
 
@@ -133,9 +133,9 @@ def score_all() -> dict:
     abort the whole run — it is counted in `failed`/`errors` and the loop moves
     on to the next paper (#276).
     """
-    preferred = settings.preferred_categories_list
+    preferred = get_settings().preferred_categories_list
     try:
-        with db_connection(settings.academic_db) as conn:
+        with db_connection(get_settings().academic_db) as conn:
             papers = get_all_papers_for_scoring(conn)
             scored = 0
             failed = 0
@@ -166,11 +166,11 @@ def score_all() -> dict:
 def score_one(paper_id: int) -> dict:
     """Compute and store relevance score for a single paper (POST /papers/{id}/score)."""
     try:
-        with db_connection(settings.academic_db) as conn:
+        with db_connection(get_settings().academic_db) as conn:
             paper = get_paper(conn, paper_id)
             if paper is None:
                 raise HTTPException(status_code=404, detail="Paper not found")
-            preferred = settings.preferred_categories_list
+            preferred = get_settings().preferred_categories_list
             score = compute_score(paper, preferred)
             update_paper_score(conn, paper_id, score)
         return {"paper_id": paper_id, "score": score}
@@ -184,7 +184,7 @@ def score_one(paper_id: int) -> dict:
 def list_all_summaries(limit: int, offset: int) -> dict:
     """List all paper summaries with associated paper metadata (GET /summaries)."""
     try:
-        with db_connection(settings.academic_db) as conn:
+        with db_connection(get_settings().academic_db) as conn:
             total, summaries = list_summaries(conn, limit=limit, offset=offset)
         return {"total": total, "summaries": summaries}
     except HTTPException:
@@ -196,7 +196,7 @@ def list_all_summaries(limit: int, offset: int) -> dict:
 
 def _select_unsummarized() -> list:
     """Sync SELECT of indexed papers lacking a summary (run via asyncio.to_thread, #742)."""
-    with db_connection(settings.academic_db) as conn:
+    with db_connection(get_settings().academic_db) as conn:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT p.id, p.file_hash, p.title, p.file_name

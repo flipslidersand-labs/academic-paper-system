@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable
 
 from academic_paper.chunker import chunk_pages
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.db import (
     db_connection,
     delete_paper,
@@ -107,7 +107,7 @@ def register_paper(file_name: str, file_hash: str, metadata_factory: Callable[[]
     a killed server are turned 'failed' at startup. ``metadata_factory`` is called
     only after the duplicate check so metadata validation errors keep their order.
     """
-    with db_connection(settings.academic_db) as conn:
+    with db_connection(get_settings().academic_db) as conn:
         existing = get_paper_by_hash(conn, file_hash)
         if existing:
             if existing["status"] in ("indexed", "pending"):
@@ -137,17 +137,17 @@ async def ingest_pipeline(
         # huge PDF can otherwise hang the job forever (#238); bound the wait here.
         try:
             pages = await asyncio.wait_for(
-                asyncio.to_thread(extract_text, tmp_path), timeout=settings.pdf_extract_timeout
+                asyncio.to_thread(extract_text, tmp_path), timeout=get_settings().pdf_extract_timeout
             )
         except asyncio.TimeoutError as exc:
-            raise TimeoutError(f"PDF extraction exceeded {settings.pdf_extract_timeout}s timeout (#238)") from exc
+            raise TimeoutError(f"PDF extraction exceeded {get_settings().pdf_extract_timeout}s timeout (#238)") from exc
         except Exception as exc:
             # Corrupt/encrypted PDFs raise pdfminer errors (not ValueError): classify as 400 (#729).
             raise PdfExtractionError("Failed to extract text from PDF") from exc
     if not pages:
         raise ValueError("No text extracted from PDF")
 
-    chunks_list = chunk_pages(pages, chunk_size=settings.chunk_size, overlap=settings.chunk_overlap)
+    chunks_list = chunk_pages(pages, chunk_size=get_settings().chunk_size, overlap=get_settings().chunk_overlap)
     if not chunks_list:
         raise ValueError("No chunks generated")
 
@@ -178,7 +178,7 @@ async def ingest_pipeline(
         await vector_store.aupsert(points)
 
     try:
-        with db_connection(settings.academic_db) as conn:
+        with db_connection(get_settings().academic_db) as conn:
             save_chunks(conn, paper_id, chunks_list)
             update_paper_status(conn, paper_id, "indexed")
     except Exception:
@@ -217,7 +217,7 @@ async def mark_paper_failed(paper_id: int) -> None:
     try:
 
         def _update() -> None:
-            with db_connection(settings.academic_db) as conn:
+            with db_connection(get_settings().academic_db) as conn:
                 update_paper_status(conn, paper_id, "failed")
 
         await asyncio.to_thread(_update)
