@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import JSONResponse
 
 from academic_paper.auth import Scope, require_scope
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.db import db_connection, get_paper, list_papers_filtered
 from academic_paper.errors import _http_exc_for
 from academic_paper.extractor import hash_file
@@ -61,11 +61,11 @@ async def ingest_paper(
     keep_tmp = False
     try:
         _validate_published_date(published_date)
-        max_bytes = settings.max_upload_mb * 1024 * 1024
+        max_bytes = get_settings().max_upload_mb * 1024 * 1024
         try:
             tmp_path = await ingest_service.stream_upload_to_tmp(file, max_bytes)
         except ingest_service.UploadTooLargeError:
-            raise HTTPException(status_code=413, detail=f"File too large (max {settings.max_upload_mb} MB)")
+            raise HTTPException(status_code=413, detail=f"File too large (max {get_settings().max_upload_mb} MB)")
         except ingest_service.NotAPdfError:
             raise HTTPException(status_code=415, detail="Not a PDF file (missing %PDF- header)")
 
@@ -158,7 +158,7 @@ def list_papers_endpoint(
 ):
     """List papers with pagination, optional filters, and sort."""
     try:
-        with db_connection(settings.academic_db) as conn:
+        with db_connection(get_settings().academic_db) as conn:
             total, papers = list_papers_filtered(
                 conn, limit=limit, offset=offset, author=author, category=category, sort=sort
             )
@@ -174,7 +174,7 @@ def list_papers_endpoint(
 def get_paper_endpoint(paper_id: int):
     """Get paper details by ID."""
     try:
-        with db_connection(settings.academic_db) as conn:
+        with db_connection(get_settings().academic_db) as conn:
             paper = get_paper(conn, paper_id)
         if paper is None:
             raise HTTPException(status_code=404, detail="Paper not found")
