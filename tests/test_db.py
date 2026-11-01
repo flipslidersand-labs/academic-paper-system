@@ -447,3 +447,56 @@ def test_count_rows(temp_db):
         [{"chunk_index": 0, "page_start": 1, "page_end": 1, "text": "x", "token_count": 1, "qdrant_id": "q0"}],
     )
     assert count_rows(conn) == {"papers": 1, "chunks": 1}
+
+
+# --- migrations decide from PRAGMA table_info, not from error text (#679) -------------
+
+
+def test_migrate_add_columns_never_alters_when_columns_exist():
+    """Present columns are skipped up front; the 'duplicate column' message is no longer relied on."""
+
+    class FakeCursor:
+        def __init__(self):
+            self.alters = []
+
+        def execute(self, sql):
+            if sql.startswith("PRAGMA table_info"):
+                return [(0, "id"), (1, "name")]  # (cid, name, ...) rows
+            self.alters.append(sql)
+            raise AssertionError("ALTER must not run for an existing column")
+
+    cur = FakeCursor()
+    _migrate_add_columns(cur, "t", [("name", "TEXT")])
+    assert cur.alters == []
+
+
+def test_migrate_add_columns_adds_only_the_missing_ones(temp_db):
+    conn = get_connection(temp_db)
+    conn.execute("CREATE TABLE t2 (id INTEGER PRIMARY KEY, a TEXT)")
+    _migrate_add_columns(conn.cursor(), "t2", [("a", "TEXT"), ("b", "TEXT"), ("c", "TEXT DEFAULT 'x'")])
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(t2)")]
+    conn.close()
+    assert cols == ["id", "a", "b", "c"]
+
+
+def test_init_db_upgrades_legacy_papers_table_and_keeps_rows(tmp_path):
+    """A papers table from before the metadata columns gains them without losing data; reruns are no-ops."""
+    path = str(tmp_path / "legacy_papers.db")
+    conn = get_connection(path)
+    conn.execute(
+        "CREATE TABLE papers (id INTEGER PRIMARY KEY AUTOINCREMENT, file_name TEXT NOT NULL, "
+        "file_hash TEXT NOT NULL UNIQUE, status TEXT NOT NULL DEFAULT 'pending')"
+    )
+    conn.execute("INSERT INTO papers (file_name, file_hash) VALUES ('old.pdf', 'h-old')")
+    conn.commit()
+    conn.close()
+
+    init_db(path)
+    init_db(path)  # idempotent
+
+    conn = get_connection(path)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(papers)")}
+    row = conn.execute("SELECT file_name, categories, published_date FROM papers WHERE file_hash='h-old'").fetchone()
+    conn.close()
+    assert {"categories", "published_date"} <= cols
+    assert (row["file_name"], row["categories"], row["published_date"]) == ("old.pdf", None, None)

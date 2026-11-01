@@ -182,13 +182,15 @@ def arxiv_id_from_file_name(file_name: str) -> str | None:
 
 
 def _migrate_add_columns(cursor: sqlite3.Cursor, table: str, columns: list[tuple[str, str]]) -> None:
-    """Add columns to a table if they don't already exist."""
+    """Add columns to a table if they don't already exist.
+
+    Existence is read from ``PRAGMA table_info`` rather than inferred from SQLite's
+    "duplicate column" error text, so a real ALTER failure always surfaces (#679).
+    """
+    existing = {row[1] for row in cursor.execute(f"PRAGMA table_info({table})")}  # noqa: S608
     for col_name, col_def in columns:
-        try:
+        if col_name not in existing:
             cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_def}")
-        except sqlite3.OperationalError as e:
-            if "duplicate column" not in str(e):
-                raise  # not a "column already exists" error — surface real failures
 
 
 @_rollback_on_error
