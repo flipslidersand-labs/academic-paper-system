@@ -272,19 +272,18 @@ async def search(
     context length by ~68% while maintaining Recall@5.
     """
     with mapped_errors("Search failed: check query and try again", "Search error for query=%r mode=%s", q, mode):
-        with db_connection(get_settings().academic_db) as conn:
-            return await run_search(
-                conn,
-                app.state.embedder,
-                app.state.vector_store,
-                q=q,
-                mode=mode,
-                limit=limit,
-                paper_id=paper_id,
-                snippet_length=snippet_length,
-                nuggets_per_chunk=nuggets_per_chunk,
-                nugget_embed_weight=nugget_embed_weight,
-            )
+        return await run_search(
+            get_settings().academic_db,
+            app.state.embedder,
+            app.state.vector_store,
+            q=q,
+            mode=mode,
+            limit=limit,
+            paper_id=paper_id,
+            snippet_length=snippet_length,
+            nuggets_per_chunk=nuggets_per_chunk,
+            nugget_embed_weight=nugget_embed_weight,
+        )
 
 
 @app.get("/health")

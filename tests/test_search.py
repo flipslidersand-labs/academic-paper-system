@@ -62,7 +62,7 @@ def test_search_returns_results(client):
     client.app.state.vector_store.asearch = AsyncMock(return_value=mock_search_results)
 
     # Mock database query for page_start
-    with patch("academic_paper.server.db_connection") as mock_get_conn:
+    with patch("academic_paper.services.search_service.db_connection") as mock_get_conn:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.__enter__.return_value = mock_conn
@@ -106,7 +106,7 @@ def test_search_vector_mode(client):
     ]
     client.app.state.vector_store.asearch = AsyncMock(return_value=mock_search_results)
 
-    with patch("academic_paper.server.db_connection") as mock_get_conn:
+    with patch("academic_paper.services.search_service.db_connection") as mock_get_conn:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.__enter__.return_value = mock_conn
@@ -137,7 +137,7 @@ def test_search_vector_mode_skips_orphan_payload_instead_of_500(client):
     ]
     client.app.state.vector_store.asearch = AsyncMock(return_value=mock_search_results)
 
-    with patch("academic_paper.server.db_connection") as mock_get_conn:
+    with patch("academic_paper.services.search_service.db_connection") as mock_get_conn:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.__enter__.return_value = mock_conn
@@ -178,7 +178,7 @@ def test_search_with_paper_id_filter(client):
     ]
     client.app.state.vector_store.asearch = AsyncMock(return_value=mock_search_results)
 
-    with patch("academic_paper.server.db_connection") as mock_get_conn:
+    with patch("academic_paper.services.search_service.db_connection") as mock_get_conn:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.__enter__.return_value = mock_conn
@@ -239,7 +239,7 @@ def test_search_hybrid_mode(client):
 
     with (
         patch("academic_paper.services.search_service.search_fts") as mock_search_fts,
-        patch("academic_paper.server.db_connection") as mock_get_conn,
+        patch("academic_paper.services.search_service.db_connection") as mock_get_conn,
     ):
         mock_search_fts.return_value = mock_fts_results
 
@@ -281,7 +281,7 @@ def test_search_keyword_mode(client):
 
     with (
         patch("academic_paper.services.search_service.search_fts") as mock_search_fts,
-        patch("academic_paper.server.db_connection") as mock_get_conn,
+        patch("academic_paper.services.search_service.db_connection") as mock_get_conn,
     ):
         mock_search_fts.return_value = mock_fts_results
 
@@ -339,7 +339,7 @@ def test_search_nugget_mode_returns_results(client):
 
     with (
         patch("academic_paper.services.search_service.search_fts") as mock_search_fts,
-        patch("academic_paper.server.db_connection") as mock_get_conn,
+        patch("academic_paper.services.search_service.db_connection") as mock_get_conn,
     ):
         mock_search_fts.return_value = mock_fts_results
 
@@ -393,7 +393,7 @@ def test_search_nugget_mode_calls_embed_single_and_embed(client):
 
     with (
         patch("academic_paper.services.search_service.search_fts") as mock_search_fts,
-        patch("academic_paper.server.db_connection") as mock_get_conn,
+        patch("academic_paper.services.search_service.db_connection") as mock_get_conn,
     ):
         mock_search_fts.return_value = mock_fts_results
 
@@ -444,7 +444,7 @@ def test_search_nugget_mode_embed_weight_zero_skips_batch_embed(client):
 
     with (
         patch("academic_paper.services.search_service.search_fts") as mock_search_fts,
-        patch("academic_paper.server.db_connection") as mock_get_conn,
+        patch("academic_paper.services.search_service.db_connection") as mock_get_conn,
     ):
         mock_search_fts.return_value = mock_fts_results
 
@@ -493,7 +493,7 @@ def test_search_hybrid_nugget_tolerate_none_payload_and_orphan_points(client, mo
 
     with (
         patch("academic_paper.services.search_service.search_fts") as mock_search_fts,
-        patch("academic_paper.server.db_connection") as mock_get_conn,
+        patch("academic_paper.services.search_service.db_connection") as mock_get_conn,
         caplog.at_level("WARNING"),
     ):
         mock_search_fts.return_value = mock_fts_results

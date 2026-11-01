@@ -6,11 +6,12 @@ This module holds the actual retrieval logic so it's testable without booting
 the FastAPI app.
 """
 
+import asyncio
 import logging
 import sqlite3
 from typing import Literal, get_args
 
-from academic_paper.db import search_fts
+from academic_paper.db import db_connection, search_fts
 from academic_paper.embedder import EmbedderClient
 from academic_paper.hybrid import rrf_merge
 from academic_paper.nugget import extract_nuggets, split_sentences
@@ -23,6 +24,45 @@ tracer = get_tracer()
 SearchMode = Literal["vector", "keyword", "hybrid", "nugget"]
 # Single source of truth for the accepted modes; server.py builds its Query pattern from this (#677).
 SEARCH_MODES: tuple[str, ...] = get_args(SearchMode)
+
+
+async def _read_db(db_path: str, fn, *args):
+    """Run ``fn(conn, *args)`` on a worker thread with its own short-lived connection (#678).
+
+    sqlite3 calls are blocking (up to busy_timeout on lock contention); running them on the
+    event loop would stall every request. A connection must not cross threads, so each read
+    opens and closes its own inside the worker.
+    """
+
+    def _run():
+        with db_connection(db_path) as conn:
+            return fn(conn, *args)
+
+    return await asyncio.to_thread(_run)
+
+
+def _page_map(conn: sqlite3.Connection, ids: list, id_column: str) -> dict:
+    meta = _fetch_chunk_meta(conn.cursor(), ids, id_column, f"{id_column}, page_start")
+    return {k: v["page_start"] for k, v in meta.items()}
+
+
+def _resolve_vector_chunk_ids(conn: sqlite3.Connection, vector_results: list, mode: str) -> list:
+    """Attach each Qdrant point's chunk_id (looked up in `chunks`); orphan points are dropped (#145).
+
+    Returns new dicts; the input results are not modified.
+    """
+    vec_qids = [v["id"] for v in vector_results]
+    qid_to_cid = {
+        k: v["id"] for k, v in _fetch_chunk_meta(conn.cursor(), vec_qids, "qdrant_id", "id, qdrant_id").items()
+    }
+    resolved = []
+    for vec_result in vector_results:
+        chunk_id = qid_to_cid.get(vec_result["id"])
+        if chunk_id is None:
+            logger.warning("search mode=%s: skipping orphan point %s (no chunks row)", mode, vec_result["id"])
+            continue
+        resolved.append({**vec_result, "payload": {**(vec_result.get("payload") or {}), "chunk_id": chunk_id}})
+    return resolved
 
 
 def _make_snippet(text: str, snippet_length: int) -> str:
@@ -63,8 +103,8 @@ def _fetch_chunk_meta(
     return {row[id_column]: row for row in rows}
 
 
-def _search_keyword(conn: sqlite3.Connection, *, q: str, limit: int, paper_id: int | None, snippet_length: int) -> list:
-    fts_results = search_fts(conn, query=q, limit=limit, paper_id=paper_id)
+async def _search_keyword(db_path: str, *, q: str, limit: int, paper_id: int | None, snippet_length: int) -> list:
+    fts_results = await _read_db(db_path, lambda conn: search_fts(conn, query=q, limit=limit, paper_id=paper_id))
     return [
         _result_row(
             rank=rank,
@@ -79,7 +119,7 @@ def _search_keyword(conn: sqlite3.Connection, *, q: str, limit: int, paper_id: i
 
 
 async def _search_vector(
-    conn: sqlite3.Connection,
+    db_path: str,
     embedder: EmbedderClient,
     vector_store: QdrantStore,
     *,
@@ -92,8 +132,7 @@ async def _search_vector(
         query_vector = await embedder.embed_single(q, mode="search")
     search_results = await vector_store.asearch(query_vector=query_vector, limit=limit, paper_id_filter=paper_id)
     vec_qids = [r["id"] for r in search_results]
-    vec_meta = _fetch_chunk_meta(conn.cursor(), vec_qids, "qdrant_id", "qdrant_id, page_start")
-    vec_page_map = {k: v["page_start"] for k, v in vec_meta.items()}
+    vec_page_map = await _read_db(db_path, _page_map, vec_qids, "qdrant_id")
     results = []
     for result in search_results:
         qdrant_id = result["id"]
@@ -137,7 +176,7 @@ async def _embed_nugget_sentences(embedder: EmbedderClient, merged_slice: list) 
 
 
 async def _search_hybrid(
-    conn: sqlite3.Connection,
+    db_path: str,
     embedder: EmbedderClient,
     vector_store: QdrantStore,
     *,
@@ -150,31 +189,18 @@ async def _search_hybrid(
     nugget_embed_weight: float,
 ) -> list:
     """hybrid and nugget share retrieval (FTS + vector, RRF); they differ only in the snippet."""
-    cursor = conn.cursor()
-    fts_results = search_fts(conn, query=q, limit=limit, paper_id=paper_id)
+    fts_results = await _read_db(db_path, lambda conn: search_fts(conn, query=q, limit=limit, paper_id=paper_id))
     with tracer.start_as_current_span("embed.query"):
         query_vector = await embedder.embed_single(q, mode="search")
     vector_results = await vector_store.asearch(query_vector=query_vector, limit=limit, paper_id_filter=paper_id)
 
-    # Ingest never stores chunk_id in the Qdrant payload, so resolve every point's
-    # chunk_id from the chunks table. Points with no chunks row (partial ingest, #145)
-    # are orphans and are dropped here, in one place.
-    vec_qids = [v["id"] for v in vector_results]
-    qid_to_cid = {k: v["id"] for k, v in _fetch_chunk_meta(cursor, vec_qids, "qdrant_id", "id, qdrant_id").items()}
-    resolved_vector_results = []
-    for vec_result in vector_results:
-        chunk_id = qid_to_cid.get(vec_result["id"])
-        if chunk_id is None:
-            logger.warning("search mode=%s: skipping orphan point %s (no chunks row)", mode, vec_result["id"])
-            continue
-        resolved_vector_results.append(
-            {**vec_result, "payload": {**(vec_result.get("payload") or {}), "chunk_id": chunk_id}}
-        )
+    # Ingest never stores chunk_id in the Qdrant payload, so resolve every point's chunk_id
+    # from the chunks table. Orphan points (no chunks row) are dropped in one place.
+    resolved_vector_results = await _read_db(db_path, _resolve_vector_chunk_ids, vector_results, mode)
 
     merged_slice = rrf_merge(fts_results, resolved_vector_results)[:limit]
     merged_ids = [r["chunk_id"] for r in merged_slice]
-    merged_meta = _fetch_chunk_meta(cursor, merged_ids, "id", "id, page_start")
-    merged_page_map = {k: v["page_start"] for k, v in merged_meta.items()}
+    merged_page_map = await _read_db(db_path, _page_map, merged_ids, "id")
     if mode == "nugget" and nugget_embed_weight > 0.0:
         nugget_vecs = await _embed_nugget_sentences(embedder, merged_slice)
     else:
@@ -207,7 +233,7 @@ async def _search_hybrid(
 
 
 async def run_search(
-    conn: sqlite3.Connection,
+    db_path: str,
     embedder: EmbedderClient,
     vector_store: QdrantStore,
     *,
@@ -221,19 +247,19 @@ async def run_search(
 ) -> dict:
     """Run one of vector/keyword/hybrid/nugget search and return the /search response body.
 
-    Raises ValueError for an unknown mode (the endpoint validates it first); otherwise
+    Reads the SQLite database at ``db_path`` on worker threads (#678). Raises ValueError for an unknown mode (the endpoint validates it first); otherwise
     whatever the underlying DB/embedder/vector_store calls raise. The caller (server.py's
     search() handler) is responsible for turning that into an HTTP response.
     """
     if mode == "keyword":
-        results = _search_keyword(conn, q=q, limit=limit, paper_id=paper_id, snippet_length=snippet_length)
+        results = await _search_keyword(db_path, q=q, limit=limit, paper_id=paper_id, snippet_length=snippet_length)
     elif mode == "vector":
         results = await _search_vector(
-            conn, embedder, vector_store, q=q, limit=limit, paper_id=paper_id, snippet_length=snippet_length
+            db_path, embedder, vector_store, q=q, limit=limit, paper_id=paper_id, snippet_length=snippet_length
         )
     elif mode in ("hybrid", "nugget"):
         results = await _search_hybrid(
-            conn,
+            db_path,
             embedder,
             vector_store,
             q=q,
