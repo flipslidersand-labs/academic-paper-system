@@ -38,7 +38,7 @@ from academic_paper.routers.jobs import router as jobs_router
 from academic_paper.routers.papers import router as papers_router
 from academic_paper.routers.summary import router as summary_router
 from academic_paper.services import ingest_service
-from academic_paper.services.search_service import run_search
+from academic_paper.services.search_service import SEARCH_MODES, run_search
 from academic_paper.services.summary_service import (  # noqa: F401  (_summary_response re-exported, #618)
     _summary_response,
     generate_summary,
@@ -250,7 +250,7 @@ async def _run_summarize_all(job_id: str) -> None:
 @app.get("/search", dependencies=[Depends(require_scope(Scope.READ))])
 async def search(
     q: str = Query(..., min_length=1, max_length=1000),
-    mode: str = Query("hybrid", pattern="^(vector|keyword|hybrid|nugget)$"),
+    mode: str = Query("hybrid", pattern=f"^({'|'.join(SEARCH_MODES)})$"),
     limit: int = Query(10, ge=1, le=100),
     paper_id: int | None = Query(None),
     snippet_length: int = Query(
