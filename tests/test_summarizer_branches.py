@@ -14,6 +14,7 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 
 from academic_paper.config import get_settings
 from academic_paper.db import db_connection, save_chunks, save_paper
+from academic_paper.services.summary_service import chunks_from_db
 from academic_paper.summarizer import RAGSummarizer
 
 _OK_SUMMARY = json.dumps({"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]})
@@ -195,7 +196,7 @@ def db_with_chunks(temp_db, monkeypatch):
 
 
 def _summarizer() -> RAGSummarizer:
-    return RAGSummarizer(_llm(), MagicMock())
+    return RAGSummarizer(_llm(), MagicMock(), chunk_loader=chunks_from_db)
 
 
 def test_chunks_from_db_slices_to_top_k_in_index_order(db_with_chunks):
@@ -245,7 +246,7 @@ async def test_summarize_db_fallback_end_to_end_uses_real_chunks(db_with_chunks)
     qdrant = MagicMock()
     qdrant.asearch = AsyncMock(side_effect=_qdrant_error(500))
     llm = _llm()
-    summarizer = RAGSummarizer(llm, qdrant, embedder=_embedder())
+    summarizer = RAGSummarizer(llm, qdrant, embedder=_embedder(), chunk_loader=chunks_from_db)
 
     await summarizer.summarize(paper_id=paper_id, file_hash="abc", top_k=2, title="T")
 
@@ -253,3 +254,56 @@ async def test_summarize_db_fallback_end_to_end_uses_real_chunks(db_with_chunks)
     assert "Page unknown: chunk 0" in prompt
     assert "Page 2: chunk 1" in prompt
     assert "chunk 2" not in prompt  # top_k=2 slice
+
+
+# --- the summarizer has no database dependency (#746) ---------------------------------
+
+
+def test_summarizer_module_does_not_import_db():
+    import ast
+    from pathlib import Path
+
+    import academic_paper.summarizer as mod
+
+    tree = ast.parse(Path(mod.__file__).read_text(encoding="utf-8"))
+    imported = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module} | {
+        a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names
+    }
+    assert "academic_paper.db" not in imported
+
+
+@pytest.mark.anyio
+async def test_db_fallback_without_a_chunk_loader_fails_loudly_not_silently():
+    qdrant = MagicMock()
+    qdrant.asearch = AsyncMock(side_effect=_qdrant_error(500))
+    summarizer = RAGSummarizer(_llm(), qdrant, embedder=_embedder())  # no chunk_loader
+    with pytest.raises(RuntimeError, match="chunk_loader"):
+        await summarizer.summarize(paper_id=1, file_hash="abc", top_k=2, title="T")
+
+
+@pytest.mark.anyio
+async def test_injected_chunk_loader_is_used_for_both_embedding_and_qdrant_fallbacks():
+    calls = []
+
+    def loader(paper_id, top_k):
+        calls.append((paper_id, top_k))
+        return [{"payload": {"page_start": 1, "text": "from loader"}}]
+
+    # (1) Qdrant 500 with a working embedder
+    qdrant = MagicMock()
+    qdrant.asearch = AsyncMock(side_effect=_qdrant_error(500))
+    llm = _llm()
+    await RAGSummarizer(llm, qdrant, embedder=_embedder(), chunk_loader=loader).summarize(
+        paper_id=4, file_hash="h", top_k=2, title="T"
+    )
+    # (2) embedding-svc 5xx -> straight to the loader, Qdrant is not queried
+    embedder = _embedder()
+    embedder.embed_single = AsyncMock(side_effect=httpx.ConnectError("down"))
+    qdrant2 = MagicMock()
+    qdrant2.asearch = AsyncMock()
+    await RAGSummarizer(_llm(), qdrant2, embedder=embedder, chunk_loader=loader).summarize(
+        paper_id=5, file_hash="h", top_k=3, title="T"
+    )
+    assert calls == [(4, 2), (5, 3)]
+    qdrant2.asearch.assert_not_called()
+    assert "from loader" in llm.generate.call_args.args[0]

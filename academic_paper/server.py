@@ -41,6 +41,7 @@ from academic_paper.services import ingest_service
 from academic_paper.services.search_service import SEARCH_MODES, run_search
 from academic_paper.services.summary_service import (  # noqa: F401  (_summary_response re-exported, #618)
     _summary_response,
+    chunks_from_db,
     generate_summary,
     get_cached_summary,
     list_all_summaries,
@@ -147,7 +148,9 @@ async def lifespan(app: FastAPI):
     llm_client = get_llm_client(http_client=ollama_http_client)
     app.state.llm = llm_client
     if llm_client is not None:
-        app.state.summarizer = RAGSummarizer(llm_client, app.state.vector_store, app.state.embedder)
+        app.state.summarizer = RAGSummarizer(
+            llm_client, app.state.vector_store, app.state.embedder, chunk_loader=chunks_from_db
+        )
     else:
         app.state.summarizer = None
     # Track active background ingest tasks so shutdown can wait for them (#194).
