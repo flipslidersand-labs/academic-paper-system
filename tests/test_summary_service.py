@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.db import get_connection, save_paper
 from academic_paper.services.summary_service import generate_summary, get_cached_summary
 
@@ -16,7 +16,7 @@ SUMMARY = {"objective": "o", "method": "m", "results": "r", "limitations": "l", 
 
 @pytest.fixture(autouse=True)
 def _db(temp_db):
-    with patch.object(settings, "academic_db", temp_db):
+    with patch.object(get_settings(), "academic_db", temp_db):
         yield temp_db
 
 
@@ -115,7 +115,7 @@ def test_score_all_zero_papers(_db):
 
     r = score_all()
     assert (r["total"], r["scored"], r["failed"], r["errors"]) == (0, 0, 0, [])
-    assert r["preferred_categories"] == settings.preferred_categories_list
+    assert r["preferred_categories"] == get_settings().preferred_categories_list
 
 
 def test_score_all_success_and_partial_failure(_db):
