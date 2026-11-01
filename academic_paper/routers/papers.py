@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from academic_paper.auth import Scope, require_scope
 from academic_paper.config import get_settings
 from academic_paper.db import db_connection, get_paper, list_papers_filtered
-from academic_paper.errors import _http_exc_for
+from academic_paper.errors import _http_exc_for, mapped_errors
 from academic_paper.extractor import hash_file
 from academic_paper.jobs import job_store
 from academic_paper.services import ingest_service
@@ -157,30 +157,20 @@ def list_papers_endpoint(
     sort: Literal["ingested_at", "score"] = Query("ingested_at", description="Sort order"),
 ):
     """List papers with pagination, optional filters, and sort."""
-    try:
+    with mapped_errors("Failed to list papers", "Failed to list papers"):
         with db_connection(get_settings().academic_db) as conn:
             total, papers = list_papers_filtered(
                 conn, limit=limit, offset=offset, author=author, category=category, sort=sort
             )
         return {"total": total, "papers": papers}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to list papers")
-        raise _http_exc_for(e, "Failed to list papers")
 
 
 @router.get("/papers/{paper_id}", dependencies=[Depends(require_scope(Scope.READ))])
 def get_paper_endpoint(paper_id: int):
     """Get paper details by ID."""
-    try:
+    with mapped_errors("Failed to get paper", "Failed to get paper_id=%s", paper_id):
         with db_connection(get_settings().academic_db) as conn:
             paper = get_paper(conn, paper_id)
         if paper is None:
             raise HTTPException(status_code=404, detail="Paper not found")
         return paper
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to get paper_id=%s", paper_id)
-        raise _http_exc_for(e, "Failed to get paper")

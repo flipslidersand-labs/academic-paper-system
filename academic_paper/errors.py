@@ -23,6 +23,7 @@ __all__ = [
     "_http_exc_for",
     "_safe_error_message",
     "classify_error",
+    "mapped_errors",
 ]
 
 
@@ -135,3 +136,32 @@ def _safe_error_message(exc: Exception) -> str:
         # Plain ValueError (input validation): the message may carry arbitrary content.
         return type(exc).__name__
     return info.public_message
+
+
+class _MappedErrors:
+    """Context manager replacing the per-endpoint ``try/except -> _http_exc_for`` boilerplate (#747).
+
+    ``with mapped_errors("Failed to list papers", "Failed to list papers"):`` logs any
+    unexpected exception (``log_msg % log_args``) and re-raises it as the HTTPException
+    ``_http_exc_for(exc, fallback_msg)`` would build. HTTPException and DomainError pass
+    through untouched (the app's DomainError handler maps the latter).
+    """
+
+    def __init__(self, fallback_msg: str, log_msg: str, *log_args: object) -> None:
+        self.fallback_msg = fallback_msg
+        self.log_msg = log_msg
+        self.log_args = log_args
+
+    def __enter__(self) -> "_MappedErrors":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        if exc is None or not isinstance(exc, Exception) or isinstance(exc, (HTTPException, DomainError)):
+            return False
+        logger.error(self.log_msg, *self.log_args, exc_info=exc)
+        raise _http_exc_for(exc, self.fallback_msg) from exc
+
+
+def mapped_errors(fallback_msg: str, log_msg: str, *log_args: object) -> _MappedErrors:
+    """Build the context manager described on ``_MappedErrors`` (#747)."""
+    return _MappedErrors(fallback_msg, log_msg, *log_args)

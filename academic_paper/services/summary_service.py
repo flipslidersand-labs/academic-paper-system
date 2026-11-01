@@ -20,7 +20,7 @@ from academic_paper.db import (
     save_summary,
     update_paper_score,
 )
-from academic_paper.errors import DomainError, NotConfiguredError, NotFoundError, _http_exc_for, _safe_error_message
+from academic_paper.errors import NotConfiguredError, NotFoundError, _safe_error_message, mapped_errors
 from academic_paper.models import PaperSummary
 from academic_paper.scorer import compute_score
 from academic_paper.telemetry import get_tracer
@@ -45,7 +45,7 @@ def get_cached_summary(paper_id: int) -> dict:
     crawler or monitoring access must never trigger LLM generation or DB
     writes. Generation lives in generate_summary().
     """
-    try:
+    with mapped_errors("Failed to get summary", "Failed to get summary for paper_id=%s", paper_id):
         with db_connection(get_settings().academic_db) as conn:
             paper = get_paper(conn, paper_id)
             if paper is None:
@@ -55,11 +55,6 @@ def get_cached_summary(paper_id: int) -> dict:
             if cached_summary is None:
                 raise NotFoundError("Summary not generated yet — POST /papers/{paper_id}/summary to generate")
             return _summary_response(paper_id, cached_summary["model"], cached_summary, True)
-    except DomainError:
-        raise
-    except Exception as e:
-        logger.exception("Failed to get summary for paper_id=%s", paper_id)
-        raise _http_exc_for(e, "Failed to get summary")
 
 
 def _read_paper_and_cache(paper_id: int, force: bool) -> tuple[dict, dict | None]:
@@ -85,15 +80,10 @@ async def generate_summary(paper_id: int, force: bool, llm, summarizer) -> dict:
     """Generate the summary (cached result is returned unless force=True)."""
     # Read paper and cache in a short-lived connection — close before LLM await
     # to avoid holding a WAL write-lock for the full LLM timeout (#191).
-    try:
+    with mapped_errors("Failed to check cached summary", "Failed to check cached summary for paper_id=%s", paper_id):
         paper, cached_summary = await asyncio.to_thread(_read_paper_and_cache, paper_id, force)
         if cached_summary is not None:
             return _summary_response(paper_id, cached_summary["model"], cached_summary, True)
-    except DomainError:
-        raise
-    except Exception as e:
-        logger.exception("Failed to check cached summary for paper_id=%s", paper_id)
-        raise _http_exc_for(e, "Failed to check cached summary")
 
     # Connection closed — safe to await LLM for up to 300 s without blocking writers.
     if llm is None:
@@ -102,7 +92,7 @@ async def generate_summary(paper_id: int, force: bool, llm, summarizer) -> dict:
     if summarizer is None:
         raise NotConfiguredError("Summarizer not initialized")
 
-    try:
+    with mapped_errors("Summarization failed: check LLM availability", "Summarization error for paper_id=%s", paper_id):
         with tracer.start_as_current_span("summarize") as span:
             span.set_attribute("paper_id", paper_id)
             summary = await summarizer.summarize(
@@ -116,10 +106,6 @@ async def generate_summary(paper_id: int, force: bool, llm, summarizer) -> dict:
 
         return _summary_response(paper_id, model, summary, False)
 
-    except Exception as e:
-        logger.exception("Summarization error for paper_id=%s", paper_id)
-        raise _http_exc_for(e, "Summarization failed: check LLM availability")
-
 
 def score_all() -> dict:
     """Compute and store relevance scores for all papers (POST /papers/score-all).
@@ -129,7 +115,7 @@ def score_all() -> dict:
     on to the next paper (#276).
     """
     preferred = get_settings().preferred_categories_list
-    try:
+    with mapped_errors("Scoring failed unexpectedly", "score_all_papers failed unexpectedly"):
         with db_connection(get_settings().academic_db) as conn:
             papers = get_all_papers_for_scoring(conn)
             scored = 0
@@ -151,16 +137,11 @@ def score_all() -> dict:
             "errors": errors,
             "preferred_categories": preferred,
         }
-    except DomainError:
-        raise
-    except Exception as e:
-        logger.exception("score_all_papers failed unexpectedly")
-        raise _http_exc_for(e, "Scoring failed unexpectedly")
 
 
 def score_one(paper_id: int) -> dict:
     """Compute and store relevance score for a single paper (POST /papers/{id}/score)."""
-    try:
+    with mapped_errors("Scoring failed", "Failed to score paper_id=%s", paper_id):
         with db_connection(get_settings().academic_db) as conn:
             paper = get_paper(conn, paper_id)
             if paper is None:
@@ -169,24 +150,14 @@ def score_one(paper_id: int) -> dict:
             score = compute_score(paper, preferred)
             update_paper_score(conn, paper_id, score)
         return {"paper_id": paper_id, "score": score}
-    except DomainError:
-        raise
-    except Exception as e:
-        logger.exception("Failed to score paper_id=%s", paper_id)
-        raise _http_exc_for(e, "Scoring failed")
 
 
 def list_all_summaries(limit: int, offset: int) -> dict:
     """List all paper summaries with associated paper metadata (GET /summaries)."""
-    try:
+    with mapped_errors("Failed to list summaries", "Failed to list summaries"):
         with db_connection(get_settings().academic_db) as conn:
             total, summaries = list_summaries(conn, limit=limit, offset=offset)
         return {"total": total, "summaries": summaries}
-    except DomainError:
-        raise
-    except Exception as e:
-        logger.exception("Failed to list summaries")
-        raise _http_exc_for(e, "Failed to list summaries")
 
 
 def _select_unsummarized() -> list:
