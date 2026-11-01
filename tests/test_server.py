@@ -14,7 +14,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.db import get_chunks, get_connection, save_chunks, save_paper
 from academic_paper.embedder import EmbedderClient
 from academic_paper.jobs import job_store
@@ -39,7 +39,7 @@ def _wait_for_job(client, job_id, timeout=2.0):
 @pytest.fixture
 def client(temp_db):
     """Create a test client with patched settings and mocked services."""
-    with patch.object(settings, "academic_db", temp_db):
+    with patch.object(get_settings(), "academic_db", temp_db):
         # Create mock instances for EmbedderClient and QdrantStore
         mock_embedder = MagicMock()
         mock_embedder.embed = AsyncMock(return_value=[[0.1] * 768])  # 768-dim vector
@@ -227,7 +227,7 @@ def test_ingest_extract_timeout_fails_job_and_cleans_tmpfile(client):
         return [{"page": 1, "text": "should never get here"}]
 
     with (
-        patch.object(settings, "pdf_extract_timeout", 0.05),
+        patch.object(get_settings(), "pdf_extract_timeout", 0.05),
         patch("academic_paper.services.ingest_service.tempfile.NamedTemporaryFile", side_effect=fake_ntf),
         patch("academic_paper.services.ingest_service.extract_text", side_effect=slow_extract),
     ):
@@ -332,7 +332,7 @@ def test_ingest_stores_qdrant_id(client):
         paper_id = data["paper_id"]
 
         # Verify qdrant_id was stored in database
-        conn = get_connection(settings.academic_db)
+        conn = get_connection(get_settings().academic_db)
         chunks = get_chunks(conn, paper_id)
         conn.close()
 
@@ -1123,7 +1123,7 @@ def test_ingest_unexpected_exception(client):
 
 def test_ingest_file_too_large_returns_413(client):
     """POST /papers/ingest returns 413 when file exceeds max_upload_mb limit."""
-    with patch.object(settings, "max_upload_mb", 0):
+    with patch.object(get_settings(), "max_upload_mb", 0):
         response = client.post(
             "/papers/ingest?wait=true",
             files={"file": ("big.pdf", BytesIO(b"X"), "application/pdf")},
@@ -1138,7 +1138,7 @@ def test_ingest_file_at_limit_is_accepted(client):
     limit_mb = len(pdf_content) // (1024 * 1024) + 1
 
     with (
-        patch.object(settings, "max_upload_mb", limit_mb),
+        patch.object(get_settings(), "max_upload_mb", limit_mb),
         patch("academic_paper.services.ingest_service.extract_text") as mock_extract,
     ):
         mock_extract.return_value = [{"page": 1, "text": "Test content"}]
@@ -1295,7 +1295,7 @@ def test_ingest_concurrent_same_pdf_pending_returns_409(client):
 
 def test_write_endpoints_require_api_key_when_configured(client, temp_db):
     """Regression (#146): write endpoints return 401 when API_KEY is set and key missing."""
-    with patch.object(settings, "api_key", "secret-key"):
+    with patch.object(get_settings(), "api_key", "secret-key"):
         # No key → 401
         r = client.post(
             "/papers/ingest",
@@ -1329,14 +1329,14 @@ def test_non_ascii_api_key_header_rejected_with_401_not_500(client):
     Starlette decodes headers as latin-1, so a client can send one byte >0x7f and
     turn an auth failure into an unhandled 500 unless the comparison is done in bytes.
     """
-    with patch.object(settings, "api_key", "secret-key"):
+    with patch.object(get_settings(), "api_key", "secret-key"):
         r = client.get("/papers", headers={b"x-api-key": "caf\xe9".encode("latin-1")})
         assert r.status_code == 401
 
 
 def test_write_endpoints_pass_without_api_key_when_unconfigured(client):
     """When API_KEY is empty (default), write endpoints accept requests without key."""
-    with patch.object(settings, "api_key", ""):
+    with patch.object(get_settings(), "api_key", ""):
         with patch("academic_paper.services.ingest_service.extract_text") as mock_extract:
             mock_extract.return_value = [{"page": 1, "text": "No auth needed"}]
             r = client.post(
@@ -1350,7 +1350,7 @@ def test_read_endpoints_require_api_key_when_configured(client, temp_db):
     """Regression (#241): read endpoints (list/detail/summary/search) also return 401
     when API_KEY is set and the key is missing or wrong — the read side must not be
     an unauthenticated hole while write/job endpoints are gated (#190)."""
-    with patch.object(settings, "api_key", "secret-key"):
+    with patch.object(get_settings(), "api_key", "secret-key"):
         assert client.get("/papers").status_code == 401
         assert client.get("/papers", headers={"X-API-Key": "wrong"}).status_code == 401
         assert client.get("/papers", headers={"X-API-Key": "secret-key"}).status_code == 200
@@ -1369,7 +1369,7 @@ def test_metrics_requires_api_key_when_configured(client):
     """Regression (#299): /metrics is added by Instrumentator.expose() rather than a
     hand-written route, so it previously fell outside the "API_KEY set → all endpoints
     require auth" boundary and leaked per-path request counters/latency histograms."""
-    with patch.object(settings, "api_key", "secret-key"):
+    with patch.object(get_settings(), "api_key", "secret-key"):
         assert client.get("/metrics").status_code == 401
         assert client.get("/metrics", headers={"X-API-Key": "wrong"}).status_code == 401
         assert client.get("/metrics", headers={"X-API-Key": "secret-key"}).status_code == 200
@@ -1377,13 +1377,13 @@ def test_metrics_requires_api_key_when_configured(client):
 
 def test_metrics_pass_without_api_key_when_unconfigured(client):
     """When API_KEY is empty (default), /metrics remains publicly reachable."""
-    with patch.object(settings, "api_key", ""):
+    with patch.object(get_settings(), "api_key", ""):
         assert client.get("/metrics").status_code == 200
 
 
 def test_read_endpoints_pass_without_api_key_when_unconfigured(client):
     """When API_KEY is empty (default), read endpoints accept requests without key."""
-    with patch.object(settings, "api_key", ""):
+    with patch.object(get_settings(), "api_key", ""):
         assert client.get("/papers").status_code != 401
         assert client.get("/papers/1").status_code != 401
         assert client.get("/papers/1/summary").status_code != 401
@@ -1393,7 +1393,7 @@ def test_read_endpoints_pass_without_api_key_when_unconfigured(client):
 def test_summaries_and_stats_require_api_key_when_configured(client):
     """Regression (#261): /summaries and /stats were missing dependencies=[Depends(verify_api_key)],
     leaving an unauthenticated hole while equally or less sensitive read endpoints were gated."""
-    with patch.object(settings, "api_key", "secret-key"):
+    with patch.object(get_settings(), "api_key", "secret-key"):
         assert client.get("/summaries").status_code == 401
         assert client.get("/summaries", headers={"X-API-Key": "wrong"}).status_code == 401
         assert client.get("/summaries", headers={"X-API-Key": "secret-key"}).status_code != 401
@@ -1406,7 +1406,7 @@ def test_summaries_and_stats_require_api_key_when_configured(client):
 @pytest.fixture(autouse=True)
 def _auth_disabled_by_default():
     """Existing tests run without an API key; opt out of the fail-closed startup check (#646)."""
-    with patch.object(settings, "auth_disabled", True):
+    with patch.object(get_settings(), "auth_disabled", True):
         yield
 
 
@@ -1425,7 +1425,7 @@ def _lifespan_client(temp_db):
     mock_qdrant.aping = AsyncMock(return_value=None)
     mock_qdrant.count_points = MagicMock(return_value=0)
     return (
-        patch.object(settings, "academic_db", temp_db),
+        patch.object(get_settings(), "academic_db", temp_db),
         patch("academic_paper.server.EmbedderClient", return_value=mock_embedder),
         patch("academic_paper.server.QdrantStore", return_value=mock_qdrant),
     )
@@ -1439,7 +1439,7 @@ def test_startup_warns_when_api_key_unset(capsys, temp_db):
     caplog's), so the startup log is asserted via captured stdout instead of caplog.
     """
     p1, p2, p3 = _lifespan_client(temp_db)
-    with patch.object(settings, "api_key", ""), patch.object(settings, "auth_disabled", True), p1, p2, p3:
+    with patch.object(get_settings(), "api_key", ""), patch.object(get_settings(), "auth_disabled", True), p1, p2, p3:
         with TestClient(app):
             pass
 
@@ -1450,9 +1450,9 @@ def test_startup_refused_when_no_api_key_and_auth_not_disabled(temp_db):
     """Regression (#646): empty API_KEY/API_KEYS without AUTH_DISABLED must fail closed."""
     p1, p2, p3 = _lifespan_client(temp_db)
     with (
-        patch.object(settings, "api_key", ""),
-        patch.object(settings, "api_keys", ""),
-        patch.object(settings, "auth_disabled", False),
+        patch.object(get_settings(), "api_key", ""),
+        patch.object(get_settings(), "api_keys", ""),
+        patch.object(get_settings(), "auth_disabled", False),
         p1,
         p2,
         p3,
@@ -1465,9 +1465,9 @@ def test_startup_refused_when_no_api_key_and_auth_not_disabled(temp_db):
 def test_startup_ok_with_api_keys_only(capsys, temp_db):
     p1, p2, p3 = _lifespan_client(temp_db)
     with (
-        patch.object(settings, "api_key", ""),
-        patch.object(settings, "api_keys", "k1"),
-        patch.object(settings, "auth_disabled", False),
+        patch.object(get_settings(), "api_key", ""),
+        patch.object(get_settings(), "api_keys", "k1"),
+        patch.object(get_settings(), "auth_disabled", False),
         p1,
         p2,
         p3,
@@ -1480,7 +1480,7 @@ def test_startup_ok_with_api_keys_only(capsys, temp_db):
 def test_startup_no_warning_when_api_key_set(capsys, temp_db):
     """No spurious warning when API_KEY is configured."""
     p1, p2, p3 = _lifespan_client(temp_db)
-    with patch.object(settings, "api_key", "secret-key"), p1, p2, p3:
+    with patch.object(get_settings(), "api_key", "secret-key"), p1, p2, p3:
         with TestClient(app):
             pass
 
@@ -1495,7 +1495,7 @@ def _run_shutdown_with_task(temp_db, coro_factory, monkeypatch):
     monkeypatch.setattr("academic_paper.server.INGEST_SHUTDOWN_TIMEOUT_S", 0.1)
     p1, p2, p3 = _lifespan_client(temp_db)
     holder = {}
-    with patch.object(settings, "api_key", "secret-key"), p1, p2, p3:
+    with patch.object(get_settings(), "api_key", "secret-key"), p1, p2, p3:
         with TestClient(app) as client:
 
             async def _register():
@@ -1536,7 +1536,7 @@ def test_lifespan_awaits_llm_aclose_on_shutdown(temp_db):
     mock_llm.aclose = AsyncMock()
     p1, p2, p3 = _lifespan_client(temp_db)
     with (
-        patch.object(settings, "llm_provider", "gemini"),
+        patch.object(get_settings(), "llm_provider", "gemini"),
         patch("academic_paper.server.get_llm_client", return_value=mock_llm),
         patch("academic_paper.server.RAGSummarizer"),
         p1,
@@ -1552,7 +1552,7 @@ def test_lifespan_awaits_llm_aclose_on_shutdown(temp_db):
 def test_lifespan_llm_provider_none(temp_db):
     """LLM_PROVIDER=none starts and stops cleanly with no LLM/summarizer (#498)."""
     p1, p2, p3 = _lifespan_client(temp_db)
-    with patch.object(settings, "llm_provider", "none"), p1, p2, p3:
+    with patch.object(get_settings(), "llm_provider", "none"), p1, p2, p3:
         with TestClient(app) as c:
             assert c.app.state.llm is None
             assert c.app.state.summarizer is None
@@ -1564,7 +1564,7 @@ def test_lifespan_injected_ollama_client_closed_exactly_once(temp_db):
     http.aclose = AsyncMock()
     p1, p2, p3 = _lifespan_client(temp_db)
     with (
-        patch.object(settings, "llm_provider", "ollama"),
+        patch.object(get_settings(), "llm_provider", "ollama"),
         patch("academic_paper.server.httpx.AsyncClient", return_value=http),
         p1,
         p2,
@@ -1590,7 +1590,7 @@ async def test_cleanup_orphaned_ingests_no_stuck_papers(temp_db):
     mock_qdrant.adelete_by_paper_id = AsyncMock()
     mock_app.state.vector_store = mock_qdrant
 
-    with patch.object(settings, "academic_db", temp_db):
+    with patch.object(get_settings(), "academic_db", temp_db):
         await _cleanup_orphaned_ingests(mock_app)
 
     mock_qdrant.adelete_by_paper_id.assert_not_called()
@@ -1610,7 +1610,7 @@ async def test_cleanup_orphaned_ingests_cleans_stuck_paper(temp_db):
     mock_qdrant.adelete_by_paper_id = AsyncMock()
     mock_app.state.vector_store = mock_qdrant
 
-    with patch.object(settings, "academic_db", temp_db):
+    with patch.object(get_settings(), "academic_db", temp_db):
         await _cleanup_orphaned_ingests(mock_app)
 
     mock_qdrant.adelete_by_paper_id.assert_called_once_with(paper_id)
@@ -1633,7 +1633,7 @@ async def test_cleanup_orphaned_ingests_marks_failed_when_qdrant_delete_raises(t
     mock_qdrant.adelete_by_paper_id = AsyncMock(side_effect=RuntimeError("qdrant down"))
     mock_app.state.vector_store = mock_qdrant
 
-    with patch.object(settings, "academic_db", temp_db), caplog.at_level(logging.WARNING):
+    with patch.object(get_settings(), "academic_db", temp_db), caplog.at_level(logging.WARNING):
         await _cleanup_orphaned_ingests(mock_app)  # must not raise
 
     assert mock_qdrant.adelete_by_paper_id.await_count == len(paper_ids)
@@ -1721,9 +1721,9 @@ _SCOPED_ROUTES = [
 @pytest.mark.parametrize(("method", "path", "scope"), _SCOPED_ROUTES)
 def test_ingest_key_scope_per_route(client, method, path, scope):
     with (
-        patch.object(settings, "api_key", "full-key"),
-        patch.object(settings, "api_keys", ""),
-        patch.object(settings, "ingest_api_key", "ing-key"),
+        patch.object(get_settings(), "api_key", "full-key"),
+        patch.object(get_settings(), "api_keys", ""),
+        patch.object(get_settings(), "ingest_api_key", "ing-key"),
     ):
         r = getattr(client, method)(path, headers={"X-API-Key": "ing-key"})
         if scope == "ingest":
@@ -1735,9 +1735,9 @@ def test_ingest_key_scope_per_route(client, method, path, scope):
 @pytest.mark.parametrize(("method", "path", "scope"), _SCOPED_ROUTES)
 def test_full_key_and_bad_key_per_route(client, method, path, scope):
     with (
-        patch.object(settings, "api_key", "full-key"),
-        patch.object(settings, "api_keys", ""),
-        patch.object(settings, "ingest_api_key", "ing-key"),
+        patch.object(get_settings(), "api_key", "full-key"),
+        patch.object(get_settings(), "api_keys", ""),
+        patch.object(get_settings(), "ingest_api_key", "ing-key"),
     ):
         assert getattr(client, method)(path, headers={"X-API-Key": "full-key"}).status_code not in (401, 403)
         assert getattr(client, method)(path, headers={"X-API-Key": "bad"}).status_code == 401

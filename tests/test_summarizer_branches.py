@@ -12,7 +12,7 @@ import httpx
 import pytest
 from qdrant_client.http.exceptions import UnexpectedResponse
 
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.db import db_connection, save_chunks, save_paper
 from academic_paper.summarizer import RAGSummarizer
 
@@ -169,7 +169,7 @@ async def test_summarize_missing_fields_default_to_empty_string():
 
 @pytest.fixture
 def db_with_chunks(temp_db, monkeypatch):
-    monkeypatch.setattr(settings, "academic_db", temp_db)
+    monkeypatch.setattr(get_settings(), "academic_db", temp_db)
 
     def _make(n_chunks: int, page_starts: list | None = None) -> int:
         with db_connection(temp_db) as conn:
