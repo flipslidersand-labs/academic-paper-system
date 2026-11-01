@@ -73,7 +73,7 @@ async def test_run_search_keyword_mode_returns_fts_results_without_touching_embe
         vector_store = _make_vector_store()
 
         result = await run_search(
-            conn,
+            temp_db,
             embedder,
             vector_store,
             q="deep learning",
@@ -106,7 +106,7 @@ async def test_run_search_vector_mode_skips_orphan_payload(temp_db):
         )
 
         result = await run_search(
-            conn,
+            temp_db,
             embedder,
             vector_store,
             q="q",
@@ -147,7 +147,7 @@ async def test_run_search_hybrid_mode_merges_fts_and_vector(temp_db):
         vector_store = _make_vector_store(search_results=[])
 
         result = await run_search(
-            conn,
+            temp_db,
             embedder,
             vector_store,
             q="hybrid retrieval",
@@ -177,7 +177,7 @@ async def test_run_search_unknown_mode_raises_instead_of_falling_through_to_hybr
     try:
         with pytest.raises(ValueError, match="unknown search mode"):
             await run_search(
-                conn,
+                temp_db,
                 _make_embedder(),
                 _make_vector_store(),
                 q="x",
@@ -212,3 +212,65 @@ def test_result_row_has_one_shape_and_key_order():
     assert list(row) == _ROW_KEYS
     assert _make_snippet("abcdef", 3) == "abc"
     assert _make_snippet("abcdef", 0) == "abcdef"
+
+
+# --- DB reads run off the event loop (#678) --------------------------------------
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("mode", ["keyword", "vector", "hybrid"])
+async def test_run_search_db_reads_run_off_the_event_loop_thread(temp_db, monkeypatch, mode):
+    import threading
+
+    from academic_paper.services import search_service
+
+    conn = get_connection(temp_db)
+    try:
+        paper_id = save_paper(conn, "p.pdf", "h1")
+        save_chunks(
+            conn,
+            paper_id,
+            [
+                {
+                    "text": "deep learning",
+                    "page_start": 1,
+                    "page_end": 1,
+                    "chunk_index": 0,
+                    "qdrant_id": "q-0",
+                    "token_count": 2,
+                }
+            ],
+        )
+    finally:
+        conn.close()
+
+    loop_thread = threading.get_ident()
+    seen: dict[str, int] = {}
+
+    def _wrap(name):
+        orig = getattr(search_service, name)
+
+        def wrapper(*a, **kw):
+            seen[name] = threading.get_ident()
+            return orig(*a, **kw)
+
+        monkeypatch.setattr(search_service, name, wrapper)
+
+    _wrap("search_fts")
+    _wrap("_fetch_chunk_meta")
+    hits = [{"id": "q-0", "score": 0.9, "payload": {"paper_id": paper_id, "text": "deep learning", "chunk_index": 0}}]
+    await run_search(
+        temp_db,
+        _make_embedder(),
+        _make_vector_store(hits),
+        q="deep learning",
+        mode=mode,
+        limit=5,
+        paper_id=None,
+        snippet_length=50,
+        nuggets_per_chunk=3,
+        nugget_embed_weight=0.7,
+    )
+
+    assert seen, "the DB read helpers were never called"
+    assert all(tid != loop_thread for tid in seen.values()), seen
