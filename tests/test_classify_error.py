@@ -76,3 +76,58 @@ def test_app_returns_detail_body_for_domain_error():
     finally:
         app.router.routes[:] = [x for x in app.router.routes if getattr(x, "path", "") != "/__domain_error_probe"]
     assert (r.status_code, r.json()) == (404, {"detail": "Paper not found"})
+
+
+# --- mapped_errors (#747) ------------------------------------------------------
+
+
+def test_mapped_errors_maps_logs_and_passes_through(caplog):
+    from fastapi import HTTPException
+
+    from academic_paper.errors import NotFoundError, mapped_errors
+
+    with pytest.raises(HTTPException) as ei, caplog.at_level(logging.ERROR, logger="academic_paper.errors"):
+        with mapped_errors("Failed to x", "x failed for id=%s", 7):
+            raise ValueError("boom")
+    assert (ei.value.status_code, ei.value.detail) == (400, "Failed to x")  # fallback_msg used as before
+    assert "x failed for id=7" in caplog.text
+
+    existing = HTTPException(status_code=404, detail="gone")
+    for passthrough in (existing, NotFoundError("nf")):
+        with pytest.raises(type(passthrough)) as ei2:
+            with mapped_errors("fb", "log"):
+                raise passthrough
+        assert ei2.value is passthrough
+
+
+def test_mapped_errors_no_exception_is_noop():
+    from academic_paper.errors import mapped_errors
+
+    with mapped_errors("fb", "log"):
+        value = 1
+    assert value == 1
+
+
+def test_no_handwritten_exception_to_http_boilerplate():
+    """#747: endpoints/services use mapped_errors, not `except Exception` -> `_http_exc_for`.
+
+    Allowed: routers/papers.py ingest_paper (its cleanup/compensation needs bespoke handling).
+    """
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent / "academic_paper"
+    offenders = []
+    for path in root.rglob("*.py"):
+        if path.name == "errors.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for h in ast.walk(fn):
+                if isinstance(h, ast.ExceptHandler) and any(
+                    isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_http_exc_for" for n in ast.walk(h)
+                ):
+                    offenders.append(f"{path.name}:{fn.name}")
+    assert sorted(set(offenders)) == ["papers.py:ingest_paper"], offenders

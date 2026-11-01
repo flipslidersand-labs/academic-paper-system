@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -29,6 +29,7 @@ from academic_paper.errors import (  # noqa: F401  (_http_exc_for/_safe_error_me
     _http_exc_for,
     _safe_error_message,
     classify_error,
+    mapped_errors,
 )
 from academic_paper.jobs import job_store
 from academic_paper.llm import get_llm_client
@@ -270,7 +271,7 @@ async def search(
     sentences from each chunk instead of returning the full snippet. Reduces
     context length by ~68% while maintaining Recall@5.
     """
-    try:
+    with mapped_errors("Search failed: check query and try again", "Search error for query=%r mode=%s", q, mode):
         with db_connection(get_settings().academic_db) as conn:
             return await run_search(
                 conn,
@@ -284,9 +285,6 @@ async def search(
                 nuggets_per_chunk=nuggets_per_chunk,
                 nugget_embed_weight=nugget_embed_weight,
             )
-    except Exception as e:
-        logger.exception("Search error for query=%r mode=%s", q, mode)
-        raise _http_exc_for(e, "Search failed: check query and try again")
 
 
 @app.get("/health")
@@ -321,7 +319,7 @@ async def health():
 @app.get("/stats", dependencies=[Depends(require_scope(Scope.READ))])
 def stats():
     """DB統計情報"""
-    try:
+    with mapped_errors("Failed to get stats", "Failed to get stats"):
         with db_connection(get_settings().academic_db) as conn:
             counts = count_rows(conn)
             try:
@@ -329,11 +327,6 @@ def stats():
             except Exception:
                 qdrant_points = -1
         return {**counts, "qdrant_points": qdrant_points}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to get stats")
-        raise _http_exc_for(e, "Failed to get stats")
 
 
 # Serve frontend at /ui — must be mounted after all API routes
