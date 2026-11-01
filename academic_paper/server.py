@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from academic_paper.auth import Scope, require_scope, verify_api_key  # noqa: F401  (verify_api_key re-exported, #617)
-from academic_paper.config import get_settings, settings
+from academic_paper.config import get_settings
 from academic_paper.db import (
     count_rows,
     db_connection,
@@ -178,7 +178,7 @@ def _docs_kwargs(enabled: bool) -> dict[str, None]:
     return {} if enabled else {"docs_url": None, "redoc_url": None, "openapi_url": None}
 
 
-app = FastAPI(title="Academic Paper System", lifespan=lifespan, **_docs_kwargs(settings.enable_docs))
+app = FastAPI(title="Academic Paper System", lifespan=lifespan, **_docs_kwargs(get_settings().enable_docs))
 
 
 # /metrics is added by Instrumentator.expose() rather than manually registered, so it
@@ -259,7 +259,7 @@ async def search(
     context length by ~68% while maintaining Recall@5.
     """
     try:
-        with db_connection(settings.academic_db) as conn:
+        with db_connection(get_settings().academic_db) as conn:
             return await run_search(
                 conn,
                 app.state.embedder,
