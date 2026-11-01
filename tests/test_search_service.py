@@ -164,3 +164,51 @@ async def test_run_search_hybrid_mode_merges_fts_and_vector(temp_db):
         assert result["results"][0]["paper_id"] == paper_id
     finally:
         conn.close()
+
+
+# --- mode dispatch and shared row shape (#677) -----------------------------------
+
+_ROW_KEYS = ["rank", "score", "paper_id", "chunk_index", "page_start", "snippet"]
+
+
+@pytest.mark.anyio
+async def test_run_search_unknown_mode_raises_instead_of_falling_through_to_hybrid(temp_db):
+    conn = get_connection(temp_db)
+    try:
+        with pytest.raises(ValueError, match="unknown search mode"):
+            await run_search(
+                conn,
+                _make_embedder(),
+                _make_vector_store(),
+                q="x",
+                mode="bogus",
+                limit=5,
+                paper_id=None,
+                snippet_length=10,
+                nuggets_per_chunk=3,
+                nugget_embed_weight=0.7,
+            )
+    finally:
+        conn.close()
+
+
+def test_search_modes_are_the_single_source_for_the_endpoint_pattern():
+    import re
+
+    from academic_paper.server import app
+    from academic_paper.services.search_service import SEARCH_MODES
+
+    assert sorted(SEARCH_MODES) == ["hybrid", "keyword", "nugget", "vector"]
+    search_route = next(r for r in app.routes if getattr(r, "path", "") == "/search")
+    pattern = next(p.field_info.metadata[0].pattern for p in search_route.dependant.query_params if p.name == "mode")
+    assert all(re.match(pattern, m) for m in SEARCH_MODES)
+    assert not re.match(pattern, "bogus")
+
+
+def test_result_row_has_one_shape_and_key_order():
+    from academic_paper.services.search_service import _make_snippet, _result_row
+
+    row = _result_row(rank=1, score=0.5, paper_id=2, chunk_index=3, page_start=None, snippet="s")
+    assert list(row) == _ROW_KEYS
+    assert _make_snippet("abcdef", 3) == "abc"
+    assert _make_snippet("abcdef", 0) == "abcdef"
