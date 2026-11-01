@@ -497,7 +497,10 @@ async def test_job_store_init_loads_existing_jobs(temp_db):
     import time as time_mod
 
     conn = get_connection(temp_db)
-    upsert_job(conn, "job-abc", "done", 3, 3, 0, [], time_mod.time(), time_mod.time())
+    upsert_job(
+        conn,
+        Job(id="job-abc", status="done", total=3, processed=3, started_at=time_mod.time(), finished_at=time_mod.time()),
+    )
     conn.close()
 
     store = JobStore()
@@ -516,7 +519,7 @@ async def test_running_job_converted_to_failed_on_init(temp_db):
     import time as time_mod
 
     conn = get_connection(temp_db)
-    upsert_job(conn, "job-crash", "running", 5, 2, 0, [], time_mod.time(), None)
+    upsert_job(conn, Job(id="job-crash", status="running", total=5, processed=2, started_at=time_mod.time()))
     conn.close()
 
     store = JobStore()
@@ -650,3 +653,58 @@ async def test_get_or_load_returns_evicted_job_from_db(temp_db):
     assert store.get(ids[0]) is None  # not re-cached
     assert (await store.get_or_load(ids[2])) is store.get(ids[2])  # in-memory path
     assert await store.get_or_load("missing-id") is None
+
+
+# --- Job fields are defined once (#670) ------------------------------------------
+
+
+def _all_fields_non_default() -> Job:
+    return Job(
+        id="j-roundtrip",
+        status="done",
+        kind="ingest",
+        total=7,
+        processed=5,
+        failed=2,
+        errors=["e1", "e2"],
+        started_at=100.5,
+        finished_at=200.5,
+        result={"paper_id": 3, "chunks": 9},
+    )
+
+
+def test_every_job_field_survives_db_roundtrip(temp_db):
+    """A field added to Job but dropped on the way to/from SQLite would silently become NULL/default."""
+    from dataclasses import fields
+
+    from academic_paper.db import db_connection, load_job
+
+    job = _all_fields_non_default()
+    for f in fields(Job):  # guard the fixture itself: no field may be left at its default
+        assert getattr(job, f.name) != (f.default if f.default is not f.default_factory else None), f.name
+    with db_connection(temp_db) as conn:
+        upsert_job(conn, job)
+        loaded = Job.from_row(load_job(conn, job.id))
+    assert loaded == job
+
+
+def test_job_to_dict_has_all_fields_and_caps_errors():
+    from dataclasses import fields
+
+    job = _all_fields_non_default()
+    job.errors = [f"e{i}" for i in range(25)]
+    d = job.to_dict()
+    assert set(d) == {f.name for f in fields(Job)}
+    assert d["errors"] == job.errors[:10]
+    assert len(job.errors) == 25  # the stored list is not truncated
+
+
+def test_upsert_job_updates_existing_row_but_keeps_started_at(temp_db):
+    from academic_paper.db import db_connection, load_job
+
+    with db_connection(temp_db) as conn:
+        upsert_job(conn, Job(id="j", status="running", started_at=1.0))
+        upsert_job(conn, Job(id="j", status="done", started_at=999.0, finished_at=5.0, kind="k"))
+        row = load_job(conn, "j")
+    assert (row["status"], row["finished_at"], row["kind"]) == ("done", 5.0, "k")
+    assert row["started_at"] == 1.0  # set on insert only, as before
