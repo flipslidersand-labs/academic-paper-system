@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.db import get_connection, save_chunks, save_paper
 from academic_paper.server import app
 
@@ -14,9 +14,9 @@ from academic_paper.server import app
 def client(temp_db):
     """Create a test client with patched settings and mocked services."""
     with (
-        patch.object(settings, "academic_db", temp_db),
+        patch.object(get_settings(), "academic_db", temp_db),
         # Disable API key auth so tests are not affected by a non-empty .env (#220).
-        patch.object(settings, "api_key", ""),
+        patch.object(get_settings(), "api_key", ""),
     ):
         # Create mock instances for EmbedderClient and QdrantStore
         mock_embedder = MagicMock()

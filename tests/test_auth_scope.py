@@ -7,7 +7,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from academic_paper.auth import ALL_SCOPES, Scope, require_scope, resolve_scopes
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 
 _app = FastAPI()
 
@@ -32,30 +32,30 @@ def _h(key):
 
 
 def test_missing_key_401(c):
-    with patch.object(settings, "api_key", "k"), patch.object(settings, "api_keys", ""):
+    with patch.object(get_settings(), "api_key", "k"), patch.object(get_settings(), "api_keys", ""):
         assert c.get("/read").status_code == 401
 
 
 def test_invalid_key_401(c):
-    with patch.object(settings, "api_key", "k"), patch.object(settings, "api_keys", ""):
+    with patch.object(get_settings(), "api_key", "k"), patch.object(get_settings(), "api_keys", ""):
         assert c.get("/read", headers=_h("bad")).status_code == 401
 
 
 def test_valid_key_passes_both_keys(c):
-    with patch.object(settings, "api_key", "k"), patch.object(settings, "api_keys", "k2"):
+    with patch.object(get_settings(), "api_key", "k"), patch.object(get_settings(), "api_keys", "k2"):
         assert c.get("/read", headers=_h("k")).status_code == 200
         assert c.get("/any", headers=_h("k2")).status_code == 200
 
 
 def test_auth_disabled_passes_through(c):
-    with patch.object(settings, "api_key", ""), patch.object(settings, "api_keys", ""):
+    with patch.object(get_settings(), "api_key", ""), patch.object(get_settings(), "api_keys", ""):
         assert c.get("/read").status_code == 200
 
 
 def test_insufficient_scope_403(c):
     with (
-        patch.object(settings, "api_key", "k"),
-        patch.object(settings, "api_keys", ""),
+        patch.object(get_settings(), "api_key", "k"),
+        patch.object(get_settings(), "api_keys", ""),
         patch("academic_paper.auth.resolve_scopes", return_value=frozenset({Scope.INGEST})),
     ):
         assert c.get("/read", headers=_h("k")).status_code == 403
@@ -64,7 +64,7 @@ def test_insufficient_scope_403(c):
 
 
 def test_non_ascii_header_401_not_500(c):
-    with patch.object(settings, "api_key", "k"), patch.object(settings, "api_keys", ""):
+    with patch.object(get_settings(), "api_key", "k"), patch.object(get_settings(), "api_keys", ""):
         r = c.get("/read", headers={b"x-api-key": "caf\xe9".encode("latin-1")})
         assert r.status_code == 401
 
@@ -93,20 +93,20 @@ def test_resolve_scopes_mismatch_none():
 
 def test_ingest_key_alone_enables_auth(c):
     with (
-        patch.object(settings, "api_key", ""),
-        patch.object(settings, "api_keys", ""),
-        patch.object(settings, "ingest_api_key", "ing"),
+        patch.object(get_settings(), "api_key", ""),
+        patch.object(get_settings(), "api_keys", ""),
+        patch.object(get_settings(), "ingest_api_key", "ing"),
     ):
-        assert settings.auth_enabled
+        assert get_settings().auth_enabled
         assert c.get("/any").status_code == 401
         assert c.get("/any", headers=_h("bad")).status_code == 401
 
 
 def test_ingest_key_lacks_read_scope_403(c):
     with (
-        patch.object(settings, "api_key", ""),
-        patch.object(settings, "api_keys", ""),
-        patch.object(settings, "ingest_api_key", "ing"),
+        patch.object(get_settings(), "api_key", ""),
+        patch.object(get_settings(), "api_keys", ""),
+        patch.object(get_settings(), "ingest_api_key", "ing"),
     ):
         assert c.get("/any", headers=_h("ing")).status_code == 200
         assert c.get("/read", headers=_h("ing")).status_code == 403
@@ -114,8 +114,8 @@ def test_ingest_key_lacks_read_scope_403(c):
 
 def test_auth_disabled_when_nothing_set():
     with (
-        patch.object(settings, "api_key", ""),
-        patch.object(settings, "api_keys", ""),
-        patch.object(settings, "ingest_api_key", ""),
+        patch.object(get_settings(), "api_key", ""),
+        patch.object(get_settings(), "api_keys", ""),
+        patch.object(get_settings(), "ingest_api_key", ""),
     ):
-        assert not settings.auth_enabled
+        assert not get_settings().auth_enabled

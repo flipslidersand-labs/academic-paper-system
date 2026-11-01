@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.db import (
     get_connection,
     list_papers_filtered,
@@ -21,7 +21,7 @@ from academic_paper.server import app
 
 @pytest.fixture
 def client(temp_db):
-    with patch.object(settings, "academic_db", temp_db):
+    with patch.object(get_settings(), "academic_db", temp_db):
         mock_embedder = MagicMock()
         mock_embedder.embed = AsyncMock(return_value=[[0.1] * 768])
         mock_qdrant = MagicMock()
