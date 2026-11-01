@@ -1,5 +1,6 @@
 """SQLite database module for academic paper system."""
 
+import dataclasses
 import functools
 import json
 import logging
@@ -568,48 +569,34 @@ def save_summary(conn: sqlite3.Connection, paper_id: int, model: str, summary: d
 
 
 @_rollback_on_error
-def upsert_job(
-    conn: sqlite3.Connection,
-    job_id: str,
-    status: str,
-    total: int,
-    processed: int,
-    failed: int,
-    errors: list[str],
-    started_at: float,
-    finished_at: float | None,
-    kind: str = "",
-    result: dict | None = None,
-) -> None:
-    """Insert or update a job row."""
+def upsert_job(conn: sqlite3.Connection, job) -> None:
+    """Insert or update a job row from a ``jobs.Job`` dataclass instance.
+
+    The column list comes from the dataclass fields, so adding a Job field needs no change
+    here (the DB column is the only other place). ``errors``/``result`` are stored as JSON.
+    ``started_at`` is set on insert and never updated, as before.
+    """
+    names = [f.name for f in dataclasses.fields(job)]
+    values = [getattr(job, n) for n in names]
+    for i, n in enumerate(names):
+        if n == "errors":
+            values[i] = json.dumps(values[i])
+        elif n == "result":
+            values[i] = json.dumps(values[i]) if values[i] is not None else None
+    updates = ", ".join(f"{n} = excluded.{n}" for n in names if n not in ("id", "started_at"))
     conn.execute(
-        """
-        INSERT INTO jobs (id, status, kind, total, processed, failed, errors, started_at, finished_at, result)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            status = excluded.status,
-            kind = excluded.kind,
-            total = excluded.total,
-            processed = excluded.processed,
-            failed = excluded.failed,
-            errors = excluded.errors,
-            finished_at = excluded.finished_at,
-            result = excluded.result
-    """,
-        (
-            job_id,
-            status,
-            kind,
-            total,
-            processed,
-            failed,
-            json.dumps(errors),
-            started_at,
-            finished_at,
-            json.dumps(result) if result is not None else None,
-        ),
+        f"INSERT INTO jobs ({', '.join(names)}) VALUES ({', '.join('?' * len(names))}) "  # noqa: S608
+        f"ON CONFLICT(id) DO UPDATE SET {updates}",
+        values,
     )
     conn.commit()
+
+
+def _job_row(row: sqlite3.Row) -> dict:
+    d = dict(row)
+    d["errors"] = json.loads(d["errors"])
+    d["result"] = json.loads(d["result"]) if d.get("result") else None
+    return d
 
 
 def load_job(conn: sqlite3.Connection, job_id: str) -> dict | None:
@@ -617,20 +604,9 @@ def load_job(conn: sqlite3.Connection, job_id: str) -> dict | None:
     row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
     if row is None:
         return None
-    d = dict(row)
-    d["errors"] = json.loads(d["errors"])
-    d["result"] = json.loads(d["result"]) if d.get("result") else None
-    return d
+    return _job_row(row)
 
 
 def load_all_jobs(conn: sqlite3.Connection) -> list[dict]:
     """Load all job rows ordered by start time (oldest first)."""
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM jobs ORDER BY started_at ASC")
-    rows = []
-    for row in cursor.fetchall():
-        d = dict(row)
-        d["errors"] = json.loads(d["errors"])
-        d["result"] = json.loads(d["result"]) if d.get("result") else None
-        rows.append(d)
-    return rows
+    return [_job_row(row) for row in conn.execute("SELECT * FROM jobs ORDER BY started_at ASC").fetchall()]
