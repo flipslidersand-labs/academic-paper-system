@@ -25,6 +25,12 @@ PORTFOLIO_CSS = (Path(__file__).resolve().parent / "portfolio.css").read_text(en
 REPO = os.environ.get("GITHUB_REPOSITORY", "flipslidersand-labs/academic-paper-system")
 
 
+def _abort_fetch(url: str, err: Exception) -> None:
+    """Fail closed: partial data must never be published (#771)."""
+    print(f"ERROR: fetch failed for {url}: {err} — aborting, existing output untouched", file=sys.stderr)
+    sys.exit(1)
+
+
 def fetch_all(url: str) -> list:
     """Fetch all items from a paginated list endpoint."""
     items = []
@@ -42,11 +48,9 @@ def fetch_all(url: str) -> list:
                     file=sys.stderr,
                 )
                 sys.exit(1)
-            print(f"[warn] fetch failed: {e}", file=sys.stderr)
-            break
-        except URLError as e:
-            print(f"[warn] fetch failed: {e}", file=sys.stderr)
-            break
+            _abort_fetch(url, e)
+        except (URLError, OSError, ValueError) as e:  # URLError/timeout/connection/bad JSON
+            _abort_fetch(url, e)
         batch = data.get("papers") or data.get("summaries") or []
         items.extend(batch)
         if len(batch) < limit:

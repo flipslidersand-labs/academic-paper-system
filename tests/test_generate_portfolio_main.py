@@ -2,7 +2,7 @@
 
 import json
 import sys
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
 # scripts/ is added to sys.path in tests/conftest.py (#272).
 import generate_portfolio
@@ -74,17 +74,23 @@ def test_summary_objective_is_reflected_by_paper_id(monkeypatch, tmp_path):
     assert "ORPHAN-OBJ" not in html_text  # summaries for unknown papers are ignored
 
 
-def test_partial_fetch_failure_is_not_detected_by_main(monkeypatch, tmp_path):
-    """Characterization (current behavior, see PR notes): fetch_all swallows URLError/HTTPError
-    mid-pagination and returns what it has, so main() publishes partial data and exits 0.
-    If this is later hardened (e.g. fetch_all raises / main exits non-zero), update this test.
-    """
-    calls = {"n": 0}
+@pytest.mark.parametrize(
+    "exc",
+    [
+        URLError("summaries down"),
+        HTTPError("http://api/summaries", 503, "Unavailable", {}, None),
+        TimeoutError("timed out"),
+        ConnectionResetError("reset"),
+    ],
+)
+def test_partial_fetch_failure_exits_1_and_keeps_existing_output(monkeypatch, tmp_path, exc):
+    """#771: any non-auth fetch error aborts before writing; existing docs/ stays intact."""
+    (tmp_path / "index.html").write_text("OLD-HTML", encoding="utf-8")
+    (tmp_path / "papers.json").write_text("OLD-JSON", encoding="utf-8")
 
     def urlopen(req, timeout=15):
-        calls["n"] += 1
         if "/summaries" in req.full_url:
-            raise URLError("summaries down")
+            raise exc
 
         class _Resp:
             def read(self):
@@ -95,8 +101,9 @@ def test_partial_fetch_failure_is_not_detected_by_main(monkeypatch, tmp_path):
     monkeypatch.setattr(generate_portfolio, "urlopen", urlopen)
     monkeypatch.setattr(sys, "argv", ["g", "--api-url", "http://api", "--output-dir", str(tmp_path)])
 
-    generate_portfolio.main()  # no SystemExit
+    with pytest.raises(SystemExit) as ei:
+        generate_portfolio.main()
 
-    data = json.loads((tmp_path / "papers.json").read_text(encoding="utf-8"))
-    assert data["count"] == 2
-    assert "OBJECTIVE" not in (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert ei.value.code == 1
+    assert (tmp_path / "index.html").read_text(encoding="utf-8") == "OLD-HTML"
+    assert (tmp_path / "papers.json").read_text(encoding="utf-8") == "OLD-JSON"
