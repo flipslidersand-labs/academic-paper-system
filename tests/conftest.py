@@ -17,7 +17,7 @@ import pytest
 
 # Settings reads ".env" relative to the cwd (#505). Import the package from an
 # empty cwd so a developer's local .env cannot leak into the module-level
-# `settings` singleton, then disable env_file for any later Settings() calls.
+# cached Settings singleton, then disable env_file for any later Settings() calls.
 _orig_cwd = os.getcwd()
 with tempfile.TemporaryDirectory() as _empty_dir:
     os.chdir(_empty_dir)
@@ -25,6 +25,7 @@ with tempfile.TemporaryDirectory() as _empty_dir:
         from academic_paper import config as _config
         from academic_paper.config import Settings, get_settings
 
+        _baseline_settings = get_settings()
         Settings.model_config["env_file"] = None
         from academic_paper.db import init_db
         from academic_paper.jobs import job_store
@@ -64,13 +65,12 @@ def _reset_job_store():
 
 @pytest.fixture(autouse=True)
 def _restore_settings_cache(monkeypatch):
-    """Keep ``get_settings() is settings`` true after tests that cache_clear() (#604).
+    """Keep ``get_settings()`` returning the import-time instance after cache_clear() (#604).
 
     After ``get_settings.cache_clear()`` the next call would build a fresh
-    Settings that differs from the module-level ``settings`` alias, so re-prime
-    the cache with the original instance on teardown.
+    Settings, so re-prime the cache with the original instance on teardown.
     """
-    original = _config.settings
+    original = _baseline_settings
     yield
     if get_settings() is not original:
         get_settings.cache_clear()
@@ -84,8 +84,8 @@ def override_settings(monkeypatch):
     """Temporarily override Settings fields; restored automatically.
 
     Usage: ``override_settings(max_upload_mb=1)``. Patches the shared instance
-    returned by get_settings() (== the ``settings`` alias), so both access
-    styles see the override and no test assigns ``settings.x = ...`` directly.
+    returned by get_settings() ; no test assigns
+    ``settings.x = ...`` directly.
     """
 
     def _override(**values):

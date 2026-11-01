@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.server import app
 
 
@@ -15,7 +15,7 @@ def test_metrics_endpoint_returns_200(temp_db):
     mock_qdrant = MagicMock()
 
     with (
-        patch.object(settings, "academic_db", temp_db),
+        patch.object(get_settings(), "academic_db", temp_db),
         patch("academic_paper.server.EmbedderClient", return_value=mock_embedder),
         patch("academic_paper.server.QdrantStore", return_value=mock_qdrant),
     ):
@@ -32,7 +32,7 @@ def test_metrics_endpoint_content_type(temp_db):
     mock_qdrant = MagicMock()
 
     with (
-        patch.object(settings, "academic_db", temp_db),
+        patch.object(get_settings(), "academic_db", temp_db),
         patch("academic_paper.server.EmbedderClient", return_value=mock_embedder),
         patch("academic_paper.server.QdrantStore", return_value=mock_qdrant),
     ):
@@ -49,7 +49,7 @@ def test_metrics_contains_http_requests_total(temp_db):
     mock_qdrant = MagicMock()
 
     with (
-        patch.object(settings, "academic_db", temp_db),
+        patch.object(get_settings(), "academic_db", temp_db),
         patch("academic_paper.server.EmbedderClient", return_value=mock_embedder),
         patch("academic_paper.server.QdrantStore", return_value=mock_qdrant),
     ):

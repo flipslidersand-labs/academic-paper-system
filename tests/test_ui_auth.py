@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.server import app
 
 INDEX = Path(__file__).parent.parent / "frontend" / "index.html"
@@ -14,7 +14,7 @@ INDEX = Path(__file__).parent.parent / "frontend" / "index.html"
 
 def _client(temp_db):
     with (
-        patch.object(settings, "academic_db", temp_db),
+        patch.object(get_settings(), "academic_db", temp_db),
         patch("academic_paper.server.EmbedderClient", return_value=MagicMock(embed=AsyncMock())),
         patch("academic_paper.server.QdrantStore", return_value=MagicMock()),
     ):
@@ -32,7 +32,7 @@ def test_frontend_sends_api_key_on_every_api_call():
 
 def test_api_data_endpoints_require_key_while_ui_shell_is_static(temp_db):
     client = _client(temp_db)
-    with patch.object(settings, "api_key", "secret-key"):
+    with patch.object(get_settings(), "api_key", "secret-key"):
         # Every endpoint the SPA calls is gated; with the header it works.
         for path in ("/stats", "/papers", "/search?q=x", "/papers/1/summary"):
             assert client.get(path).status_code == 401, path

@@ -216,8 +216,3 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return the process-wide Settings instance (cached, #389)."""
     return Settings()
-
-
-# Backward-compatible alias: existing ``from academic_paper.config import settings``
-# keeps working and is the same object as ``get_settings()``.
-settings = get_settings()

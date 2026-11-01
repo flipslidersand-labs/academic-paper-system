@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.db import (
     get_connection,
     load_all_jobs,
@@ -43,7 +43,7 @@ def mock_summarizer():
 
 @pytest.fixture
 def client(temp_db, mock_summarizer):
-    with patch.object(settings, "academic_db", temp_db):
+    with patch.object(get_settings(), "academic_db", temp_db):
         mock_embedder = MagicMock()
         mock_qdrant = MagicMock()
         mock_llm = MagicMock()
@@ -64,7 +64,7 @@ def client(temp_db, mock_summarizer):
 
 @pytest.fixture
 def client_no_llm(temp_db):
-    with patch.object(settings, "academic_db", temp_db):
+    with patch.object(get_settings(), "academic_db", temp_db):
         mock_embedder = MagicMock()
         mock_qdrant = MagicMock()
         with (
