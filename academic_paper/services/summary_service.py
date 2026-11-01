@@ -1,16 +1,14 @@
 """Summary retrieval/generation logic for the summary endpoints, extracted from server.py (#359 1/5, #618).
 
 server.py's summary handlers stay thin FastAPI shims: they pass ``app.state.llm`` /
-``app.state.summarizer`` in as arguments and call these functions, which raise
-``HTTPException`` exactly as the inline handlers did, so the response shape and the
-error mapping are unchanged. This module has no dependency on the FastAPI app.
+``app.state.summarizer`` in as arguments and call these functions. Expected failures are raised
+as domain errors (NotFoundError / NotConfiguredError, #741) and mapped to HTTP by the app's
+DomainError handler, so the response shape is unchanged. This module has no dependency on the FastAPI app.
 """
 
 import asyncio
 import logging
 import time
-
-from fastapi import HTTPException
 
 from academic_paper.config import get_settings
 from academic_paper.db import (
@@ -22,7 +20,7 @@ from academic_paper.db import (
     save_summary,
     update_paper_score,
 )
-from academic_paper.errors import _http_exc_for, _safe_error_message
+from academic_paper.errors import DomainError, NotConfiguredError, NotFoundError, _http_exc_for, _safe_error_message
 from academic_paper.models import PaperSummary
 from academic_paper.scorer import compute_score
 from academic_paper.telemetry import get_tracer
@@ -51,16 +49,13 @@ def get_cached_summary(paper_id: int) -> dict:
         with db_connection(get_settings().academic_db) as conn:
             paper = get_paper(conn, paper_id)
             if paper is None:
-                raise HTTPException(status_code=404, detail="Paper not found")
+                raise NotFoundError("Paper not found")
 
             cached_summary = get_summary(conn, paper_id)
             if cached_summary is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Summary not generated yet — POST /papers/{paper_id}/summary to generate",
-                )
+                raise NotFoundError("Summary not generated yet — POST /papers/{paper_id}/summary to generate")
             return _summary_response(paper_id, cached_summary["model"], cached_summary, True)
-    except HTTPException:
+    except DomainError:
         raise
     except Exception as e:
         logger.exception("Failed to get summary for paper_id=%s", paper_id)
@@ -76,7 +71,7 @@ def _read_paper_and_cache(paper_id: int, force: bool) -> tuple[dict, dict | None
     with db_connection(get_settings().academic_db) as conn:
         paper = get_paper(conn, paper_id)
         if paper is None:
-            raise HTTPException(status_code=404, detail="Paper not found")
+            raise NotFoundError("Paper not found")
         cached_summary = None if force else get_summary(conn, paper_id)
         return paper, cached_summary
 
@@ -94,7 +89,7 @@ async def generate_summary(paper_id: int, force: bool, llm, summarizer) -> dict:
         paper, cached_summary = await asyncio.to_thread(_read_paper_and_cache, paper_id, force)
         if cached_summary is not None:
             return _summary_response(paper_id, cached_summary["model"], cached_summary, True)
-    except HTTPException:
+    except DomainError:
         raise
     except Exception as e:
         logger.exception("Failed to check cached summary for paper_id=%s", paper_id)
@@ -102,10 +97,10 @@ async def generate_summary(paper_id: int, force: bool, llm, summarizer) -> dict:
 
     # Connection closed — safe to await LLM for up to 300 s without blocking writers.
     if llm is None:
-        raise HTTPException(status_code=503, detail="LLM not configured")
+        raise NotConfiguredError("LLM not configured")
 
     if summarizer is None:
-        raise HTTPException(status_code=503, detail="Summarizer not initialized")
+        raise NotConfiguredError("Summarizer not initialized")
 
     try:
         with tracer.start_as_current_span("summarize") as span:
@@ -156,7 +151,7 @@ def score_all() -> dict:
             "errors": errors,
             "preferred_categories": preferred,
         }
-    except HTTPException:
+    except DomainError:
         raise
     except Exception as e:
         logger.exception("score_all_papers failed unexpectedly")
@@ -169,12 +164,12 @@ def score_one(paper_id: int) -> dict:
         with db_connection(get_settings().academic_db) as conn:
             paper = get_paper(conn, paper_id)
             if paper is None:
-                raise HTTPException(status_code=404, detail="Paper not found")
+                raise NotFoundError("Paper not found")
             preferred = get_settings().preferred_categories_list
             score = compute_score(paper, preferred)
             update_paper_score(conn, paper_id, score)
         return {"paper_id": paper_id, "score": score}
-    except HTTPException:
+    except DomainError:
         raise
     except Exception as e:
         logger.exception("Failed to score paper_id=%s", paper_id)
@@ -187,7 +182,7 @@ def list_all_summaries(limit: int, offset: int) -> dict:
         with db_connection(get_settings().academic_db) as conn:
             total, summaries = list_summaries(conn, limit=limit, offset=offset)
         return {"total": total, "summaries": summaries}
-    except HTTPException:
+    except DomainError:
         raise
     except Exception as e:
         logger.exception("Failed to list summaries")
