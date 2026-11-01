@@ -51,7 +51,7 @@ async def _search(temp_db, hits, embed_return):
 
         with patch("academic_paper.services.search_service.extract_nuggets", side_effect=fake_extract):
             result = await run_search(
-                conn,
+                temp_db,
                 embedder,
                 store,
                 q="alpha",
