@@ -5,7 +5,7 @@ import logging
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Literal
 
 logger = logging.getLogger(__name__)
@@ -31,18 +31,14 @@ class Job:
     result: dict | None = None
 
     def to_dict(self) -> dict:
-        return {
-            "id": self.id,
-            "status": self.status,
-            "kind": self.kind,
-            "total": self.total,
-            "processed": self.processed,
-            "failed": self.failed,
-            "errors": self.errors[:10],
-            "started_at": self.started_at,
-            "finished_at": self.finished_at,
-            "result": self.result,
-        }
+        d = {f.name: getattr(self, f.name) for f in fields(self)}
+        d["errors"] = self.errors[:10]
+        return d
+
+    @classmethod
+    def from_row(cls, row: dict) -> "Job":
+        """Build a Job from a ``jobs`` table row (as returned by db.load_job/load_all_jobs)."""
+        return cls(**{f.name: row[f.name] for f in fields(cls) if f.name in row})
 
 
 class JobStore:
@@ -79,38 +75,12 @@ class JobStore:
         jobs: list[Job] = []
         with db_connection(db_path) as conn:
             for row in load_all_jobs(conn):
-                status = row["status"]
-                errors = list(row["errors"])
-                if status in ("pending", "running"):
-                    status = "failed"
-                    errors.append("Server restarted while job was in flight")
-                    upsert_job(
-                        conn,
-                        row["id"],
-                        status,
-                        row["total"],
-                        row["processed"],
-                        row["failed"],
-                        errors,
-                        row["started_at"],
-                        row["finished_at"],
-                        kind=row.get("kind", ""),
-                        result=row.get("result"),
-                    )
-                jobs.append(
-                    Job(
-                        id=row["id"],
-                        status=status,
-                        kind=row.get("kind", ""),
-                        total=row["total"],
-                        processed=row["processed"],
-                        failed=row["failed"],
-                        errors=errors,
-                        started_at=row["started_at"],
-                        finished_at=row["finished_at"],
-                        result=row.get("result"),
-                    )
-                )
+                job = Job.from_row(row)
+                if job.status in ("pending", "running"):
+                    job.status = "failed"
+                    job.errors = [*job.errors, "Server restarted while job was in flight"]
+                    upsert_job(conn, job)
+                jobs.append(job)
         return jobs
 
     def _persist(self, job: Job) -> None:
@@ -124,19 +94,7 @@ class JobStore:
         from academic_paper.db import db_connection, upsert_job
 
         with db_connection(self._db_path) as conn:
-            upsert_job(
-                conn,
-                job.id,
-                job.status,
-                job.total,
-                job.processed,
-                job.failed,
-                job.errors,
-                job.started_at,
-                job.finished_at,
-                kind=job.kind,
-                result=job.result,
-            )
+            upsert_job(conn, job)
 
     async def create(self, kind: str = "") -> Job:
         job = Job(id=str(uuid.uuid4()), status="pending", kind=kind)
@@ -164,18 +122,7 @@ class JobStore:
             row = load_job(conn, job_id)
         if row is None:
             return None
-        return Job(
-            id=row["id"],
-            status=row["status"],
-            kind=row.get("kind", ""),
-            total=row["total"],
-            processed=row["processed"],
-            failed=row["failed"],
-            errors=list(row["errors"]),
-            started_at=row["started_at"],
-            finished_at=row["finished_at"],
-            result=row.get("result"),
-        )
+        return Job.from_row(row)
 
     def list_all(self) -> list[Job]:
         with self._lock:

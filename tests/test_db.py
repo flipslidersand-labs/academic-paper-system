@@ -21,6 +21,7 @@ from academic_paper.db import (
     search_fts,
     upsert_job,
 )
+from academic_paper.jobs import Job
 
 
 def test_migrate_add_columns_ignores_duplicate_column(temp_db):
@@ -338,7 +339,7 @@ def _fail_save_summary(conn):
 
 def _fail_upsert_job(conn):
     with pytest.raises(sqlite3.IntegrityError):
-        upsert_job(conn, "j1", None, 0, 0, 0, [], 0.0, None)  # status NOT NULL
+        upsert_job(conn, Job(id="j1", status=None, started_at=0.0))  # status NOT NULL
 
 
 @pytest.mark.parametrize("fail", [_fail_save_chunks, _fail_save_paper, _fail_save_summary, _fail_upsert_job])
