@@ -14,6 +14,7 @@ from academic_paper.config import get_settings
 from academic_paper.db import (
     db_connection,
     get_all_papers_for_scoring,
+    get_chunks,
     get_paper,
     get_summary,
     list_summaries,
@@ -38,6 +39,22 @@ def _summary_response(paper_id: int, model: str, summary: dict, cached: bool) ->
         **{f: summary.get(f, defaults[f]) for f in PaperSummary.model_fields},
         "cached": cached,
     }
+
+
+def chunks_from_db(paper_id: int, top_k: int) -> list[dict]:
+    """First top_k chunks in chunk_index order, Qdrant-shaped; the RAGSummarizer DB-order fallback (#746)."""
+    with db_connection(get_settings().academic_db) as conn:
+        chunks_db = get_chunks(conn, paper_id)
+    return [
+        {
+            "payload": {
+                "paper_id": paper_id,
+                "page_start": chunk.get("page_start") or "unknown",
+                "text": chunk["text"],
+            }
+        }
+        for chunk in chunks_db[:top_k]
+    ]
 
 
 def get_cached_summary(paper_id: int) -> dict:
