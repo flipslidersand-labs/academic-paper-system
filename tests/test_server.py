@@ -1758,3 +1758,28 @@ def test_docs_kwargs_enable_docs_648():
 
     assert _docs_kwargs(True) == {}
     assert _docs_kwargs(False) == {"docs_url": None, "redoc_url": None, "openapi_url": None}
+
+
+def test_every_route_is_covered_by_the_scope_tests():
+    """A new endpoint must be added to _SCOPED_ROUTES (or consciously exempted here), else it ships unauthenticated.
+
+    The scope tests above are a hand-written list; this keeps the list complete (#355).
+    """
+    import re
+
+    from academic_paper.server import app
+
+    exempt = {("get", "/health")}  # liveness probe, unauthenticated by design (#195)
+    covered = [(m, re.sub(r"\?.*$", "", p)) for m, p, _ in _SCOPED_ROUTES]
+
+    def _is_covered(method: str, template: str) -> bool:
+        rx = re.compile("^" + re.sub(r"\\\{[^}]+\\\}", "[^/]+", re.escape(template)) + "$")
+        return any(m == method and rx.match(p) for m, p in covered)
+
+    missing = [
+        (method, path)
+        for path, ops in app.openapi()["paths"].items()
+        for method in ops
+        if (method, path) not in exempt and not _is_covered(method, path)
+    ]
+    assert missing == [], f"routes without a scope test (add to _SCOPED_ROUTES): {missing}"
