@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.db import get_connection, save_chunks, save_paper
 from academic_paper.jobs import job_store
 from academic_paper.server import _run_summarize_all, app
@@ -29,7 +29,7 @@ def summarizer():
 
 @pytest.fixture
 def client(temp_db, summarizer):
-    with patch.object(settings, "academic_db", temp_db), patch.object(settings, "api_key", ""):
+    with patch.object(get_settings(), "academic_db", temp_db), patch.object(get_settings(), "api_key", ""):
         with (
             patch("academic_paper.server.EmbedderClient", return_value=MagicMock()),
             patch("academic_paper.server.QdrantStore", return_value=MagicMock()),

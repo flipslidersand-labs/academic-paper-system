@@ -16,7 +16,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 from academic_paper.jobs import job_store
 from academic_paper.server import app
 from academic_paper.services import ingest_service as svc
@@ -110,8 +110,8 @@ def test_pipeline_embed_failure_does_not_touch_db_or_delete_in_pipeline():
 @pytest.fixture
 def client(temp_db):
     with (
-        patch.object(settings, "academic_db", temp_db),
-        patch.object(settings, "api_key", ""),
+        patch.object(get_settings(), "academic_db", temp_db),
+        patch.object(get_settings(), "api_key", ""),
     ):
         mock_embedder = MagicMock()
         mock_embedder.embed = AsyncMock(return_value=[[0.1] * 768])

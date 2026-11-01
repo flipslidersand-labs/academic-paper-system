@@ -7,7 +7,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from academic_paper.config import Settings, settings
+from academic_paper.config import Settings, get_settings
 from academic_paper.server import verify_api_key
 
 _app = FastAPI()
@@ -28,14 +28,14 @@ def _get(c, key=None):
 
 
 def test_api_key_only_unchanged(c):
-    with patch.object(settings, "api_key", "a"), patch.object(settings, "api_keys", ""):
+    with patch.object(get_settings(), "api_key", "a"), patch.object(get_settings(), "api_keys", ""):
         assert _get(c, "a").status_code == 200
         assert _get(c, "b").status_code == 401
         assert _get(c).status_code == 401
 
 
 def test_api_keys_accept_each_and_reject_others(c):
-    with patch.object(settings, "api_key", ""), patch.object(settings, "api_keys", "a,b"):
+    with patch.object(get_settings(), "api_key", ""), patch.object(get_settings(), "api_keys", "a,b"):
         assert _get(c, "a").status_code == 200
         assert _get(c, "b").status_code == 200
         assert _get(c, "c").status_code == 401
@@ -43,7 +43,7 @@ def test_api_keys_accept_each_and_reject_others(c):
 
 
 def test_api_key_and_api_keys_combined(c):
-    with patch.object(settings, "api_key", "old"), patch.object(settings, "api_keys", "new"):
+    with patch.object(get_settings(), "api_key", "old"), patch.object(get_settings(), "api_keys", "new"):
         assert _get(c, "old").status_code == 200
         assert _get(c, "new").status_code == 200
         assert _get(c, "other").status_code == 401
@@ -51,7 +51,7 @@ def test_api_key_and_api_keys_combined(c):
 
 @pytest.mark.parametrize("keys", ["a,,b", "a, ,b", ",a,"])
 def test_empty_elements_do_not_disable_auth_or_match_empty(c, keys):
-    with patch.object(settings, "api_key", ""), patch.object(settings, "api_keys", keys):
+    with patch.object(get_settings(), "api_key", ""), patch.object(get_settings(), "api_keys", keys):
         assert _get(c, "").status_code == 401
         assert _get(c, "   ").status_code == 401
         assert _get(c).status_code == 401
@@ -61,25 +61,25 @@ def test_empty_elements_do_not_disable_auth_or_match_empty(c, keys):
 @pytest.mark.parametrize("keys", [",", "  ,  "])
 def test_only_blank_api_keys_means_auth_disabled(c, keys):
     # Blank-only config is equivalent to unset (documented); never an accept-empty-key hole
-    with patch.object(settings, "api_key", ""), patch.object(settings, "api_keys", keys):
-        assert settings.accepted_api_keys == []
+    with patch.object(get_settings(), "api_key", ""), patch.object(get_settings(), "api_keys", keys):
+        assert get_settings().accepted_api_keys == []
         assert _get(c).status_code == 200
 
 
 def test_whitespace_around_elements_is_stripped(c):
-    with patch.object(settings, "api_key", ""), patch.object(settings, "api_keys", " a , b "):
+    with patch.object(get_settings(), "api_key", ""), patch.object(get_settings(), "api_keys", " a , b "):
         assert _get(c, "a").status_code == 200
         assert _get(c, "b").status_code == 200
 
 
 def test_both_empty_auth_disabled(c):
-    with patch.object(settings, "api_key", ""), patch.object(settings, "api_keys", ""):
+    with patch.object(get_settings(), "api_key", ""), patch.object(get_settings(), "api_keys", ""):
         assert _get(c).status_code == 200
 
 
 def test_non_ascii_header_returns_401_not_500(c):
     """Regression (#425) with multiple keys configured."""
-    with patch.object(settings, "api_key", "k"), patch.object(settings, "api_keys", "a,b"):
+    with patch.object(get_settings(), "api_key", "k"), patch.object(get_settings(), "api_keys", "a,b"):
         r = c.get("/protected", headers={b"x-api-key": "caf\xe9".encode("latin-1")})
         assert r.status_code == 401
 
