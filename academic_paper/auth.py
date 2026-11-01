@@ -10,7 +10,7 @@ from enum import StrEnum
 
 from fastapi import Header, HTTPException
 
-from academic_paper.config import settings
+from academic_paper.config import get_settings
 
 
 class Scope(StrEnum):
@@ -50,10 +50,10 @@ def require_scope(*scopes: Scope) -> Callable[..., Awaitable[None]]:
     required = frozenset(scopes)
 
     async def dependency(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
-        if not settings.auth_enabled:
+        if not get_settings().auth_enabled:
             return  # auth disabled
-        ingest_keys = [settings.ingest_api_key] if settings.ingest_api_key else []
-        granted = resolve_scopes(x_api_key, settings.accepted_api_keys, ingest_keys)
+        ingest_keys = [get_settings().ingest_api_key] if get_settings().ingest_api_key else []
+        granted = resolve_scopes(x_api_key, get_settings().accepted_api_keys, ingest_keys)
         if granted is None:
             raise HTTPException(status_code=401, detail="Invalid or missing API key")
         if not required <= granted:
