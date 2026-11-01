@@ -1,5 +1,5 @@
 # Stage 1: Build — install pinned deps into a virtualenv
-FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS builder
+FROM python:3.15-slim@sha256:94d3426f1def7db4a106a232ac121bfd975393e5dfd40a619b955fae45fe7913 AS builder
 WORKDIR /build
 COPY pyproject.toml README.md requirements.lock ./
 COPY academic_paper/ ./academic_paper/
@@ -8,7 +8,7 @@ RUN python -m venv /opt/venv && \
     /opt/venv/bin/pip install --no-cache-dir --no-deps .
 
 # Stage 2: Runtime — slim image with only the venv, no build toolchain
-FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS runtime
+FROM python:3.15-slim@sha256:94d3426f1def7db4a106a232ac121bfd975393e5dfd40a619b955fae45fe7913 AS runtime
 COPY --from=builder /opt/venv /opt/venv
 WORKDIR /app
 COPY frontend/ ./frontend/
