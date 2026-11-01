@@ -223,3 +223,7 @@ MIT
 The daily arXiv collection, the weekly portfolio publish and their watchdog run from a private ops repo on a
 self-hosted runner. This public repo has no self-hosted runner and no `runs-on` pointing at one: public CI uses
 GitHub-hosted runners only (repo-compass ADR-010).
+
+## 設計判断 / Architecture decisions
+
+[ADR 一覧](docs/adr/README.md) — 設計判断、根拠資料、未決定事項。
