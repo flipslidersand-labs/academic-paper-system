@@ -46,3 +46,33 @@ def test_safe_error_message_logs_only_unclassified(caplog):
     assert msg.startswith("Internal error [")
     # the id in the job message is findable in the log
     assert msg[len("Internal error [") : -1] in caplog.text
+
+
+def test_domain_errors_map_to_404_and_503_with_their_message():
+    from academic_paper.errors import NotConfiguredError, NotFoundError, _http_exc_for
+
+    nf = classify_error(NotFoundError("Paper not found"))
+    nc = classify_error(NotConfiguredError("LLM not configured"))
+    assert (nf.kind, nf.status, nf.public_message) == ("not_found", 404, "Paper not found")
+    assert (nc.kind, nc.status, nc.public_message) == ("not_configured", 503, "LLM not configured")
+    # the same mapping is reused by the generic HTTP path and the job-error text
+    assert _http_exc_for(NotFoundError("x"), "fb").status_code == 404
+    assert _safe_error_message(NotConfiguredError("LLM not configured")) == "LLM not configured"
+
+
+def test_app_returns_detail_body_for_domain_error():
+    """The app-level handler yields the same {"detail": ...} body as HTTPException (#741)."""
+    from fastapi.testclient import TestClient
+
+    from academic_paper.errors import NotFoundError
+    from academic_paper.server import app
+
+    @app.get("/__domain_error_probe")
+    def _probe():
+        raise NotFoundError("Paper not found")
+
+    try:
+        r = TestClient(app).get("/__domain_error_probe")
+    finally:
+        app.router.routes[:] = [x for x in app.router.routes if getattr(x, "path", "") != "/__domain_error_probe"]
+    assert (r.status_code, r.json()) == (404, {"detail": "Paper not found"})

@@ -24,7 +24,12 @@ from academic_paper.db import (
     update_paper_status,
 )
 from academic_paper.embedder import EmbedderClient
-from academic_paper.errors import _http_exc_for, _safe_error_message  # noqa: F401  (re-exported, #614/#615)
+from academic_paper.errors import (  # noqa: F401  (_http_exc_for/_safe_error_message re-exported, #614/#615)
+    DomainError,
+    _http_exc_for,
+    _safe_error_message,
+    classify_error,
+)
 from academic_paper.jobs import job_store
 from academic_paper.llm import get_llm_client
 from academic_paper.logging_config import configure_logging
@@ -179,6 +184,13 @@ def _docs_kwargs(enabled: bool) -> dict[str, None]:
 
 
 app = FastAPI(title="Academic Paper System", lifespan=lifespan, **_docs_kwargs(get_settings().enable_docs))
+
+
+@app.exception_handler(DomainError)
+async def _domain_error_handler(_request: Request, exc: DomainError) -> JSONResponse:
+    """Service-layer DomainError -> HTTP, same {"detail": ...} body as HTTPException (#741)."""
+    info = classify_error(exc)
+    return JSONResponse(status_code=info.status, content={"detail": info.public_message})
 
 
 # /metrics is added by Instrumentator.expose() rather than manually registered, so it
