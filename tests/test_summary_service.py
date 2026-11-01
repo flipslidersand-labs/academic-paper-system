@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 from academic_paper.config import get_settings
 from academic_paper.db import get_connection, save_paper
+from academic_paper.errors import NotConfiguredError, NotFoundError
 from academic_paper.services.summary_service import generate_summary, get_cached_summary
 
 SUMMARY = {"objective": "o", "method": "m", "results": "r", "limitations": "l", "keywords": ["k"]}
@@ -47,16 +48,13 @@ def _generate(pid, force, llm, summarizer):
 
 
 def test_get_cached_missing_paper_404():
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(NotFoundError, match="Paper not found"):
         get_cached_summary(999)
-    assert ei.value.status_code == 404
 
 
 def test_get_cached_not_generated_404(paper_id):
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(NotFoundError, match="not generated"):
         get_cached_summary(paper_id)
-    assert ei.value.status_code == 404
-    assert "not generated" in ei.value.detail
 
 
 def test_generate_then_cache_hit(paper_id, llm, summarizer):
@@ -76,21 +74,18 @@ def test_force_regenerates(paper_id, llm, summarizer):
 
 
 def test_missing_paper_404(llm, summarizer):
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(NotFoundError):
         _generate(999, False, llm, summarizer)
-    assert ei.value.status_code == 404
 
 
 def test_llm_none_503(paper_id, summarizer):
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(NotConfiguredError, match="LLM not configured"):
         _generate(paper_id, False, None, summarizer)
-    assert (ei.value.status_code, ei.value.detail) == (503, "LLM not configured")
 
 
 def test_summarizer_none_503(paper_id, llm):
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(NotConfiguredError, match="Summarizer not initialized"):
         _generate(paper_id, False, llm, None)
-    assert (ei.value.status_code, ei.value.detail) == (503, "Summarizer not initialized")
 
 
 def test_timeout_maps_to_504(paper_id, llm, summarizer):
@@ -146,9 +141,8 @@ def test_score_one_ok_and_404(_db):
     (pid,) = _mk_papers(_db, 1)
     r = score_one(pid)
     assert r["paper_id"] == pid and isinstance(r["score"], float)
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(NotFoundError):
         score_one(9999)
-    assert ei.value.status_code == 404
 
 
 def test_list_all_summaries_empty(_db):

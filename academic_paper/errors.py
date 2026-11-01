@@ -14,7 +14,31 @@ from academic_paper.llm import LLMOutputError
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ErrorInfo", "PdfExtractionError", "_http_exc_for", "_safe_error_message", "classify_error"]
+__all__ = [
+    "DomainError",
+    "ErrorInfo",
+    "NotConfiguredError",
+    "NotFoundError",
+    "PdfExtractionError",
+    "_http_exc_for",
+    "_safe_error_message",
+    "classify_error",
+]
+
+
+class DomainError(Exception):
+    """Service-layer error with an author-written, client-safe message (#741).
+
+    Raised by services instead of HTTPException; the HTTP layer maps it via classify_error.
+    """
+
+
+class NotFoundError(DomainError):
+    """A requested resource does not exist (HTTP 404)."""
+
+
+class NotConfiguredError(DomainError):
+    """A required backend is not configured or not initialized (HTTP 503)."""
 
 
 class PdfExtractionError(ValueError):
@@ -37,6 +61,7 @@ class ErrorInfo:
 def classify_error(exc: Exception, fallback_msg: str = "") -> ErrorInfo:
     """Classify an exception without logging or building an HTTPException (#148, #741).
 
+    - NotFoundError → 404, NotConfiguredError → 503 (service-layer domain errors, #741)
     - embedding-svc 401/403 (key rejected) → 502 (#792)
     - Dependency-unavailable (httpx connect/timeout, Qdrant HTTP errors) → 502/503
     - EmbeddingCountMismatchError / EmbeddingResponseError / LLMOutputError → 502
@@ -45,6 +70,10 @@ def classify_error(exc: Exception, fallback_msg: str = "") -> ErrorInfo:
     - ValueError from input validation (no text, no chunks) → 400
     - Everything else → kind "internal" (500); the caller adds an opaque id and logs.
     """
+    if isinstance(exc, NotFoundError):
+        return ErrorInfo("not_found", 404, str(exc))
+    if isinstance(exc, NotConfiguredError):
+        return ErrorInfo("not_configured", 503, str(exc))
     if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (401, 403):
         # A config problem the operator must fix, not an unclassified 500. The key value is never included.
         return ErrorInfo("upstream_auth", 502, "Embedding service rejected authentication (check EMBEDDING_API_KEY)")
