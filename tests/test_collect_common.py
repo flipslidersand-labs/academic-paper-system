@@ -589,3 +589,42 @@ def test_ingest_downloaded_builds_metadata_and_calls_pre_ingest():
         "source": "arxiv",
     }
     assert args[5] == 7
+
+
+# ---------------------------------------------------------------- parse_retry_after (#819)
+
+
+def test_parse_retry_after_integer_seconds():
+    from _collect_common import parse_retry_after
+
+    assert parse_retry_after("7") == 7
+
+
+def test_parse_retry_after_missing_or_garbage_uses_default():
+    from _collect_common import parse_retry_after
+
+    assert parse_retry_after(None, default=15) == 15
+    assert parse_retry_after("soon", default=15) == 15
+    assert parse_retry_after("nan", default=15) == 15
+    assert parse_retry_after("-5", default=15) == 0
+
+
+def test_parse_retry_after_caps_large_values():
+    from _collect_common import parse_retry_after
+
+    assert parse_retry_after("86400", max_wait=30) == 30
+    assert parse_retry_after("inf", default=15, max_wait=30) == 15
+
+
+def test_parse_retry_after_http_date():
+    import email.utils
+    from datetime import UTC, datetime, timedelta
+
+    from _collect_common import parse_retry_after
+
+    future = email.utils.format_datetime(datetime.now(UTC) + timedelta(seconds=20), usegmt=True)
+    assert 0 < parse_retry_after(future) <= 20
+    far = email.utils.format_datetime(datetime.now(UTC) + timedelta(days=2), usegmt=True)
+    assert parse_retry_after(far, max_wait=30) == 30
+    past = email.utils.format_datetime(datetime.now(UTC) - timedelta(hours=1), usegmt=True)
+    assert parse_retry_after(past) == 0

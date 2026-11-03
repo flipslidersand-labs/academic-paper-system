@@ -3,7 +3,9 @@
 Complements tests/test_collect_scripts.py. No network: httpx is mocked with respx and time.sleep is patched.
 """
 
+import email.utils
 import time
+from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs
 
 import httpx
@@ -255,21 +257,43 @@ def test_s2_429_twice_reports_fetch_error_after_single_retry(sleeps):
 
 
 @respx.mock
-def test_s2_non_numeric_retry_after_is_reported_as_fetch_error_not_crash(sleeps):
-    """HTTP-date Retry-After makes int() raise; it is swallowed into fetch_error (no retry happens).
-
-    Characterization test: the collector does not crash, but it also does not wait/retry.
-    """
+def test_s2_http_date_retry_after_is_waited_and_retried(sleeps):
+    """HTTP-date Retry-After must not abort pagination: wait (capped) and retry once (#819)."""
+    date = email.utils.format_datetime(datetime.now(UTC) + timedelta(seconds=10), usegmt=True)
     route = respx.get(semantic_scholar_collect.S2_API).mock(
-        return_value=httpx.Response(429, headers={"retry-after": "Wed, 21 Oct 2026 07:28:00 GMT"})
+        side_effect=[httpx.Response(429, headers={"retry-after": date}), _s2_page([_s2_paper(1)])]
     )
 
     papers, err = semantic_scholar_collect.fetch_papers("rag", max_results=5)
 
-    assert papers == []
-    assert err
-    assert route.call_count == 1
-    assert sleeps == []
+    assert err is None
+    assert len(papers) == 1
+    assert route.call_count == 2
+    assert len(sleeps) == 1 and 0 <= sleeps[0] <= 10
+
+
+@respx.mock
+def test_s2_huge_retry_after_is_capped(sleeps):
+    respx.get(semantic_scholar_collect.S2_API).mock(
+        side_effect=[httpx.Response(429, headers={"retry-after": "86400"}), _s2_page([_s2_paper(1)])]
+    )
+
+    papers, err = semantic_scholar_collect.fetch_papers("rag", max_results=5)
+
+    assert err is None
+    assert sleeps == [30]
+
+
+@respx.mock
+def test_s2_garbage_retry_after_falls_back_to_default(sleeps):
+    respx.get(semantic_scholar_collect.S2_API).mock(
+        side_effect=[httpx.Response(429, headers={"retry-after": "soon"}), _s2_page([_s2_paper(1)])]
+    )
+
+    papers, err = semantic_scholar_collect.fetch_papers("rag", max_results=5)
+
+    assert err is None
+    assert sleeps == [15]
 
 
 @respx.mock

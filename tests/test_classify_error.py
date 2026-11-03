@@ -131,3 +131,47 @@ def test_no_handwritten_exception_to_http_boilerplate():
                 ):
                     offenders.append(f"{path.name}:{fn.name}")
     assert sorted(set(offenders)) == ["papers.py:ingest_paper"], offenders
+
+
+def _status_error(status: int, url: str) -> httpx.HTTPStatusError:
+    req = httpx.Request("POST", url)
+    return httpx.HTTPStatusError("x", request=req, response=httpx.Response(status, request=req))
+
+
+def _embed_url() -> str:
+    from academic_paper.config import get_settings
+
+    return f"{get_settings().embedding_svc_url}/embed/batch"
+
+
+@pytest.mark.parametrize(
+    ("status", "kind", "http_status"),
+    [
+        (503, "upstream_unavailable", 503),
+        (500, "upstream_unavailable", 503),
+        (429, "upstream_unavailable", 503),
+        (404, "upstream_protocol", 502),
+        (400, "upstream_protocol", 502),
+    ],
+)
+def test_http_status_error_classified_by_status(status, kind, http_status):
+    """5xx/429 -> 503, other 4xx -> 502 instead of an opaque 500 (#818)."""
+    info = classify_error(_status_error(status, _embed_url()))
+    assert (info.kind, info.status) == (kind, http_status)
+
+
+def test_auth_error_mentions_embedding_key_only_for_embedding_svc():
+    """An Ollama 401 must not point the operator at EMBEDDING_API_KEY (#818)."""
+    emb = classify_error(_status_error(401, _embed_url()))
+    assert (emb.kind, emb.status) == ("upstream_auth", 502)
+    assert "EMBEDDING_API_KEY" in emb.public_message
+
+    for status in (401, 403):
+        llm = classify_error(_status_error(status, "http://ollama.invalid:11434/api/generate"))
+        assert (llm.kind, llm.status) == ("upstream_auth", 502)
+        assert "EMBEDDING_API_KEY" not in llm.public_message
+
+
+def test_safe_error_message_for_http_status_error_is_not_opaque():
+    msg = _safe_error_message(_status_error(503, _embed_url()))
+    assert not msg.startswith("Internal error")
