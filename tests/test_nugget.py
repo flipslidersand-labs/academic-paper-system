@@ -86,6 +86,31 @@ def test_cosine_similarity_basic():
 
 def test_cosine_similarity_zero_vector():
     assert cosine_similarity([0.0, 0.0], [1.0, 1.0]) == 0.0
+    assert cosine_similarity([1.0, 1.0], [0.0, 0.0]) == 0.0
+
+
+def test_cosine_similarity_empty_returns_zero():
+    assert cosine_similarity([], []) == 0.0
+    assert cosine_similarity([], [1.0, 2.0]) == 0.0
+    assert cosine_similarity([1.0, 2.0], []) == 0.0
+
+
+def test_cosine_similarity_length_mismatch_truncates_dot_keeps_full_norms():
+    # 内積は短い方に切り詰め、ノルムは各ベクトル全体で計算する (#820 以前からの挙動)。
+    assert cosine_similarity([3.0, 4.0], [1.0]) == pytest.approx(0.6)
+    assert cosine_similarity([1.0], [3.0, 4.0]) == pytest.approx(0.6)
+    # 共通部分が直交なら 0、片方がゼロベクトルなら 0。
+    assert cosine_similarity([1.0, 0.0, 5.0], [0.0, 1.0]) == 0.0
+    assert cosine_similarity([0.0], [1.0, 1.0]) == 0.0
+
+
+def test_cosine_similarity_sign_and_scale():
+    assert cosine_similarity([1.0, 2.0], [-1.0, -2.0]) == pytest.approx(-1.0)
+    assert cosine_similarity([3.0, 4.0], [3.0, 4.0]) == 1.0
+    assert cosine_similarity([3.0, 4.0], [300.0, 400.0]) == pytest.approx(1.0)
+    assert cosine_similarity([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]) == pytest.approx(
+        32.0 / (14.0**0.5 * 77.0**0.5), rel=1e-12
+    )
 
 
 def test_extract_nuggets_embedding_shifts_ranking():
