@@ -9,6 +9,7 @@ import httpx
 from fastapi import HTTPException
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
+from academic_paper.config import get_settings
 from academic_paper.embedder import EmbeddingCountMismatchError, EmbeddingResponseError
 from academic_paper.llm import LLMOutputError
 
@@ -59,11 +60,31 @@ class ErrorInfo:
     public_message: str
 
 
+def _is_embedding_svc(exc: httpx.HTTPStatusError) -> bool:
+    """True when the failed request went to embedding-svc (host:port match), not Ollama etc. (#818)."""
+    return exc.request.url.netloc == httpx.URL(get_settings().embedding_svc_url).netloc
+
+
+def _classify_http_status(exc: httpx.HTTPStatusError) -> ErrorInfo:
+    """Classify an upstream HTTP error by status, regardless of which client raised it (#792, #818)."""
+    status = exc.response.status_code
+    if status in (401, 403):
+        # A config problem the operator must fix. The key value is never included.
+        if _is_embedding_svc(exc):
+            return ErrorInfo(
+                "upstream_auth", 502, "Embedding service rejected authentication (check EMBEDDING_API_KEY)"
+            )
+        return ErrorInfo("upstream_auth", 502, "Upstream service rejected authentication")
+    if status >= 500 or status == 429:
+        return ErrorInfo("upstream_unavailable", 503, "Upstream service unavailable")
+    return ErrorInfo("upstream_protocol", 502, "Upstream service rejected the request")
+
+
 def classify_error(exc: Exception, fallback_msg: str = "") -> ErrorInfo:
     """Classify an exception without logging or building an HTTPException (#148, #741).
 
     - NotFoundError → 404, NotConfiguredError → 503 (service-layer domain errors, #741)
-    - embedding-svc 401/403 (key rejected) → 502 (#792)
+    - httpx.HTTPStatusError: 401/403 → 502, 5xx/429 → 503, other 4xx → 502 (#792, #818)
     - Dependency-unavailable (httpx connect/timeout, Qdrant HTTP errors) → 502/503
     - EmbeddingCountMismatchError / EmbeddingResponseError / LLMOutputError → 502
     - builtin TimeoutError (asyncio.wait_for deadlines) → 504 (#423)
@@ -75,9 +96,8 @@ def classify_error(exc: Exception, fallback_msg: str = "") -> ErrorInfo:
         return ErrorInfo("not_found", 404, str(exc))
     if isinstance(exc, NotConfiguredError):
         return ErrorInfo("not_configured", 503, str(exc))
-    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (401, 403):
-        # A config problem the operator must fix, not an unclassified 500. The key value is never included.
-        return ErrorInfo("upstream_auth", 502, "Embedding service rejected authentication (check EMBEDDING_API_KEY)")
+    if isinstance(exc, httpx.HTTPStatusError):
+        return _classify_http_status(exc)
     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
         return ErrorInfo("upstream_unavailable", 503, "Upstream service unavailable")
     if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)):

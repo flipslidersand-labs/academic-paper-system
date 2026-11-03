@@ -342,6 +342,76 @@ def test_pin_resolution_rejects_mismatched_port():
             socket.getaddrinfo("example.com", None)
 
 
+def test_pin_resolution_rejects_non_numeric_port():
+    """#833: a non-numeric port ('abc') is refused as a mismatch, not a ValueError leak."""
+    import socket
+
+    from _collect_common import _pin_resolution
+
+    ai = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("203.0.113.1", 443))]
+    with _pin_resolution("example.com", ai):
+        with pytest.raises(RuntimeError, match="pinned"):
+            socket.getaddrinfo("example.com", "abc")
+        with pytest.raises(RuntimeError, match="pinned"):
+            socket.getaddrinfo("example.com", port=[443])  # TypeError path
+
+
+def test_pin_resolution_delegates_other_hosts_to_real_getaddrinfo(monkeypatch):
+    """#833: the pin is host-scoped; other hosts go to the original getaddrinfo."""
+    import socket
+
+    from _collect_common import _pin_resolution
+
+    calls = []
+    other = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("198.51.100.7", 80))]
+
+    def fake_real(node, *args, **kwargs):
+        calls.append((node, args, kwargs))
+        return other
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_real)
+    ai = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("203.0.113.1", 443))]
+    with _pin_resolution("example.com", ai):
+        assert socket.getaddrinfo("other.example", 80, type=socket.SOCK_STREAM) == other
+        assert calls == [("other.example", (80,), {"type": socket.SOCK_STREAM})]
+    assert socket.getaddrinfo is fake_real
+
+
+def test_resolve_safe_raises_value_error_on_dns_failure(monkeypatch):
+    """#833: DNS failure (gaierror) is surfaced as ValueError, never a raw gaierror."""
+    import socket
+
+    from _collect_common import _resolve_safe
+
+    def boom(*args, **kwargs):
+        raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+
+    monkeypatch.setattr(socket, "getaddrinfo", boom)
+    with pytest.raises(ValueError, match="Could not resolve host 'nx.example'"):
+        _resolve_safe("nx.example", 443)
+    with pytest.raises(ValueError, match="Could not resolve host"):
+        assert_safe_url("https://nx.example/paper.pdf")
+
+
+def test_resolve_safe_rejects_only_non_global_and_filters_mixed(monkeypatch):
+    """#833: all-private results are refused; mixed results keep only global addrs."""
+    import socket
+
+    from _collect_common import _resolve_safe
+
+    def ai(ip):
+        return (socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 443))
+
+    private_only = [ai("10.0.0.5"), ai("127.0.0.1"), ai("169.254.169.254")]
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: private_only)
+    with pytest.raises(ValueError, match="non-public address"):
+        _resolve_safe("internal.example", 443)
+
+    mixed = [ai("10.0.0.5"), ai("203.0.113.1".replace("203.0.113.1", "8.8.8.8"))]
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: mixed)
+    assert _resolve_safe("mixed.example", 443) == [ai("8.8.8.8")]
+
+
 def test_download_pdf_pins_resolution_during_fetch():
     """download_pdf must pin socket.getaddrinfo so the client's own connect
     can't re-resolve a rebinding domain to a different (private) address."""
@@ -589,3 +659,42 @@ def test_ingest_downloaded_builds_metadata_and_calls_pre_ingest():
         "source": "arxiv",
     }
     assert args[5] == 7
+
+
+# ---------------------------------------------------------------- parse_retry_after (#819)
+
+
+def test_parse_retry_after_integer_seconds():
+    from _collect_common import parse_retry_after
+
+    assert parse_retry_after("7") == 7
+
+
+def test_parse_retry_after_missing_or_garbage_uses_default():
+    from _collect_common import parse_retry_after
+
+    assert parse_retry_after(None, default=15) == 15
+    assert parse_retry_after("soon", default=15) == 15
+    assert parse_retry_after("nan", default=15) == 15
+    assert parse_retry_after("-5", default=15) == 0
+
+
+def test_parse_retry_after_caps_large_values():
+    from _collect_common import parse_retry_after
+
+    assert parse_retry_after("86400", max_wait=30) == 30
+    assert parse_retry_after("inf", default=15, max_wait=30) == 15
+
+
+def test_parse_retry_after_http_date():
+    import email.utils
+    from datetime import UTC, datetime, timedelta
+
+    from _collect_common import parse_retry_after
+
+    future = email.utils.format_datetime(datetime.now(UTC) + timedelta(seconds=20), usegmt=True)
+    assert 0 < parse_retry_after(future) <= 20
+    far = email.utils.format_datetime(datetime.now(UTC) + timedelta(days=2), usegmt=True)
+    assert parse_retry_after(far, max_wait=30) == 30
+    past = email.utils.format_datetime(datetime.now(UTC) - timedelta(hours=1), usegmt=True)
+    assert parse_retry_after(past) == 0
