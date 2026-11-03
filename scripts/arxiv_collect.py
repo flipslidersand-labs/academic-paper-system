@@ -33,7 +33,14 @@ from urllib.parse import quote
 
 import defusedxml.ElementTree as ET  # noqa: N817 (matches stdlib ET convention)
 import httpx
-from _collect_common import add_common_args, format_date_range, ingest_downloaded, run_collect, write_summary
+from _collect_common import (
+    add_common_args,
+    format_date_range,
+    ingest_downloaded,
+    parse_retry_after,
+    run_collect,
+    write_summary,
+)
 from cli_utils import check_date_order, positive_int
 
 # academic_paper is importable from repo root (pip install -e .)
@@ -43,7 +50,6 @@ from academic_paper.retry import with_retry
 ARXIV_API = "https://export.arxiv.org/api/query"
 ARXIV_PDF_BASE = "https://arxiv.org/pdf"
 FETCH_FACTOR = 5  # multiply max_results when date-filtering to fill the target
-_RETRY_AFTER_MAX = 30.0  # cap on honoring a Retry-After header (seconds)
 
 
 class _RetryableStatusError(httpx.HTTPStatusError):
@@ -104,10 +110,7 @@ def fetch_papers(
             if r.status_code == 429 or r.status_code >= 500:
                 if r.status_code == 429:
                     # with_retry only does exponential backoff; honor Retry-After here.
-                    try:
-                        time.sleep(min(float(r.headers.get("Retry-After", 0)), _RETRY_AFTER_MAX))
-                    except ValueError:
-                        pass  # HTTP-date form: fall back to with_retry backoff
+                    time.sleep(parse_retry_after(r.headers.get("Retry-After"), default=0))
                 raise _RetryableStatusError(str(exc), request=exc.request, response=exc.response) from exc
             raise
         return r
