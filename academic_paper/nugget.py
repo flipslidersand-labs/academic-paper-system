@@ -83,9 +83,10 @@ def _normalize(scores: list[float]) -> list[float]:
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     """Cosine similarity between two vectors. Returns 0.0 for a zero vector."""
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
+    n = min(len(a), len(b))  # 長さ不一致は従来どおり内積のみ短い方に切り詰める
+    dot = math.sumprod(a[:n], b[:n])
+    norm_a = math.hypot(*a)
+    norm_b = math.hypot(*b)
     if norm_a == 0 or norm_b == 0:
         return 0.0
     return dot / (norm_a * norm_b)
