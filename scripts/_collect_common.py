@@ -11,13 +11,16 @@ Provides:
 
 import argparse
 import contextlib
+import email.utils
 import ipaddress
 import json
+import math
 import re
 import socket
 import sys
 import tempfile
 import threading
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
@@ -32,6 +35,29 @@ _ALLOWED_SCHEMES = {"http", "https"}
 _ALLOWED_PDF_CONTENT_TYPES = {"application/pdf", "application/x-pdf"}
 _PDF_MAGIC = b"%PDF-"
 _MAX_REDIRECTS = 5
+RETRY_AFTER_MAX = 30.0  # cap on honoring a Retry-After header (seconds)
+
+
+def parse_retry_after(value: str | None, default: float = 15.0, max_wait: float = RETRY_AFTER_MAX) -> float:
+    """Seconds to wait for a Retry-After header: integer seconds or HTTP-date, clamped to [0, max_wait].
+
+    Missing / unparseable / non-finite values yield `default` (also clamped), so a bad header never
+    aborts a collector and a huge one never stalls a cron job (#819).
+    """
+    wait = default
+    if value is not None:
+        try:
+            parsed = float(value)
+        except ValueError:
+            try:
+                dt = email.utils.parsedate_to_datetime(value)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=UTC)
+                parsed = (dt - datetime.now(UTC)).total_seconds()
+            except (TypeError, ValueError):
+                parsed = default
+        wait = parsed if math.isfinite(parsed) else default
+    return max(0.0, min(wait, max_wait))
 
 
 def _resolve_safe(host: str, port: int) -> list:
