@@ -33,7 +33,7 @@ env:
 jobs:
   pip-audit:
     # Pure-Python job: follow the org runner var, same resolution as qa-workflows python-test.yml.
-    runs-on: ${{ vars.GATE_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.GATE_RUNNER }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -55,7 +55,7 @@ jobs:
   trivy-image:
     # `docker build` needs a docker socket, which linux-general (ARC) lacks —
     # keep ubuntu-latest, same constraint as ci.yml's docker-build job.
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.GATE_RUNNER }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
