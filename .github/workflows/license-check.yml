@@ -5,9 +5,11 @@ name: License Check
 # the way of concurrent edits to ci.yml.
 #
 # - runtime: requirements.lock (what the Docker image ships) is checked against a
-#   permissive allow-list with NO exceptions.
-# - dev: `.[dev]` is checked against the same list; the only exception is fpdf2
-#   (LGPL-3.0, test-PDF generation only, never shipped — see README "License").
+#   permissive allow-list; the only exception is certifi (MPL-2.0, unmodified CA data
+#   file), passed via --ignore-packages so any other MPL-2.0 dependency fails the job (#831).
+# - dev: requirements-dev.lock (the pinned set CI actually tests with) is checked against
+#   the same list; exceptions are certifi (above) and fpdf2 (LGPL-3.0, test-PDF
+#   generation only, never shipped — see README "License") (#835).
 
 on:
   push:
@@ -17,6 +19,7 @@ on:
     paths:
       - pyproject.toml
       - requirements.lock
+      - requirements-dev.lock
       - .github/workflows/license-check.yml
 
 concurrency:
@@ -38,8 +41,9 @@ jobs:
     env:
       # Substring match (pip-licenses --partial-match) against the License field /
       # classifiers, which are free-form (e.g. "BSD License", "Apache Software License").
-      # Weak-copyleft MPL-2.0 is allowed only for certifi (unmodified data file).
-      ALLOWED: "MIT;BSD;Apache;ISC;0BSD;Zlib;CC0;Unlicense;Python Software Foundation;PSF;Mozilla Public License 2.0"
+      # MPL-2.0 is deliberately NOT listed: certifi is exempted per-package with
+      # --ignore-packages below, so a new MPL-2.0 dependency fails instead of passing silently.
+      ALLOWED: "MIT;BSD;Apache;ISC;0BSD;Zlib;CC0;Unlicense;Python Software Foundation;PSF"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -51,20 +55,20 @@ jobs:
       - name: Install pip-licenses
         run: python -m pip install --quiet "pip-licenses==${PIP_LICENSES_VERSION}"
 
-      - name: Runtime dependencies (requirements.lock) — no exceptions
+      - name: Runtime dependencies (requirements.lock) — certifi MPL-2.0 exception only
         run: |
           python -m venv "$RUNNER_TEMP/rt"
           "$RUNNER_TEMP/rt/bin/pip" install --quiet --require-hashes -r requirements.lock
           pip-licenses --python "$RUNNER_TEMP/rt/bin/python" --format=markdown
           pip-licenses --python "$RUNNER_TEMP/rt/bin/python" --partial-match \
+            --ignore-packages certifi \
             --allow-only="$ALLOWED"
 
-      - name: Dev extras (.[dev]) — fpdf2 LGPL exception only
+      - name: Dev dependencies (requirements-dev.lock) — certifi MPL-2.0 and fpdf2 LGPL exceptions only
         run: |
           python -m venv "$RUNNER_TEMP/dev"
-          "$RUNNER_TEMP/dev/bin/pip" install --quiet --require-hashes -r requirements.lock
-          "$RUNNER_TEMP/dev/bin/pip" install --quiet -e ".[dev]"
+          "$RUNNER_TEMP/dev/bin/pip" install --quiet --require-hashes -r requirements-dev.lock
           pip-licenses --python "$RUNNER_TEMP/dev/bin/python" --format=markdown
           pip-licenses --python "$RUNNER_TEMP/dev/bin/python" --partial-match \
-            --ignore-packages fpdf2 academic-paper-system \
+            --ignore-packages certifi fpdf2 \
             --allow-only="$ALLOWED"
