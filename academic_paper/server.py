@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from academic_paper.auth import Scope, require_scope, verify_api_key  # noqa: F401  (verify_api_key re-exported, #617)
+from academic_paper.auth import Scope, require_scope
 from academic_paper.config import get_settings
 from academic_paper.db import (
     count_rows,

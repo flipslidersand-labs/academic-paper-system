@@ -1391,7 +1391,7 @@ def test_read_endpoints_pass_without_api_key_when_unconfigured(client):
 
 
 def test_summaries_and_stats_require_api_key_when_configured(client):
-    """Regression (#261): /summaries and /stats were missing dependencies=[Depends(verify_api_key)],
+    """Regression (#261): /summaries and /stats were missing dependencies=[Depends(require_scope())],
     leaving an unauthenticated hole while equally or less sensitive read endpoints were gated."""
     with patch.object(get_settings(), "api_key", "secret-key"):
         assert client.get("/summaries").status_code == 401
