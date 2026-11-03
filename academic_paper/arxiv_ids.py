@@ -1,9 +1,8 @@
 """Shared arXiv ID pattern and watermark extraction (#424).
 
 Centralizes the arXiv ID regex used independently by
-scripts/arxiv_collect.py, scripts/fix_file_names.py, and academic_paper/db.py
-so that a format change (e.g. supporting legacy pre-2007 IDs) only needs one
-edit instead of three.
+scripts/arxiv_collect.py and academic_paper/db.py so that a format change
+(e.g. supporting legacy pre-2007 IDs) only needs one edit instead of two.
 """
 
 import re

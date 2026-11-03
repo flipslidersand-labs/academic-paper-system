@@ -23,6 +23,7 @@ def submit_and_wait(
     submit_timeout: int = 30,
     poll_timeout: int = 300,
     poll_interval: float = 2.0,
+    max_poll_errors: int = 5,
 ) -> dict:
     """POST a PDF to /papers/ingest and poll the job to completion.
 
@@ -37,6 +38,8 @@ def submit_and_wait(
         submit_timeout: Timeout (s) for the POST and each poll request.
         poll_timeout: Max seconds to wait for the job to finish.
         poll_interval: Seconds between polls.
+        max_poll_errors: Consecutive transient poll errors (transport / 5xx)
+            tolerated before the last one is raised.
 
     Returns:
         dict with "status" in {"ingested", "duplicate"} plus paper_id/chunks
@@ -62,10 +65,26 @@ def submit_and_wait(
     job_id = body["job_id"]
     paper_id = body.get("paper_id")
     deadline = time.monotonic() + poll_timeout
+    poll_errors = 0
     while True:
-        jresp = client.get(f"{api_url}/jobs/{job_id}", headers=auth_headers(), timeout=submit_timeout)
-        jresp.raise_for_status()
-        job = jresp.json()
+        try:
+            jresp = client.get(f"{api_url}/jobs/{job_id}", headers=auth_headers(), timeout=submit_timeout)
+            jresp.raise_for_status()
+            job = jresp.json()
+        except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            # The server keeps ingesting regardless of a failed poll, so a transient
+            # error (timeout, connection reset, 5xx) must not be counted as failed (#825).
+            # Permanent errors (4xx: auth, 404) and exhausted budgets propagate as before.
+            if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
+                raise
+            poll_errors += 1
+            if poll_errors >= max_poll_errors:
+                raise
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"ingest job {job_id} did not finish within {poll_timeout}s") from exc
+            time.sleep(poll_interval)
+            continue
+        poll_errors = 0
         status = job["status"]
         if status == "done":
             result = job.get("result") or {}

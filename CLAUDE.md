@@ -390,7 +390,6 @@ academic-paper-system/
 │   ├── pubmed_collect.py     # PubMed Central 論文収集
 │   ├── semantic_scholar_collect.py # Semantic Scholar 論文収集
 │   ├── update-lock.sh        # requirements.lock 再生成 (--upgrade で最新化)
-│   ├── fix_file_names.py     # 既存論文の file_name 不整合修正
 │   └── generate_portfolio.py # ポートフォリオ静的ページ生成
 ├── tests/                   # テストスイート
 │   ├── test_*.py
