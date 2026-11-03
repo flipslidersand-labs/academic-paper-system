@@ -128,7 +128,6 @@ def test_stream_upload_tmp_write_runs_off_loop(monkeypatch):
 
 
 def test_ingest_hash_file_and_register_paper_run_off_loop(temp_db, override_settings, monkeypatch):
-    from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
     from academic_paper.routers import papers as papers_router
@@ -152,11 +151,12 @@ def test_ingest_hash_file_and_register_paper_run_off_loop(temp_db, override_sett
     monkeypatch.setattr(ingest_service, "register_paper", register_wrapper)
     # wait=True path: stub the pipeline so no embedder / Qdrant / PDF parsing is touched.
     monkeypatch.setattr(ingest_service, "ingest_pipeline", AsyncMock(return_value=3))
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(embedder=None, vector_store=None)))
 
     async def run():
         loop_tid = threading.get_ident()
-        result = await papers_router.ingest_paper(request, _FakeUpload(), None, None, None, None, None, wait=True)
+        result = await papers_router.ingest_paper(
+            _FakeUpload(), None, None, None, None, None, wait=True, embedder=None, vector_store=None, active=None
+        )
         return loop_tid, result
 
     loop_tid, result = asyncio.run(run())
