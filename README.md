@@ -98,9 +98,9 @@ All collectors accept `--api-url` (default `http://localhost:8020`) and
 for the full option list. When `API_KEY` is set on the server, export the same
 value as `PAPER_API_KEY` for the scripts.
 
-the daily collection job (cron `0 0 * * *`, 09:00 JST; see "Scheduled jobs" below) runs them
-on a self-hosted runner that can reach `localhost:8020`, then triggers bulk
-summarization (`POST /jobs/summarize-all`) and scoring (`POST /papers/score-all`).
+The daily collection job is run by a private ops repo that invokes these scripts against the API
+(see "Scheduled jobs" below); it then triggers bulk summarization (`POST /jobs/summarize-all`) and
+scoring (`POST /papers/score-all`). The schedule and runner are defined there, not in this repo.
 
 ## Scoring & Portfolio
 
@@ -119,10 +119,12 @@ summarization (`POST /jobs/summarize-all`) and scoring (`POST /papers/score-all`
   The weekly publish job now lives in the private ops repo (see "Scheduled jobs" below);
   it no longer commits `docs/` here.
 
-## CI workflows (dependencies & security)
+## CI workflows
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
+| `.github/workflows/ci.yml` | push / pull_request to `main`, manual | `test` (pytest + ruff via the shared reusable workflow, coverage threshold 71%), `docker-build` (compose validation and image build), `gitleaks` (secret scan). ruff is pinned, see "ruff version pin" |
+| `.github/workflows/license-check.yml` | push, pull_request | `pip-licenses` allow-list check for runtime and dev installs; `fpdf2` is the only exception, see "Third-party licenses" |
 | `.github/workflows/lock-update.yml` | weekly cron (Mon 03:00 JST) + manual | Runs `scripts/update-lock.sh --upgrade` and opens a PR with the new `requirements.lock`. CI is started explicitly via `workflow_dispatch`, because pushes made with `GITHUB_TOKEN` do not trigger workflows |
 | `.github/workflows/vuln-scan.yml` | push, pull_request, weekly cron (Mon 03:00 UTC), manual | `pip-audit` on the hash-pinned `requirements.lock` plus a Trivy scan of the Docker image (#350) |
 
@@ -184,24 +186,6 @@ ruff is pinned in three places that must match: `pyproject.toml` (dev extra
 they drift (e.g. a Dependabot bump of only `pyproject.toml`), so bump all three
 in the same PR.
 
-## Scheduled workflow watchdog
-
-`.github/workflows/scheduled-watchdog.yml` (GitHub-hosted `ubuntu-latest`, every 3 hours + manual dispatch) watches the
-self-hosted-runner cron workflows. A job that never gets a runner runs no steps, so its own notifications cannot fire (#499).
-It runs `scripts/watchdog_check.py` against `gh run list` output and fails when:
-
-| Condition | Threshold | Rationale |
-|-----------|-----------|-----------|
-| a run stays `queued` | > 3h | GitHub cancels queued jobs after 24h; 3h catches a dead runner early |
-| latest completed run is `cancelled` / `failure` | - | the failure was not otherwise noticed |
-| last `success` too old | `arxiv-daily` 26h, `portfolio-publish` ~170h | daily cron + 2h slack; weekly cron (Sun) + ~2h slack |
-
-On a violation the job exits 1 (red run in the Actions tab) and posts the violation lines plus the run URL to Discord.
-Read the message as `<workflow name>: <reason>`; run `gh run list --workflow <file>` to investigate.
-The Discord step uses the `DISCORD_WEBHOOK_URL` repository secret (same one as `arxiv-daily.yml`); if it is unset the
-notification is skipped and only the red run remains. `tests/test_watchdog_workflow.py` guards that the watchdog stays
-on GitHub-hosted runners, keeps `actions: read` only, covers both workflows and has a timeout.
-
 ## License
 
 MIT
@@ -214,14 +198,14 @@ MIT
   tests to generate sample PDFs. It is not in `requirements.lock`, not installed in
   the Docker image, and not part of the built wheel, so it is never distributed.
   `pip install academic-paper-system[dev]` does install it into your dev environment.
-- `.github/workflows/license-check.yml` enforces an SPDX-style allow-list with
+- `license-check.yml` (see "CI workflows") enforces an SPDX-style allow-list with
   `pip-licenses` for both runtime and dev installs; `fpdf2` is the sole listed exception.
   Adding another copyleft package makes the check fail.
 
 ## Scheduled jobs
 
 The daily arXiv collection, the weekly portfolio publish and their watchdog run from a private ops repo on a
-self-hosted runner. This public repo has no self-hosted runner and no `runs-on` pointing at one: public CI uses
+self-hosted runner. The watchdog check logic (`scripts/watchdog_check.py`) stays in this repo. This public repo has no self-hosted runner and no `runs-on` pointing at one: public CI uses
 GitHub-hosted runners only (repo-compass ADR-010).
 
 ## 設計判断 / Architecture decisions
