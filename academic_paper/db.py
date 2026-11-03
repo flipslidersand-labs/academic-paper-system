@@ -357,7 +357,8 @@ def list_papers_filtered(
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-    order_by = "COALESCE(score, -1) DESC" if sort == "score" else "ingested_at DESC"
+    # Unique tiebreak (id) keeps LIMIT/OFFSET pages disjoint when the sort key ties (#826).
+    order_by = ("COALESCE(score, -1) DESC" if sort == "score" else "ingested_at DESC") + ", id DESC"
 
     # COUNT and the paginated SELECT must see the same snapshot, or a
     # concurrent writer committing between the two queries can make `total`
@@ -531,7 +532,7 @@ def list_summaries(
             p.source
         FROM summaries s
         JOIN papers p ON s.paper_id = p.id
-        ORDER BY s.created_at DESC
+        ORDER BY s.created_at DESC, s.paper_id DESC
         LIMIT ? OFFSET ?
     """,
         (limit, offset),
