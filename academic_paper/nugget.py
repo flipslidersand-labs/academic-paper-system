@@ -32,7 +32,9 @@ def split_sentences(text: str) -> list[str]:
 
 
 def _tokenize(text: str) -> list[str]:
-    return text.lower().split()
+    # \w+ drops punctuation ('results.' -> 'results') and keeps non-ASCII word chars.
+    # Used for both sentences and query, so index/query sides stay consistent.
+    return re.findall(r"\w+", text.lower())
 
 
 def bm25_scores(query: str, sentences: list[str], k1: float = 1.5, b: float = 0.75) -> list[float]:
