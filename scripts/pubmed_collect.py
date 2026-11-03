@@ -65,11 +65,11 @@ def fetch_pmc_ids(
     if api_key:
         params["api_key"] = api_key
     if from_date or until_date:
+        # esearch ignores mindate/maxdate unless both are sent (#823), so fill the
+        # missing side with an open bound.
         params["datetype"] = "pdat"
-        if from_date:
-            params["mindate"] = from_date
-        if until_date:
-            params["maxdate"] = until_date
+        params["mindate"] = from_date or "1800-01-01"
+        params["maxdate"] = until_date or "2099-12-31"
 
     resp = client.get(ESEARCH_URL, params=params, timeout=timeout)
     resp.raise_for_status()
