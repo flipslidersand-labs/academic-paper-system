@@ -96,7 +96,10 @@ def test_llm_output_error_is_upstream_failure_not_client_error():
 @pytest.mark.parametrize("code", [401, 403])
 def test_embedding_svc_auth_rejection_maps_to_502(code):
     """embedding-svc 401/403 (key rejected) -> 502 with a cause, not an opaque 500 (#792)."""
-    exc = httpx.HTTPStatusError("denied", request=_REQ, response=httpx.Response(code, request=_REQ))
+    from academic_paper.config import get_settings
+
+    req = httpx.Request("POST", f"{get_settings().embedding_svc_url}/embed/batch")
+    exc = httpx.HTTPStatusError("denied", request=req, response=httpx.Response(code, request=req))
     http_exc = _http_exc_for(exc, "fb")
     assert http_exc.status_code == 502
     assert "authentication" in http_exc.detail

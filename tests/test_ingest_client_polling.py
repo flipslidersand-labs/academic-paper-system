@@ -169,3 +169,88 @@ def test_poll_requests_carry_api_key(monkeypatch):
         _submit(client)
 
     assert job_route.calls[0].request.headers["X-API-Key"] == "sekrit"
+
+
+# --- transient poll errors (#825) -------------------------------------------------
+
+
+def _done(paper_id=7):
+    return httpx.Response(200, json={"status": "done", "result": {"paper_id": paper_id, "chunks": 3}})
+
+
+@respx.mock
+def test_poll_read_timeout_then_done_is_ingested():
+    """A ReadTimeout on one poll must not fail an ingest that later completes (#825)."""
+    _mock_submit()
+    job_route = respx.get(f"{API}/jobs/job-1").mock(side_effect=[httpx.ReadTimeout("slow"), _done()])
+
+    with httpx.Client() as client:
+        result = _submit(client)
+
+    assert result["status"] == "ingested"
+    assert job_route.call_count == 2
+
+
+@respx.mock
+@pytest.mark.parametrize("code", [500, 502, 503, 504])
+def test_poll_5xx_then_done_is_ingested(code):
+    _mock_submit()
+    respx.get(f"{API}/jobs/job-1").mock(side_effect=[httpx.Response(code), _done()])
+
+    with httpx.Client() as client:
+        assert _submit(client)["status"] == "ingested"
+
+
+@respx.mock
+def test_poll_connect_error_then_done_is_ingested():
+    _mock_submit()
+    respx.get(f"{API}/jobs/job-1").mock(side_effect=[httpx.ConnectError("restarting"), _done()])
+
+    with httpx.Client() as client:
+        assert _submit(client)["status"] == "ingested"
+
+
+@respx.mock
+def test_poll_error_counter_resets_after_successful_poll():
+    """Errors are *consecutive*: interleaved successes keep the budget from running out."""
+    _mock_submit()
+    running = httpx.Response(200, json={"status": "running"})
+    err = httpx.ReadTimeout("slow")
+    respx.get(f"{API}/jobs/job-1").mock(side_effect=[err, err, running, err, err, running, err, err, _done()])
+
+    with httpx.Client() as client:
+        assert _submit(client, max_poll_errors=3)["status"] == "ingested"
+
+
+@respx.mock
+def test_poll_persistent_transient_errors_raise_after_limit():
+    _mock_submit()
+    job_route = respx.get(f"{API}/jobs/job-1").mock(side_effect=httpx.ReadTimeout("down"))
+
+    with httpx.Client() as client, pytest.raises(httpx.ReadTimeout):
+        _submit(client, max_poll_errors=3)
+
+    assert job_route.call_count == 3
+
+
+@respx.mock
+@pytest.mark.parametrize("code", [401, 403, 404])
+def test_poll_permanent_4xx_is_not_retried(code):
+    _mock_submit()
+    job_route = respx.get(f"{API}/jobs/job-1").mock(return_value=httpx.Response(code))
+
+    with httpx.Client() as client, pytest.raises(httpx.HTTPStatusError):
+        _submit(client)
+
+    assert job_route.call_count == 1
+
+
+@respx.mock
+def test_poll_transient_errors_respect_deadline(monkeypatch):
+    _mock_submit()
+    clock = iter([0.0, 1.0, 11.0, 12.0])
+    monkeypatch.setattr(ingest_client.time, "monotonic", lambda: next(clock))
+    respx.get(f"{API}/jobs/job-1").mock(side_effect=httpx.ReadTimeout("slow"))
+
+    with httpx.Client() as client, pytest.raises(TimeoutError):
+        _submit(client, poll_timeout=10, max_poll_errors=50)
