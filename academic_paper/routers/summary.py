@@ -1,15 +1,15 @@
 """Summary / score routes, extracted from server.py (#359 5/5, #622).
 
-Path, response and OpenAPI are unchanged. require_scope (#627) is applied per route. llm / summarizer are read from ``request.app.state`` so this module does not
-import server.py. Declaration order is preserved: ``/papers/score-all`` stays before
+Path, response and OpenAPI are unchanged. require_scope (#627) is applied per route. llm / summarizer are injected via academic_paper.dependencies (#360). Declaration order is preserved: ``/papers/score-all`` stays before
 the ``/papers/{paper_id}/...`` routes.
 """
 
 import asyncio
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query
 
 from academic_paper.auth import Scope, require_scope
+from academic_paper.dependencies import get_llm, get_summarizer
 from academic_paper.services.summary_service import (
     generate_summary,
     get_cached_summary,
@@ -28,10 +28,11 @@ async def get_summary_endpoint(paper_id: int):
 
 
 @router.post("/papers/{paper_id}/summary", dependencies=[Depends(require_scope(Scope.ADMIN))])
-async def generate_summary_endpoint(request: Request, paper_id: int, force: bool = Query(False)):
+async def generate_summary_endpoint(
+    paper_id: int, force: bool = Query(False), llm=Depends(get_llm), summarizer=Depends(get_summarizer)
+):
     """Generate the summary (cached result is returned unless force=true)."""
-    state = request.app.state
-    return await generate_summary(paper_id, force, state.llm, state.summarizer)
+    return await generate_summary(paper_id, force, llm, summarizer)
 
 
 @router.post("/papers/score-all", dependencies=[Depends(require_scope(Scope.ADMIN))])
