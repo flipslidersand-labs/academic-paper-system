@@ -791,3 +791,22 @@ async def test_summarize_non_object_or_unparseable_llm_reply_is_valueerror(reply
     _, s = _injection_summarizer("t", reply)
     with pytest.raises(ValueError):
         await s.summarize(paper_id=1, file_hash="h")
+
+
+def test_build_prompt_skips_chunks_with_none_payload_or_no_text():
+    """#853: payload=None / payload without text chunks are skipped, the rest still build a prompt."""
+    chunks = [
+        {"payload": None},
+        {"id": 1},
+        {"payload": {"page_start": 2}},
+        {"payload": {"page_start": 3, "text": "kept text"}},
+    ]
+    prompt = RAGSummarizer._build_prompt(chunks, top_k=10, paper_id=1)
+    assert "Page 3: kept text" in prompt
+    assert "Page 2" not in prompt
+
+
+def test_build_prompt_all_payloads_none_raises_value_error():
+    """#853: no usable content raises ValueError (not AttributeError)."""
+    with pytest.raises(ValueError, match="No valid content"):
+        RAGSummarizer._build_prompt([{"payload": None}], top_k=5, paper_id=1)
