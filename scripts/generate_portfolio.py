@@ -59,6 +59,23 @@ def fetch_all(url: str) -> list:
     return items
 
 
+# Fields published in papers.json (#856). Internal columns such as file_hash, ingested_at,
+# status, id and file_name must not reach the public repo / Pages.
+PUBLIC_PAPER_FIELDS = ("title", "authors", "categories", "published_date", "source", "score")
+
+
+def public_paper(paper: dict) -> dict:
+    """Reduce an API paper row to the allowlisted public fields (+ arxiv_id for arXiv papers)."""
+    out = {k: paper[k] for k in PUBLIC_PAPER_FIELDS if k in paper}
+    if not out.get("title") and paper.get("file_name"):
+        out["title"] = paper["file_name"]  # same fallback the HTML card uses
+    if paper.get("source") == "arxiv":
+        arxiv_id = arxiv_id_from_file_name(paper.get("file_name") or "")
+        if arxiv_id:
+            out["arxiv_id"] = arxiv_id
+    return out
+
+
 def score_badge(score) -> str:
     if score is None:
         return '<span class="text-xs text-gray-400">—</span>'
@@ -190,7 +207,7 @@ def main():
     print(f"Wrote {out}/index.html", file=sys.stderr)
 
     json_content = json.dumps(
-        {"updated": updated, "count": len(papers), "papers": papers},
+        {"updated": updated, "count": len(papers), "papers": [public_paper(p) for p in papers]},
         ensure_ascii=False,
         indent=2,
     )
