@@ -67,10 +67,9 @@ PUBLIC_PAPER_FIELDS = ("title", "authors", "categories", "published_date", "sour
 def public_paper(paper: dict) -> dict:
     """Reduce an API paper row to the allowlisted public fields (+ arxiv_id for arXiv papers)."""
     out = {k: paper[k] for k in PUBLIC_PAPER_FIELDS if k in paper}
-    if not out.get("title") and paper.get("file_name"):
-        out["title"] = paper["file_name"]  # same fallback the HTML card uses
+    # No file_name -> title fallback here: file_name is internal and must not be published.
     if paper.get("source") == "arxiv":
-        arxiv_id = arxiv_id_from_file_name(paper.get("file_name") or "")
+        arxiv_id = paper.get("arxiv_id") or arxiv_id_from_file_name(paper.get("file_name") or "")
         if arxiv_id:
             out["arxiv_id"] = arxiv_id
     return out
