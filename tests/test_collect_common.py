@@ -1,6 +1,7 @@
 """Tests for scripts/_collect_common.py helpers."""
 
 import argparse
+import contextlib
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -633,9 +634,18 @@ def test_ingest_downloaded_builds_metadata_and_calls_pre_ingest():
     def _pre(tmp_path):
         seen["pre"] = tmp_path
 
-    with patch("_collect_common.ingest_pdf", return_value={"status": "ingested"}) as mock_ingest:
+    # download_pdf builds its own proxy-ignoring client (#857); stub it out so
+    # no real network access happens.
+    @contextlib.contextmanager
+    def _fake_download(client, url, timeout=60, max_mb=None):
+        yield "/tmp/fake.pdf"
+
+    with (
+        patch("_collect_common.download_pdf", _fake_download),
+        patch("_collect_common.ingest_pdf", return_value={"status": "ingested"}) as mock_ingest,
+    ):
         result = ingest_downloaded(
-            _mock_stream_response(b"%PDF-1.4 x"),
+            MagicMock(),
             "http://api",
             pdf_url="https://example.com/a.pdf",
             file_name="a.pdf",
@@ -698,3 +708,43 @@ def test_parse_retry_after_http_date():
     assert parse_retry_after(far, max_wait=30) == 30
     past = email.utils.format_datetime(datetime.now(UTC) - timedelta(hours=1), usegmt=True)
     assert parse_retry_after(past) == 0
+
+
+def test_ingest_downloaded_pdf_client_ignores_proxy_env(monkeypatch):
+    """#857: with HTTPS_PROXY set, the client used for download_pdf must not route
+    through the proxy (trust_env=False), otherwise _pin_resolution is bypassed
+    because the proxy resolves the target host itself. The API client is untouched."""
+    import _collect_common
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.invalid:3128")
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.invalid:3128")
+    monkeypatch.setenv("ALL_PROXY", "http://proxy.invalid:3128")
+
+    seen = {}
+
+    @contextlib.contextmanager
+    def _fake_download(client, url, timeout=60, max_mb=None):
+        seen["dl_client"] = client
+        yield "/tmp/unused.pdf"
+
+    monkeypatch.setattr(_collect_common, "download_pdf", _fake_download)
+    monkeypatch.setattr(_collect_common, "ingest_pdf", lambda client, *a, **k: {"status": "ingested"})
+
+    api_client = MagicMock()
+    ingest_downloaded(
+        api_client,
+        "http://api.invalid",
+        pdf_url="https://example.com/p.pdf",
+        file_name="p.pdf",
+        title="t",
+        authors=[],
+        categories=[],
+        published_date=None,
+        source="test",
+    )
+
+    dl_client = seen["dl_client"]
+    assert dl_client is not api_client
+    assert isinstance(dl_client, httpx.Client)
+    assert dl_client.trust_env is False
+    assert not dl_client._mounts  # no proxy transport mounted from env
