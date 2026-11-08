@@ -185,7 +185,28 @@ async def ingest_pipeline(
 
     try:
         # Thousands of chunk INSERTs (+ FTS) must not block the event loop (#855).
-        await asyncio.to_thread(_write)
+        # Keep a reference and shield it: cancelling the await does not stop the worker
+        # thread, so on cancellation wait for the write to settle before re-raising. That
+        # way compensation (mark_paper_failed / compensate_qdrant) always runs after the
+        # 'indexed' write is committed, never before it.
+        fut = asyncio.ensure_future(asyncio.to_thread(_write))
+        try:
+            await asyncio.shield(fut)
+        except asyncio.CancelledError:
+            while not fut.done():
+                try:
+                    await asyncio.shield(fut)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            if not fut.cancelled() and fut.exception() is not None:
+                logger.error(
+                    "DB write failed while ingest was being cancelled for paper_id=%s",
+                    paper_id,
+                    exc_info=fut.exception(),
+                )
+            raise
     except Exception:
         # Qdrant upsert succeeded but DB write failed — compensate by deleting
         # the orphaned vectors so the paper can be re-ingested (#145).
