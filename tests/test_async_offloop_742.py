@@ -252,3 +252,99 @@ def test_run_summarize_all_db_calls_run_off_loop(temp_db, override_settings, mon
     assert job.status == "done" and job.processed == 1
     assert seen["select"] and seen["save"]
     assert loop_tid not in seen["select"] + seen["save"]
+
+
+def test_ingest_pipeline_db_write_runs_off_loop(temp_db, override_settings, monkeypatch):
+    """save_chunks / update_paper_status at the end of ingest_pipeline must not block the loop (#855)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from academic_paper.services import ingest_service
+
+    override_settings(academic_db=temp_db)
+    with db_mod.db_connection(temp_db) as conn:
+        pid = db_mod.save_paper(conn, "a.pdf", "h855")
+
+    seen: list[int] = []
+    _record_threads(monkeypatch, ingest_service, "save_chunks", seen)
+    _record_threads(monkeypatch, ingest_service, "update_paper_status", seen)
+    monkeypatch.setattr(ingest_service, "extract_text", lambda p: [{"page": 1, "text": "hello world"}])
+    monkeypatch.setattr(
+        ingest_service,
+        "chunk_pages",
+        lambda pages, **kw: [{"text": "hello", "chunk_index": 0, "page_start": 1, "page_end": 1, "token_count": 1}],
+    )
+
+    embedder = MagicMock()
+    embedder.embed = AsyncMock(return_value=[[0.1, 0.2]])
+    store = MagicMock()
+    store.aensure_collection = AsyncMock()
+    store.aupsert = AsyncMock()
+    store.adelete_by_paper_id = AsyncMock()
+
+    async def run():
+        loop_tid = threading.get_ident()
+        await ingest_service.ingest_pipeline("/x.pdf", pid, "h855", "a.pdf", embedder=embedder, vector_store=store)
+        return loop_tid
+
+    loop_tid = asyncio.run(run())
+    assert len(seen) == 2
+    assert loop_tid not in seen
+    with db_mod.db_connection(temp_db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM chunks WHERE paper_id = ?", (pid,)).fetchone()[0] == 1
+        assert conn.execute("SELECT status FROM papers WHERE id = ?", (pid,)).fetchone()[0] == "indexed"
+
+
+def test_ingest_pipeline_cancel_waits_for_db_write(temp_db, override_settings, monkeypatch):
+    """Cancelling during the DB write must re-raise only after the write is committed (#855)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from academic_paper.services import ingest_service
+
+    override_settings(academic_db=temp_db)
+    with db_mod.db_connection(temp_db) as conn:
+        pid = db_mod.save_paper(conn, "a.pdf", "h855c")
+
+    entered = threading.Event()
+    release = threading.Event()
+    orig = ingest_service.save_chunks
+
+    def slow_save_chunks(*a, **kw):
+        entered.set()
+        release.wait(timeout=10)
+        return orig(*a, **kw)
+
+    monkeypatch.setattr(ingest_service, "save_chunks", slow_save_chunks)
+    monkeypatch.setattr(ingest_service, "extract_text", lambda p: [{"page": 1, "text": "hello world"}])
+    monkeypatch.setattr(
+        ingest_service,
+        "chunk_pages",
+        lambda pages, **kw: [{"text": "hello", "chunk_index": 0, "page_start": 1, "page_end": 1, "token_count": 1}],
+    )
+    embedder = MagicMock()
+    embedder.embed = AsyncMock(return_value=[[0.1, 0.2]])
+    store = MagicMock()
+    store.aensure_collection = AsyncMock()
+    store.aupsert = AsyncMock()
+    store.adelete_by_paper_id = AsyncMock()
+
+    async def run():
+        task = asyncio.ensure_future(
+            ingest_service.ingest_pipeline("/x.pdf", pid, "h855c", "a.pdf", embedder=embedder, vector_store=store)
+        )
+        await asyncio.to_thread(entered.wait, 10)
+        task.cancel()
+        asyncio.get_running_loop().call_later(0.2, release.set)
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        else:
+            raise AssertionError("CancelledError was swallowed")
+        # State at the moment the cancellation surfaced: the write must already be committed.
+        with db_mod.db_connection(temp_db) as conn:
+            n = conn.execute("SELECT COUNT(*) FROM chunks WHERE paper_id = ?", (pid,)).fetchone()[0]
+            status = conn.execute("SELECT status FROM papers WHERE id = ?", (pid,)).fetchone()[0]
+        return n, status
+
+    n, status = asyncio.run(run())
+    assert (n, status) == (1, "indexed")
