@@ -33,7 +33,7 @@ jobs:
   licenses:
     # Pure-Python job (no docker socket needed), so follow the org-wide runner var
     # with an ubuntu-latest fallback, same resolution as qa-workflows python-test.yml.
-    runs-on: ${{ vars.GATE_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.GATE_RUNNER }}
     timeout-minutes: 15
     env:
       # Substring match (pip-licenses --partial-match) against the License field /
