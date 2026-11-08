@@ -85,11 +85,15 @@ def fetch_pmc_ids(
         result = {}
     # NCBI may return an error body with HTTP 200; do not treat it as an empty result (#854).
     # Keep the message free of the request URL so api_key never leaks.
-    errorlist = result.get("errorlist")
-    if isinstance(errorlist, dict):
-        errorlist = any(errorlist.values())
-    if data.get("error") or result.get("ERROR") or errorlist:
+    if data.get("error"):
+        # The top-level error response may carry an "api-key" field, so never echo it.
         raise EsearchError("esearch returned an error response")
+    if result.get("ERROR"):
+        raise EsearchError(f"esearch returned an error: {str(result['ERROR'])[:200]}")
+    # errorlist/warninglist (e.g. phrasesnotfound) accompany successful searches; warn only.
+    for key in ("errorlist", "warninglist"):
+        if result.get(key) and any(result[key].values() if isinstance(result[key], dict) else [1]):
+            print(f"[pubmed] WARNING: esearch {key}: {result[key]}", file=sys.stderr)
     return result.get("idlist", [])
 
 
