@@ -30,6 +30,10 @@ EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 PMC_PDF_URL = "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{pmc_id}/pdf/"
 
 
+class EsearchError(RuntimeError):
+    """esearch answered HTTP 200 but with an error body (#854)."""
+
+
 def _safe_error(exc: Exception) -> str:
     """Describe an error without leaking the api_key query parameter.
 
@@ -73,7 +77,24 @@ def fetch_pmc_ids(
 
     resp = client.get(ESEARCH_URL, params=params, timeout=timeout)
     resp.raise_for_status()
-    return resp.json().get("esearchresult", {}).get("idlist", [])
+    data = resp.json()
+    if not isinstance(data, dict):
+        raise EsearchError("esearch returned a non-object response")
+    result = data.get("esearchresult")
+    if not isinstance(result, dict):
+        result = {}
+    # NCBI may return an error body with HTTP 200; do not treat it as an empty result (#854).
+    # Keep the message free of the request URL so api_key never leaks.
+    if data.get("error"):
+        # The top-level error response may carry an "api-key" field, so never echo it.
+        raise EsearchError("esearch returned an error response")
+    if result.get("ERROR"):
+        raise EsearchError(f"esearch returned an error: {str(result['ERROR'])[:200]}")
+    # errorlist/warninglist (e.g. phrasesnotfound) accompany successful searches; warn only.
+    for key in ("errorlist", "warninglist"):
+        if result.get(key) and any(result[key].values() if isinstance(result[key], dict) else [1]):
+            print(f"[pubmed] WARNING: esearch {key}: {result[key]}", file=sys.stderr)
+    return result.get("idlist", [])
 
 
 def fetch_paper_metadata(
@@ -256,7 +277,11 @@ def main() -> None:
                 until_date=args.until_date,
             )
         except Exception as exc:
-            print(f"[pubmed] ERROR fetching PMC IDs: {_safe_error(exc)}", file=sys.stderr)
+            err = str(exc) if isinstance(exc, EsearchError) else _safe_error(exc)
+            print(f"[pubmed] ERROR fetching PMC IDs: {err}", file=sys.stderr)
+            if isinstance(exc, EsearchError):
+                # Other fetch failures keep the no-summary behavior pending #528.
+                write_summary(args.summary_file, fetched=0, fetch_error=err)
             sys.exit(1)
 
         print(f"[pubmed] found {len(pmc_ids)} PMC IDs")
