@@ -8,7 +8,7 @@ import pytest
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
 from academic_paper.embedder import EmbeddingCountMismatchError, EmbeddingResponseError
-from academic_paper.errors import _http_exc_for, _safe_error_message
+from academic_paper.errors import NoUsableContentError, _http_exc_for, _safe_error_message
 from academic_paper.llm import LLMOutputError
 
 _REQ = httpx.Request("GET", "http://internal-host:9999/x")
@@ -104,3 +104,10 @@ def test_embedding_svc_auth_rejection_maps_to_502(code):
     assert http_exc.status_code == 502
     assert "authentication" in http_exc.detail
     assert "EMBEDDING_API_KEY" in http_exc.detail
+
+
+def test_no_usable_content_error_is_500_fixed_message_in_job_errors():
+    """#867: summarize-all job errors get the fixed text, not the bare class name or str(exc)."""
+    exc = NoUsableContentError("No chunks found for paper 1 secret")
+    assert _safe_error_message(exc) == "Summarization failed: no usable content for this paper"
+    assert _http_exc_for(exc, "fb").status_code == 500
