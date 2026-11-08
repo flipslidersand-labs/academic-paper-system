@@ -7,13 +7,13 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from academic_paper.auth import require_scope
 from academic_paper.config import Settings, get_settings
-from academic_paper.server import verify_api_key
 
 _app = FastAPI()
 
 
-@_app.get("/protected", dependencies=[Depends(verify_api_key)])
+@_app.get("/protected", dependencies=[Depends(require_scope())])
 def _protected():
     return {"ok": True}
 
