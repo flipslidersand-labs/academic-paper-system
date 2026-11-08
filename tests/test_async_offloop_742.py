@@ -252,3 +252,40 @@ def test_run_summarize_all_db_calls_run_off_loop(temp_db, override_settings, mon
     assert job.status == "done" and job.processed == 1
     assert seen["select"] and seen["save"]
     assert loop_tid not in seen["select"] + seen["save"]
+
+
+def test_ingest_pipeline_db_write_runs_off_loop(temp_db, override_settings, monkeypatch):
+    """save_chunks / update_paper_status at the end of ingest_pipeline must not block the loop (#855)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from academic_paper.services import ingest_service
+
+    override_settings(academic_db=temp_db)
+    with db_mod.db_connection(temp_db) as conn:
+        pid = db_mod.save_paper(conn, "a.pdf", "h855")
+
+    seen: list[int] = []
+    _record_threads(monkeypatch, ingest_service, "save_chunks", seen)
+    _record_threads(monkeypatch, ingest_service, "update_paper_status", seen)
+    monkeypatch.setattr(ingest_service, "extract_text", lambda p: [{"page": 1, "text": "hello world"}])
+    monkeypatch.setattr(
+        ingest_service,
+        "chunk_pages",
+        lambda pages, **kw: [{"text": "hello", "chunk_index": 0, "page_start": 1, "page_end": 1, "token_count": 1}],
+    )
+
+    embedder = MagicMock()
+    embedder.embed = AsyncMock(return_value=[[0.1, 0.2]])
+    store = MagicMock()
+    store.aensure_collection = AsyncMock()
+    store.aupsert = AsyncMock()
+    store.adelete_by_paper_id = AsyncMock()
+
+    async def run():
+        loop_tid = threading.get_ident()
+        await ingest_service.ingest_pipeline("/x.pdf", pid, "h855", "a.pdf", embedder=embedder, vector_store=store)
+        return loop_tid
+
+    loop_tid = asyncio.run(run())
+    assert len(seen) == 2
+    assert loop_tid not in seen
