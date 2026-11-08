@@ -318,13 +318,15 @@ async def run_ingest(
             # mark_paper_failed never raises (#421): it swallows and logs its own
             # errors, so the job attributes below always run afterward instead of
             # being skipped by an exception from the paper-status write.
+            # Terminalize the job before the compensation awaits so a cancel (or failure)
+            # during compensation still leaves a failed job with the reason (#872).
+            job.failed = 1
+            job.errors.append(f"paper_id={paper_id}: {_safe_error_message(e)}")
+            job.status = "failed"
             await mark_paper_failed(paper_id)
             # Upsert may have partially succeeded (batched); remove leftover vectors
             # so a failed paper is not returned by vector search (#471).
             await compensate_qdrant(vector_store, paper_id)
-            job.failed = 1
-            job.errors.append(f"paper_id={paper_id}: {_safe_error_message(e)}")
-            job.status = "failed"
         except asyncio.CancelledError:
             # CancelledError is a BaseException so `except Exception` misses it; without
             # this the job stays 'running' with finished_at set (#872). Terminalize the
