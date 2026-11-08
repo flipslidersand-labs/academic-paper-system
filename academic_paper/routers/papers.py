@@ -29,6 +29,22 @@ router = APIRouter()
 _DUPLICATE_DETAIL = {"indexed": "File already ingested", "pending": "File is already being ingested"}
 
 
+async def _compensate_failed_ingest(vector_store, paper_id: int) -> None:
+    await ingest_service.mark_paper_failed(paper_id)
+    await ingest_service.compensate_qdrant(vector_store, paper_id)
+
+
+_compensation_tasks: set[asyncio.Future] = set()
+
+
+async def _shielded_compensate(vector_store, paper_id: int) -> None:
+    """Run compensation in a task that survives caller cancellation; keep a ref so it isn't GC'd."""
+    task = asyncio.ensure_future(_compensate_failed_ingest(vector_store, paper_id))
+    _compensation_tasks.add(task)
+    task.add_done_callback(_compensation_tasks.discard)
+    await asyncio.shield(task)
+
+
 @router.post("/papers/ingest", dependencies=[Depends(require_scope(Scope.INGEST))])
 async def ingest_paper(
     file: UploadFile = File(...),
@@ -95,12 +111,23 @@ async def ingest_paper(
                 chunks = await ingest_service.ingest_pipeline(
                     tmp_path, paper_id, file_hash, file_name, embedder=embedder, vector_store=vector_store
                 )
+            except asyncio.CancelledError:
+                # Client disconnect / timeout: CancelledError is a BaseException, so without this the paper
+                # stays 'pending' and re-uploads 409 until restart (#852). Compensate shielded, then re-raise.
+                logger.warning("Synchronous ingest cancelled for paper_id=%s", paper_id)
+                try:
+                    await _shielded_compensate(vector_store, paper_id)
+                except asyncio.CancelledError:
+                    logger.warning("Second cancel during compensation; continuing in background paper_id=%s", paper_id)
+                    raise
+                except Exception:
+                    logger.error("Cancel compensation failed for paper_id=%s", paper_id, exc_info=True)
+                raise  # re-raise the original CancelledError, not the compensation failure
             except Exception as e:
                 logger.exception("Synchronous ingest failed for paper_id=%s", paper_id)
-                await ingest_service.mark_paper_failed(paper_id)
                 # _ingest_pipeline already compensates Qdrant on save_chunks failure;
                 # compensate here for embed/upsert errors that leave no Qdrant data.
-                await ingest_service.compensate_qdrant(vector_store, paper_id)
+                await _compensate_failed_ingest(vector_store, paper_id)
                 raise _http_exc_for(e, "Ingest failed: check PDF content and try again")
             return {
                 "paper_id": paper_id,
