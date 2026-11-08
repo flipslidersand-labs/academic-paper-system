@@ -177,10 +177,36 @@ async def ingest_pipeline(
     with tracer.start_as_current_span("qdrant.upsert"):
         await vector_store.aupsert(points)
 
-    try:
+    def _write() -> None:
+        # Connection lifecycle stays inside the worker thread (sqlite3 check_same_thread) (#855).
         with db_connection(get_settings().academic_db) as conn:
             save_chunks(conn, paper_id, chunks_list)
             update_paper_status(conn, paper_id, "indexed")
+
+    try:
+        # Thousands of chunk INSERTs (+ FTS) must not block the event loop (#855).
+        # Keep a reference and shield it: cancelling the await does not stop the worker
+        # thread, so on cancellation wait for the write to settle before re-raising. That
+        # way compensation (mark_paper_failed / compensate_qdrant) always runs after the
+        # 'indexed' write is committed, never before it.
+        fut = asyncio.ensure_future(asyncio.to_thread(_write))
+        try:
+            await asyncio.shield(fut)
+        except asyncio.CancelledError:
+            while not fut.done():
+                try:
+                    await asyncio.shield(fut)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            if not fut.cancelled() and fut.exception() is not None:
+                logger.error(
+                    "DB write failed while ingest was being cancelled for paper_id=%s",
+                    paper_id,
+                    exc_info=fut.exception(),
+                )
+            raise
     except Exception:
         # Qdrant upsert succeeded but DB write failed — compensate by deleting
         # the orphaned vectors so the paper can be re-ingested (#145).
