@@ -29,6 +29,11 @@ router = APIRouter()
 _DUPLICATE_DETAIL = {"indexed": "File already ingested", "pending": "File is already being ingested"}
 
 
+async def _compensate_failed_ingest(vector_store, paper_id: int) -> None:
+    await ingest_service.mark_paper_failed(paper_id)
+    await ingest_service.compensate_qdrant(vector_store, paper_id)
+
+
 @router.post("/papers/ingest", dependencies=[Depends(require_scope(Scope.INGEST))])
 async def ingest_paper(
     file: UploadFile = File(...),
@@ -95,6 +100,15 @@ async def ingest_paper(
                 chunks = await ingest_service.ingest_pipeline(
                     tmp_path, paper_id, file_hash, file_name, embedder=embedder, vector_store=vector_store
                 )
+            except asyncio.CancelledError:
+                # Client disconnect / timeout: CancelledError is a BaseException, so without this the paper
+                # stays 'pending' and re-uploads 409 until restart (#852). Compensate shielded, then re-raise.
+                logger.warning("Synchronous ingest cancelled for paper_id=%s", paper_id)
+                try:
+                    await asyncio.shield(_compensate_failed_ingest(vector_store, paper_id))
+                except BaseException:
+                    logger.error("Cancel compensation failed for paper_id=%s", paper_id, exc_info=True)
+                raise
             except Exception as e:
                 logger.exception("Synchronous ingest failed for paper_id=%s", paper_id)
                 await ingest_service.mark_paper_failed(paper_id)
