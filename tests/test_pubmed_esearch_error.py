@@ -25,16 +25,34 @@ def _call(body: dict, api_key: str = _KEY):
 @pytest.mark.parametrize(
     "body",
     [
-        {"error": "API rate limit exceeded"},
+        {"error": "API rate limit exceeded", "api-key": _KEY},
         {"esearchresult": {"ERROR": "Invalid query", "idlist": []}},
-        {"esearchresult": {"idlist": [], "errorlist": {"phrasesnotfound": ["zzz"]}}},
     ],
 )
-def test_error_bodies_raise(body):
+def test_error_bodies_raise_without_leaking_key(body):
     with pytest.raises(RuntimeError) as ei:
         _call(body)
     assert _KEY not in str(ei.value)
     assert _KEY not in pubmed_collect._safe_error(ei.value)
+
+
+def test_result_error_text_is_included_truncated():
+    with pytest.raises(pubmed_collect.EsearchError) as ei:
+        _call({"esearchresult": {"ERROR": "Invalid query " + "x" * 500}})
+    assert "Invalid query" in str(ei.value)
+    assert len(str(ei.value)) < 300
+
+
+def test_top_level_error_text_not_included():
+    with pytest.raises(pubmed_collect.EsearchError) as ei:
+        _call({"error": f"bad {_KEY}", "api-key": _KEY})
+    assert "bad" not in str(ei.value)
+
+
+def test_errorlist_with_idlist_is_not_fatal(capsys):
+    body = {"esearchresult": {"idlist": ["1", "2"], "errorlist": {"phrasesnotfound": ["zzqqxxnotaword"]}}}
+    assert _call(body) == ["1", "2"]
+    assert "zzqqxxnotaword" in capsys.readouterr().err
 
 
 def test_normal_empty_idlist_returns_empty():
@@ -50,11 +68,13 @@ def test_empty_errorlist_is_not_error():
     assert _call(body) == ["1"]
 
 
-def test_main_writes_fetch_error_and_exits_1(monkeypatch, tmp_path):
+def test_main_writes_fetch_error_and_exits_1(monkeypatch, tmp_path, capsys):
     real_client = httpx.Client
 
     def _client_factory(*a, **k):
-        return real_client(transport=httpx.MockTransport(lambda req: httpx.Response(200, json={"error": "bad query"})))
+        return real_client(
+            transport=httpx.MockTransport(lambda req: httpx.Response(200, json={"error": "bad query", "api-key": _KEY}))
+        )
 
     monkeypatch.setattr(pubmed_collect.httpx, "Client", _client_factory)
     out = tmp_path / "s.json"
@@ -65,3 +85,5 @@ def test_main_writes_fetch_error_and_exits_1(monkeypatch, tmp_path):
     data = json.loads(out.read_text())
     assert data["fetched"] == 0
     assert data["fetch_error"]
+    assert _KEY not in out.read_text()
+    assert _KEY not in capsys.readouterr().err
