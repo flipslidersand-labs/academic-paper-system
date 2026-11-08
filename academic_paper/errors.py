@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DomainError",
     "ErrorInfo",
+    "NoUsableContentError",
     "NotConfiguredError",
     "NotFoundError",
     "PdfExtractionError",
@@ -42,6 +43,13 @@ class NotFoundError(DomainError):
 
 class NotConfiguredError(DomainError):
     """A required backend is not configured or not initialized (HTTP 503)."""
+
+
+class NoUsableContentError(Exception):
+    """No usable chunk text exists for a paper (server-side data state, not client input) -> 500 (#867).
+
+    Deliberately not a ValueError so classify_error does not map it to 400.
+    """
 
 
 class PdfExtractionError(ValueError):
@@ -107,7 +115,8 @@ def classify_error(exc: Exception, fallback_msg: str = "") -> ErrorInfo:
     - EmbeddingCountMismatchError / EmbeddingResponseError / LLMOutputError → 502
     - builtin TimeoutError (asyncio.wait_for deadlines) → 504 (#423)
     - sqlite3.IntegrityError (file_hash UNIQUE violation) → 409
-    - ValueError from input validation (no text, no chunks) → 400
+    - NoUsableContentError (no usable chunks for a paper, #867) → 500 with a fixed message
+    - ValueError from input validation (e.g. no text) → 400
     - Everything else → kind "internal" (500); the caller adds an opaque id and logs.
     """
     if isinstance(exc, NotFoundError):
@@ -138,6 +147,8 @@ def classify_error(exc: Exception, fallback_msg: str = "") -> ErrorInfo:
         return ErrorInfo("upstream_protocol", 502, "Vector store returned an unexpected response")
     if isinstance(exc, sqlite3.IntegrityError):
         return ErrorInfo("conflict", 409, "Conflict: duplicate record")
+    if isinstance(exc, NoUsableContentError):
+        return ErrorInfo("no_usable_content", 500, "Summarization failed: no usable content for this paper")
     if isinstance(exc, ValueError):
         return ErrorInfo("invalid_input", 400, fallback_msg)
     return ErrorInfo("internal", 500, "")

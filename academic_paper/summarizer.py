@@ -11,6 +11,7 @@ from qdrant_client.http.exceptions import ApiException, ResponseHandlingExceptio
 
 from academic_paper.config import get_settings
 from academic_paper.embedder import EmbedderClient
+from academic_paper.errors import NoUsableContentError
 from academic_paper.http_status import is_client_error
 from academic_paper.llm import BaseLLMClient, LLMOutputError
 from academic_paper.models import PaperSummary
@@ -132,7 +133,8 @@ class RAGSummarizer:
             Dictionary with keys: objective, method, results, limitations, keywords
 
         Raises:
-            ValueError: If no chunks found or LLM returns invalid JSON
+            NoUsableContentError: If no usable chunks are found
+            ValueError: If LLM returns invalid JSON
             TimeoutError: If the call exceeds get_settings().summarize_total_timeout
         """
         # The embedding/Qdrant/LLM wait_for calls below are awaited sequentially,
@@ -225,7 +227,7 @@ class RAGSummarizer:
     def _build_prompt(chunks: list[dict], top_k: int, paper_id: int) -> str:
         """Prompt from the retrieved chunks (page-labelled, sanitized, length-capped)."""
         if not chunks:
-            raise ValueError(f"No chunks found for paper {paper_id}")
+            raise NoUsableContentError(f"No chunks found for paper {paper_id}")
 
         context_parts = []
         skipped = 0
@@ -242,7 +244,7 @@ class RAGSummarizer:
             logger.warning("summarize paper_id=%s: skipping %d chunk(s) with no payload/text", paper_id, skipped)
 
         if not context_parts:
-            raise ValueError(f"No valid content found in chunks for paper {paper_id}")
+            raise NoUsableContentError(f"No valid content found in chunks for paper {paper_id}")
 
         context = "\n\n".join(context_parts)[:MAX_CONTEXT_CHARS]
         return f"""Please summarize the following academic paper content and provide a structured summary in JSON format.

@@ -1096,6 +1096,31 @@ def test_generate_summary_endpoint_unexpected_error_returns_500(client):
     assert "Internal error" in response.json()["detail"]
 
 
+@pytest.mark.parametrize("qdrant_result", [[], [{"id": "1", "payload": None}], [{"id": "1", "payload": {"text": ""}}]])
+def test_generate_summary_no_usable_chunks_returns_500_fixed_message(client, temp_db, qdrant_result):
+    """#867: no/unusable chunks is a server-side data problem: 500 with a fixed message
+    that does not blame the LLM or the client input."""
+    from academic_paper.summarizer import RAGSummarizer
+
+    conn = get_connection(temp_db)
+    try:
+        paper_id = save_paper(conn, "p867.pdf", "hash867")
+    finally:
+        conn.close()
+    qdrant = MagicMock()
+    qdrant.asearch = AsyncMock(return_value=qdrant_result)
+    llm = MagicMock()
+    llm.display_name = "mock"
+    llm.generate = AsyncMock()
+    client.app.state.llm = llm
+    client.app.state.summarizer = RAGSummarizer(llm, qdrant, chunk_loader=lambda *_: [])
+    response = client.post(f"/papers/{paper_id}/summary")
+    assert response.status_code == 500
+    detail = response.json()["detail"]
+    assert detail == "Summarization failed: no usable content for this paper"
+    assert "LLM" not in detail
+
+
 def test_stats_unexpected_error_returns_500(client):
     """GET /stats: unclassified errors must map through _http_exc_for, not a raw 500 (#303)."""
     with patch("academic_paper.server.db_connection", side_effect=RuntimeError("disk error")):
