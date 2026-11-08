@@ -180,7 +180,16 @@ def download_pdf(client: httpx.Client, url: str, timeout: int = 60, max_mb: int 
     httpx's built-in redirect following never re-checks a Location header,
     which previously let a third-party API's URL redirect straight past the
     guard into internal infrastructure (#278).
+
+    *client* must be created with ``trust_env=False``; a client that honours
+    the environment is rejected (ValueError), because a proxy would resolve the
+    host itself and bypass ``_pin_resolution`` / ``_resolve_safe`` (#857, #864).
+    Trade-off: ``trust_env=False`` also ignores SSL_CERT_FILE / SSL_CERT_DIR and
+    ``~/.netrc``, so in an environment relying on a corporate CA bundle via those
+    variables, TLS verification of the PDF host can fail (#864).
     """
+    if client.trust_env:
+        raise ValueError("download_pdf requires an httpx.Client created with trust_env=False")
     max_bytes = (max_mb if max_mb is not None else get_settings().max_upload_mb) * 1024 * 1024
     tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
     tmp_path = tmp.name
@@ -337,10 +346,11 @@ def ingest_downloaded(
     # HTTP(S)_PROXY / ALL_PROXY. Through a proxy the proxy resolves the host
     # itself, so _pin_resolution / _resolve_safe would not protect the fetch
     # (#857). The shared *client* (ingest API) keeps its default proxy handling.
-    with (
-        httpx.Client(trust_env=False) as download_client,
-        download_pdf(download_client, pdf_url, pdf_timeout) as tmp_path,
-    ):
+    # The client is only needed while download_pdf fetches, so close it as soon
+    # as the file is on disk; the ExitStack keeps the temp file alive (#864).
+    with contextlib.ExitStack() as stack:
+        with httpx.Client(trust_env=False) as download_client:
+            tmp_path = stack.enter_context(download_pdf(download_client, pdf_url, pdf_timeout))
         if pre_ingest is not None:
             pre_ingest(tmp_path)
         return ingest_pdf(
