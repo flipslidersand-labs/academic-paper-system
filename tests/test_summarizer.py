@@ -793,7 +793,7 @@ async def test_summarize_non_object_or_unparseable_llm_reply_is_valueerror(reply
         await s.summarize(paper_id=1, file_hash="h")
 
 
-def test_build_prompt_skips_chunks_with_none_payload_or_no_text():
+def test_build_prompt_skips_chunks_with_none_payload_or_no_text(caplog):
     """#853: payload=None / payload without text chunks are skipped, the rest still build a prompt."""
     chunks = [
         {"payload": None},
@@ -801,9 +801,17 @@ def test_build_prompt_skips_chunks_with_none_payload_or_no_text():
         {"payload": {"page_start": 2}},
         {"payload": {"page_start": 3, "text": "kept text"}},
     ]
-    prompt = RAGSummarizer._build_prompt(chunks, top_k=10, paper_id=1)
+    with caplog.at_level("WARNING", logger="academic_paper.summarizer"):
+        prompt = RAGSummarizer._build_prompt(chunks, top_k=10, paper_id=1)
     assert "Page 3: kept text" in prompt
     assert "Page 2" not in prompt
+    assert any("skipping 3 chunk(s)" in r.getMessage() and "paper_id=1" in r.getMessage() for r in caplog.records)
+
+
+def test_build_prompt_no_warning_when_nothing_skipped(caplog):
+    with caplog.at_level("WARNING", logger="academic_paper.summarizer"):
+        RAGSummarizer._build_prompt([{"payload": {"page_start": 1, "text": "ok"}}], top_k=5, paper_id=1)
+    assert not caplog.records
 
 
 def test_build_prompt_all_payloads_none_raises_value_error():
