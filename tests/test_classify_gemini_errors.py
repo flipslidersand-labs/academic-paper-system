@@ -8,7 +8,7 @@ from academic_paper.errors import _safe_error_message, classify_error
 _SECRET = "AIzaSyFAKEKEY-secret-detail"
 
 
-def _client(code: int):
+def _client(code: int | None):
     return genai_errors.ClientError(code, {"error": {"message": _SECRET, "status": "X"}})
 
 
@@ -26,13 +26,16 @@ def _server(code: int):
         (_server(503), "upstream_unavailable", 503),
         (_client(400), "upstream_protocol", 502),
         (_client(404), "upstream_protocol", 502),
+        (_server(599), "upstream_unavailable", 503),
+        (_client(1007), "upstream_protocol", 502),
+        (_client(None), "upstream_protocol", 502),
     ],
 )
 def test_genai_api_error_classification(exc, kind, status):
     info = classify_error(exc, "fb")
     assert (info.kind, info.status) == (kind, status)
     assert _SECRET not in info.public_message
-    assert str(exc.code) not in info.public_message
+    assert str(exc.code) not in info.public_message or exc.code is None
     assert info.public_message
 
 
