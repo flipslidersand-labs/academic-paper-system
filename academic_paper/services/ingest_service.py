@@ -177,10 +177,15 @@ async def ingest_pipeline(
     with tracer.start_as_current_span("qdrant.upsert"):
         await vector_store.aupsert(points)
 
-    try:
+    def _write() -> None:
+        # Connection lifecycle stays inside the worker thread (sqlite3 check_same_thread) (#855).
         with db_connection(get_settings().academic_db) as conn:
             save_chunks(conn, paper_id, chunks_list)
             update_paper_status(conn, paper_id, "indexed")
+
+    try:
+        # Thousands of chunk INSERTs (+ FTS) must not block the event loop (#855).
+        await asyncio.to_thread(_write)
     except Exception:
         # Qdrant upsert succeeded but DB write failed — compensate by deleting
         # the orphaned vectors so the paper can be re-ingested (#145).
