@@ -864,6 +864,52 @@ def test_validate_published_date_rejects_out_of_range():
     assert exc_info.value.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        # True regressions: accepted by date.fromisoformat before the fix.
+        "20260101",
+        "2026-W01-1",
+        "2026W011",
+        # Already 422 before the fix; kept as guards for the regex itself.
+        "2026-01-01\n",
+        "２０２６-01-01",
+        "2026-1-1",
+        "2026-01-01T00",
+    ],
+)
+def test_validate_published_date_rejects_non_canonical_format(value):
+    """Only canonical YYYY-MM-DD is accepted; fromisoformat's looser forms
+    (basic format, ISO week dates) would be stored verbatim (#851)."""
+    from academic_paper.server import _validate_published_date
+
+    with pytest.raises(HTTPException) as exc_info:
+        _validate_published_date(value)
+    assert exc_info.value.status_code == 422
+    assert "YYYY-MM-DD" in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    ("value", "ok"),
+    [
+        ("2024-02-29", True),
+        ("1900-01-01", True),
+        (__import__("datetime").date.today().isoformat(), True),
+        ("2023-02-29", False),
+    ],
+)
+def test_validate_published_date_boundaries(value, ok):
+    """Accepted boundary values pass; impossible calendar dates are 422 (#851)."""
+    from academic_paper.server import _validate_published_date
+
+    if ok:
+        _validate_published_date(value)
+        return
+    with pytest.raises(HTTPException) as exc_info:
+        _validate_published_date(value)
+    assert exc_info.value.status_code == 422
+
+
 def test_sanitize_text_strips_control_chars():
     """_sanitize_text removes control chars (incl. newlines) from external metadata (#233)."""
     from academic_paper.server import _sanitize_text
