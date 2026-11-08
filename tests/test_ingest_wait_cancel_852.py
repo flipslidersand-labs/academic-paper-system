@@ -72,28 +72,40 @@ def test_cancelled_wait_ingest_marks_failed_compensates_and_allows_reupload(temp
     assert result["status"] == "indexed"
 
 
-def test_cancel_still_propagates_when_compensation_fails(temp_db, override_settings, monkeypatch):
+def test_second_cancel_during_compensation_still_fails_paper_and_deletes_qdrant(
+    temp_db, override_settings, monkeypatch
+):
     override_settings(academic_db=temp_db)
-    started = asyncio.Event
     store = MagicMock()
-    store.adelete_by_paper_id = AsyncMock(side_effect=RuntimeError("qdrant down"))
+    store.adelete_by_paper_id = AsyncMock()
     seen = {}
+    orig_mark = ingest_service.mark_paper_failed
 
-    async def hang(*a, **kw):
+    async def hang(tmp_path, paper_id, *a, **kw):
+        seen["paper_id"] = paper_id
         seen["started"].set()
         await asyncio.sleep(60)
 
+    async def slow_mark(paper_id):
+        seen["comp_started"].set()
+        await asyncio.sleep(0.2)
+        await orig_mark(paper_id)
+
     monkeypatch.setattr(ingest_service, "ingest_pipeline", hang)
-    monkeypatch.setattr(ingest_service, "mark_paper_failed", AsyncMock(side_effect=RuntimeError("db down")))
+    monkeypatch.setattr(ingest_service, "mark_paper_failed", slow_mark)
 
     async def run():
-        seen["started"] = started()
+        seen["started"] = asyncio.Event()
+        seen["comp_started"] = asyncio.Event()
         task = asyncio.create_task(_call(store))
-        waiter = asyncio.create_task(seen["started"].wait())
-        await asyncio.wait({task, waiter}, timeout=10, return_when=asyncio.FIRST_COMPLETED)
-        assert seen["started"].is_set(), "pipeline never started"
+        await asyncio.wait_for(seen["started"].wait(), 10)
         task.cancel()
+        await asyncio.wait_for(seen["comp_started"].wait(), 10)
+        task.cancel()  # second cancel while compensation is running
         with pytest.raises(asyncio.CancelledError):
             await task
+        await asyncio.sleep(0.6)  # compensation continues in the background
 
     asyncio.run(run())
+    assert _status(temp_db, seen["paper_id"]) == "failed"
+    store.adelete_by_paper_id.assert_awaited_once_with(seen["paper_id"])
