@@ -18,6 +18,7 @@ import argparse
 import os
 import sys
 import time
+from datetime import date
 
 import defusedxml.ElementTree as ET  # noqa: N817 (matches stdlib ET convention)
 import httpx
@@ -64,11 +65,11 @@ def fetch_pmc_ids(
     if api_key:
         params["api_key"] = api_key
     if from_date or until_date:
+        # esearch ignores mindate/maxdate unless both are sent (#823), so fill the
+        # missing side with an open bound.
         params["datetype"] = "pdat"
-        if from_date:
-            params["mindate"] = from_date
-        if until_date:
-            params["maxdate"] = until_date
+        params["mindate"] = from_date or "1800-01-01"
+        params["maxdate"] = until_date or "2099-12-31"
 
     resp = client.get(ESEARCH_URL, params=params, timeout=timeout)
     resp.raise_for_status()
@@ -108,6 +109,37 @@ def fetch_paper_metadata(
     return papers
 
 
+def _build_pub_date(elem) -> str | None:
+    """Build an ISO date from a PMC <pub-date>, or None if unusable (#821).
+
+    month/day may be missing, empty, non-numeric ('Jan'), or out of range. Fall
+    back y-m-d -> y-m-1 -> y-1-1 -> None so /papers/ingest never gets a 422 for
+    metadata alone. Future dates (the server rejects them) and years before
+    1900 become None.
+    """
+
+    def num(tag: str) -> int | None:
+        text = (elem.findtext(tag) or "").strip()
+        return int(text) if text.isascii() and text.isdigit() else None
+
+    year_text = (elem.findtext("year") or "").strip()
+    if not (year_text.isascii() and year_text.isdigit()):
+        return None
+    year = int(year_text)
+    month = num("month")
+    # A day without a usable month is meaningless, so it falls through to year-only.
+    candidates = [(month, num("day") or 1), (month, 1)] if month else []
+    for month, day in [*candidates, (1, 1)]:
+        try:
+            parsed = date(year, month, day)
+        except ValueError:
+            continue
+        if parsed > date.today() or year < 1900:
+            return None
+        return parsed.isoformat()
+    return None
+
+
 def _parse_article(article) -> dict | None:
     """Extract metadata from a PMC article XML element."""
     pmc_elem = article.find(".//article-id[@pub-id-type='pmc']")
@@ -141,13 +173,7 @@ def _parse_article(article) -> dict | None:
         ),
         None,
     )
-    pub_date = None
-    if pub_date_elem is not None:
-        year = pub_date_elem.findtext("year", "")
-        month = pub_date_elem.findtext("month", "01").zfill(2)
-        day = pub_date_elem.findtext("day", "01").zfill(2)
-        if year:
-            pub_date = f"{year}-{month}-{day}"
+    pub_date = _build_pub_date(pub_date_elem) if pub_date_elem is not None else None
 
     categories: list[str] = []
     for subj in article.findall(".//subject"):

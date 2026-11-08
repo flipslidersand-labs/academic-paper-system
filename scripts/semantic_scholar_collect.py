@@ -26,7 +26,14 @@ import sys
 import time
 
 import httpx
-from _collect_common import add_common_args, format_date_range, ingest_downloaded, run_collect, write_summary
+from _collect_common import (
+    add_common_args,
+    format_date_range,
+    ingest_downloaded,
+    parse_retry_after,
+    run_collect,
+    write_summary,
+)
 from cli_utils import check_date_order, positive_int
 
 S2_API = "https://api.semanticscholar.org/graph/v1/paper/search"
@@ -72,7 +79,7 @@ def fetch_papers(
         try:
             resp = httpx.get(S2_API, params=params, headers=headers, timeout=timeout)
             if resp.status_code == 429:
-                wait = int(resp.headers.get("retry-after", "15"))
+                wait = parse_retry_after(resp.headers.get("retry-after"), default=15)
                 print(f"[s2] rate limited, sleeping {wait}s", file=sys.stderr)
                 time.sleep(wait)
                 resp = httpx.get(S2_API, params=params, headers=headers, timeout=timeout)

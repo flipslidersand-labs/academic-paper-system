@@ -86,6 +86,31 @@ def test_cosine_similarity_basic():
 
 def test_cosine_similarity_zero_vector():
     assert cosine_similarity([0.0, 0.0], [1.0, 1.0]) == 0.0
+    assert cosine_similarity([1.0, 1.0], [0.0, 0.0]) == 0.0
+
+
+def test_cosine_similarity_empty_returns_zero():
+    assert cosine_similarity([], []) == 0.0
+    assert cosine_similarity([], [1.0, 2.0]) == 0.0
+    assert cosine_similarity([1.0, 2.0], []) == 0.0
+
+
+def test_cosine_similarity_length_mismatch_truncates_dot_keeps_full_norms():
+    # 内積は短い方に切り詰め、ノルムは各ベクトル全体で計算する (#820 以前からの挙動)。
+    assert cosine_similarity([3.0, 4.0], [1.0]) == pytest.approx(0.6)
+    assert cosine_similarity([1.0], [3.0, 4.0]) == pytest.approx(0.6)
+    # 共通部分が直交なら 0、片方がゼロベクトルなら 0。
+    assert cosine_similarity([1.0, 0.0, 5.0], [0.0, 1.0]) == 0.0
+    assert cosine_similarity([0.0], [1.0, 1.0]) == 0.0
+
+
+def test_cosine_similarity_sign_and_scale():
+    assert cosine_similarity([1.0, 2.0], [-1.0, -2.0]) == pytest.approx(-1.0)
+    assert cosine_similarity([3.0, 4.0], [3.0, 4.0]) == 1.0
+    assert cosine_similarity([3.0, 4.0], [300.0, 400.0]) == pytest.approx(1.0)
+    assert cosine_similarity([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]) == pytest.approx(
+        32.0 / (14.0**0.5 * 77.0**0.5), rel=1e-12
+    )
 
 
 def test_extract_nuggets_embedding_shifts_ranking():
@@ -144,3 +169,32 @@ def test_bm25_idf_uses_document_frequency():
     assert common[0] == common[1] == common[2]
     # Rare term only scores the sentence that contains it.
     assert rare[1] == rare[2] == 0.0
+
+
+# --- BM25 tokenization strips punctuation (#824) ---
+
+
+def test_tokenize_strips_punctuation():
+    from academic_paper.nugget import _tokenize
+
+    assert _tokenize("Results. Accuracy, (RAG) rag?") == ["results", "accuracy", "rag", "rag"]
+
+
+def test_tokenize_keeps_non_ascii():
+    from academic_paper.nugget import _tokenize
+
+    assert _tokenize("日本語の検索、テスト。 café") == ["日本語の検索", "テスト", "café"]
+
+
+def test_bm25_punctuated_word_matches_query_term():
+    # 'results.' (sentence-final) must match query 'results'.
+    scores = bm25_scores("results", ["We report results.", "Nothing here"])
+    assert scores[0] > 0.0
+    assert scores[1] == 0.0
+
+
+def test_extract_nuggets_selects_sentence_by_punctuated_word():
+    # Only the sentence-final / parenthesised / comma-suffixed words match the query.
+    text = "Intro text here. We improve accuracy, (RAG) greatly. Other filler words follow. The final results."
+    assert extract_nuggets("results", text, top_k=1, embed_weight=0.0) == "The final results."
+    assert extract_nuggets("rag", text, top_k=1, embed_weight=0.0) == "We improve accuracy, (RAG) greatly."
