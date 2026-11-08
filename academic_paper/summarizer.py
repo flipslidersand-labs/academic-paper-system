@@ -228,12 +228,18 @@ class RAGSummarizer:
             raise ValueError(f"No chunks found for paper {paper_id}")
 
         context_parts = []
+        skipped = 0
         for chunk in chunks[:top_k]:
-            payload = chunk.get("payload", {})
+            payload = chunk.get("payload") or {}
             page_start = payload.get("page_start", "unknown")
             text = payload.get("text", "")
             if text:
                 context_parts.append(f"Page {page_start}: {_sanitize_paper_text(str(text))}")
+            else:
+                skipped += 1
+
+        if skipped:
+            logger.warning("summarize paper_id=%s: skipping %d chunk(s) with no payload/text", paper_id, skipped)
 
         if not context_parts:
             raise ValueError(f"No valid content found in chunks for paper {paper_id}")

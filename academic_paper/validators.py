@@ -52,6 +52,7 @@ def _parse_list_field(value: str | None, field: str = "field") -> list[str] | No
 
 
 _MIN_PUBLISHED_YEAR = 1900
+_PUBLISHED_DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 
 def _validate_published_date(value: str | None, field: str = "published_date") -> None:
@@ -64,7 +65,11 @@ def _validate_published_date(value: str | None, field: str = "published_date") -
     """
     if not value:
         return
+    # fromisoformat also accepts YYYYMMDD and ISO week dates (3.11+), which would be
+    # stored verbatim and re-parsed to a different date downstream (#851).
     try:
+        if not _PUBLISHED_DATE_RE.fullmatch(value):
+            raise ValueError(value)
         parsed = date.fromisoformat(value)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"{field} must be an ISO date (YYYY-MM-DD), got {value!r}")
