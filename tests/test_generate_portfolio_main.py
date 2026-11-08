@@ -131,6 +131,7 @@ def test_papers_json_exposes_only_allowlisted_fields(monkeypatch, tmp_path):
         {"id": 9, "file_name": "arxiv_2611.00001v2.pdf", "file_hash": "f" * 64, "source": "arxiv"},
         {"id": 10, "file_name": "secret_internal_name.pdf", "file_hash": "e" * 64, "source": "local"},
         {"id": 11, "file_name": "x_11.pdf", "arxiv_id": "2611.99999", "title": "E", "source": "arxiv"},
+        {"id": 12, "file_name": None, "title": None, "source": "arxiv"},
     ]
     _run(monkeypatch, tmp_path, _fetch_factory(papers, []))
     raw = (tmp_path / "papers.json").read_text(encoding="utf-8")
@@ -145,10 +146,13 @@ def test_papers_json_exposes_only_allowlisted_fields(monkeypatch, tmp_path):
     # title-less papers: file_name must not leak (no title fallback), no title key emitted
     for name in ("arxiv_2611.00001v2.pdf", "secret_internal_name.pdf", "x_11.pdf", "local.pdf"):
         assert name not in raw
+        assert name not in (tmp_path / "index.html").read_text(encoding="utf-8")
     assert out[2] == {"source": "arxiv", "arxiv_id": "2611.00001"}
     assert out[3] == {"source": "local"}
     # explicit arxiv_id column wins over file_name derivation
     assert out[4] == {"title": "E", "source": "arxiv", "arxiv_id": "2611.99999"}
+    # title=None and file_name=None must not crash and must not emit null keys
+    assert out[5] == {"source": "arxiv"}
     assert out[0] == {
         "title": "T",
         "authors": ["A"],
