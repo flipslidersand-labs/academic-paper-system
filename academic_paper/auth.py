@@ -50,29 +50,14 @@ def require_scope(*scopes: Scope) -> Callable[..., Awaitable[None]]:
     required = frozenset(scopes)
 
     async def dependency(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
-        if not get_settings().auth_enabled:
+        settings = get_settings()
+        if not settings.auth_enabled:
             return  # auth disabled
-        ingest_keys = [get_settings().ingest_api_key] if get_settings().ingest_api_key else []
-        granted = resolve_scopes(x_api_key, get_settings().accepted_api_keys, ingest_keys)
+        ingest_keys = [settings.ingest_api_key] if settings.ingest_api_key else []
+        granted = resolve_scopes(x_api_key, settings.accepted_api_keys, ingest_keys)
         if granted is None:
             raise HTTPException(status_code=401, detail="Invalid or missing API key")
         if not required <= granted:
             raise HTTPException(status_code=403, detail="Insufficient scope")
 
     return dependency
-
-
-_require_authenticated = require_scope()  # any valid key, no scope required (#602)
-
-
-async def verify_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> None:
-    """Require X-API-Key on write and read endpoints when API_KEY env var is set (#146).
-
-    Applied to read endpoints too (#241): paper text/search snippets are at least
-    as sensitive as the job metadata already gated behind auth (#190), so the
-    boundary must not be asymmetric.
-
-    Uses hmac.compare_digest for constant-time comparison to prevent
-    timing attacks that could leak key length / prefix (#190).
-    """
-    await _require_authenticated(x_api_key)

@@ -119,3 +119,11 @@ def test_auth_disabled_when_nothing_set():
         patch.object(get_settings(), "ingest_api_key", ""),
     ):
         assert not get_settings().auth_enabled
+
+
+def test_legacy_auth_aliases_removed():
+    """#822: only require_scope() is the public dependency; old aliases must not return."""
+    import academic_paper.auth as auth
+
+    assert not hasattr(auth, "verify_api_key")
+    assert not hasattr(auth, "_require_authenticated")
