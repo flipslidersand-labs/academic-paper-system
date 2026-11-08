@@ -410,7 +410,8 @@ def test_portfolio_main_writes_index_and_json(monkeypatch, tmp_path):
     assert "obj" in index_html
     papers_json = json.loads((out_dir / "papers.json").read_text(encoding="utf-8"))
     assert papers_json["count"] == 1
-    assert papers_json["papers"] == papers
+    # #856: only allowlisted public fields (no id / file_name)
+    assert papers_json["papers"] == [{"title": "T", "authors": ["A"], "score": 0.8, "source": "arxiv"}]
 
 
 def test_portfolio_main_aborts_when_no_papers_fetched(monkeypatch, tmp_path):
