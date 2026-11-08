@@ -376,6 +376,18 @@ def test_ingest_invalid_published_date_422(client):
     assert "ISO date" in resp.json()["detail"]
 
 
+@pytest.mark.parametrize("value", ["20260101", "2026-W01-1"])
+def test_ingest_non_canonical_published_date_422(client, value):
+    """Regression (#851): basic/ISO-week formats pass max_length=10 but must be 422."""
+    resp = client.post(
+        "/papers/ingest",
+        files={"file": ("d.pdf", BytesIO(_make_minimal_pdf()), "application/pdf")},
+        data={"published_date": value},
+    )
+    assert resp.status_code == 422
+    assert "YYYY-MM-DD" in resp.json()["detail"]
+
+
 def test_ingest_nested_authors_422(client):
     """Regression (#144): JSON array with non-string elements is rejected."""
     resp = client.post(
