@@ -175,6 +175,107 @@ async def test_run_ingest_final_persist_failure_is_swallowed(tmp_path):
     assert not os.path.exists(pdf)
 
 
+async def _start_blocked_ingest(tmp_path, js, job):
+    pdf = tmp_path / "a.pdf"
+    pdf.write_bytes(b"%PDF-")
+    embedder, store = _deps()
+    started = asyncio.Event()
+
+    async def _block(*a, **kw):
+        started.set()
+        await asyncio.Event().wait()
+
+    patcher = patch.object(svc, "ingest_pipeline", _block)
+    patcher.start()
+    task = asyncio.ensure_future(
+        svc.run_ingest("j", str(pdf), 9, "h", "f.pdf", embedder=embedder, vector_store=store, job_store=js)
+    )
+    await started.wait()
+    return task, patcher, pdf
+
+
+@_sync
+async def test_run_ingest_cancel_marks_job_failed_and_reraises(tmp_path):
+    job = Job(id="j", status="pending", kind="ingest")
+    js = _job_store(job)
+    task, patcher, pdf = await _start_blocked_ingest(tmp_path, js, job)
+    try:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        patcher.stop()
+    assert job.status == "failed" and job.finished_at is not None
+    assert any("cancelled" in e for e in job.errors)
+    assert js.persist.await_args_list[-1].args[0] is job  # final state persisted
+    assert not os.path.exists(pdf)
+
+
+@_sync
+async def test_run_ingest_cancel_during_final_persist_still_persists(tmp_path):
+    job = Job(id="j", status="pending", kind="ingest")
+    release = asyncio.Event()
+    final_persist_started = asyncio.Event()
+    persisted: list[str] = []
+    calls = 0
+
+    async def _persist(j):
+        nonlocal calls
+        calls += 1
+        if calls == 1:  # the 'running' persist
+            return
+        final_persist_started.set()
+        await release.wait()
+        persisted.append(j.status)
+
+    js = _job_store(job)
+    js.persist = _persist
+    task, patcher, pdf = await _start_blocked_ingest(tmp_path, js, job)
+    try:
+        task.cancel()
+        await final_persist_started.wait()  # now blocked inside the final persist
+        task.cancel()  # second cancel while persisting
+        await asyncio.sleep(0)  # let the second cancel be delivered
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        patcher.stop()
+    assert persisted == ["failed"]
+    assert job.finished_at is not None
+    assert not os.path.exists(pdf)
+
+
+@_sync
+async def test_run_ingest_cancel_during_compensation_keeps_job_failed(tmp_path):
+    pdf = tmp_path / "a.pdf"
+    pdf.write_bytes(b"%PDF-")
+    job = Job(id="j", status="pending", kind="ingest")
+    js = _job_store(job)
+    embedder, store = _deps()
+    in_comp = asyncio.Event()
+
+    async def _block_mark(_pid):
+        in_comp.set()
+        await asyncio.Event().wait()
+
+    task = asyncio.ensure_future(
+        svc.run_ingest("j", str(pdf), 9, "h", "f.pdf", embedder=embedder, vector_store=store, job_store=js)
+    )
+    with (
+        patch.object(svc, "ingest_pipeline", AsyncMock(side_effect=ValueError("bad"))),
+        patch.object(svc, "mark_paper_failed", _block_mark),
+    ):
+        await in_comp.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert job.status == "failed" and job.failed == 1 and job.finished_at is not None
+    assert job.errors and job.errors[0].startswith("paper_id=9: ") and "cancelled" not in job.errors[0]
+    assert js.persist.await_args_list[-1].args[0] is job
+    assert not os.path.exists(pdf)
+
+
 class _FakeUpload:
     def __init__(self, data: bytes, size=None, filename="a.pdf"):
         self._data = data

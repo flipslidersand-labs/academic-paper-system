@@ -26,7 +26,7 @@ from academic_paper.db import (
 from academic_paper.embedder import EmbedderClient
 from academic_paper.errors import PdfExtractionError, _safe_error_message
 from academic_paper.extractor import extract_text
-from academic_paper.jobs import JobStore
+from academic_paper.jobs import Job, JobStore
 from academic_paper.telemetry import get_tracer
 from academic_paper.vector_store import QdrantStore, make_qdrant_id
 
@@ -258,6 +258,29 @@ def unlink_quiet(path: str) -> None:
         pass
 
 
+async def _persist_shielded(job_store: JobStore, job: Job) -> None:
+    """persist(job) that survives repeated task cancellation (#872).
+
+    Awaiting directly would raise CancelledError again if the task is cancelled
+    while persisting, losing the terminal state. Run it as its own future and
+    wait for it to settle; the cancellation is re-raised afterwards.
+    """
+    fut = asyncio.ensure_future(job_store.persist(job))
+    try:
+        await asyncio.shield(fut)
+    except asyncio.CancelledError:
+        while not fut.done():
+            try:
+                await asyncio.shield(fut)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if not fut.cancelled() and fut.exception() is not None:
+            logger.error("Failed to persist final state of job=%s", job.id, exc_info=fut.exception())
+        raise
+
+
 async def run_ingest(
     job_id: str,
     tmp_path: str,
@@ -295,17 +318,30 @@ async def run_ingest(
             # mark_paper_failed never raises (#421): it swallows and logs its own
             # errors, so the job attributes below always run afterward instead of
             # being skipped by an exception from the paper-status write.
+            # Terminalize the job before the compensation awaits so a cancel (or failure)
+            # during compensation still leaves a failed job with the reason (#872).
+            job.failed = 1
+            job.errors.append(f"paper_id={paper_id}: {_safe_error_message(e)}")
+            job.status = "failed"
             await mark_paper_failed(paper_id)
             # Upsert may have partially succeeded (batched); remove leftover vectors
             # so a failed paper is not returned by vector search (#471).
             await compensate_qdrant(vector_store, paper_id)
+        except asyncio.CancelledError:
+            # CancelledError is a BaseException so `except Exception` misses it; without
+            # this the job stays 'running' with finished_at set (#872). Terminalize the
+            # job in memory first (the finally below persists it), then re-raise. Paper
+            # state is left to ingest_pipeline's shielded write / startup cleanup so we
+            # don't double-compensate.
+            logger.warning("Background ingest cancelled for paper_id=%s job=%s", paper_id, job_id)
             job.failed = 1
-            job.errors.append(f"paper_id={paper_id}: {_safe_error_message(e)}")
+            job.errors.append(f"paper_id={paper_id}: cancelled")
             job.status = "failed"
+            raise
         finally:
             job.finished_at = time.time()
             try:
-                await job_store.persist(job)
+                await _persist_shielded(job_store, job)
             except Exception:
                 # in-memory の job は既に終端状態。ここで投げるとタスク例外が未取得で落ちるだけ (#725)。
                 logger.error("Failed to persist final state of job=%s", job_id, exc_info=True)
