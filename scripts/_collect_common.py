@@ -333,7 +333,14 @@ def ingest_downloaded(
     becomes ``""`` and *source* is attached. ``pre_ingest(tmp_path)``, when
     given, runs after download and before the ingest call (e.g. arXiv ID check).
     """
-    with download_pdf(client, pdf_url, pdf_timeout) as tmp_path:
+    # The PDF host is untrusted: fetch it with a dedicated client that ignores
+    # HTTP(S)_PROXY / ALL_PROXY. Through a proxy the proxy resolves the host
+    # itself, so _pin_resolution / _resolve_safe would not protect the fetch
+    # (#857). The shared *client* (ingest API) keeps its default proxy handling.
+    with (
+        httpx.Client(trust_env=False) as download_client,
+        download_pdf(download_client, pdf_url, pdf_timeout) as tmp_path,
+    ):
         if pre_ingest is not None:
             pre_ingest(tmp_path)
         return ingest_pdf(
