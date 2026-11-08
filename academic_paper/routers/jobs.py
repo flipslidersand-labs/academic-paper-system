@@ -1,12 +1,13 @@
 """Jobs routes (summarize-all / get / list), extracted from server.py (#359 4/5, #621).
 
-Path, status code and OpenAPI are unchanged. require_scope (#627) is applied per route. llm / summarizer are read from ``request.app.state`` so this module does not
-import server.py. ``/jobs/summarize-all`` is declared before ``/jobs/{job_id}``.
+Path, status code and OpenAPI are unchanged. require_scope (#627) is applied per route. llm / summarizer are injected via academic_paper.dependencies (#360).
+ ``/jobs/summarize-all`` is declared before ``/jobs/{job_id}``.
 """
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from academic_paper.auth import Scope, require_scope
+from academic_paper.dependencies import get_llm, get_summarizer
 from academic_paper.jobs import job_store
 from academic_paper.services.summary_service import run_summarize_all
 
@@ -14,16 +15,17 @@ router = APIRouter()
 
 
 @router.post("/jobs/summarize-all", status_code=202, dependencies=[Depends(require_scope(Scope.ADMIN))])
-async def start_summarize_all(request: Request, background_tasks: BackgroundTasks):
+async def start_summarize_all(
+    background_tasks: BackgroundTasks, llm=Depends(get_llm), summarizer=Depends(get_summarizer)
+):
     """Start a background job to summarize all papers without a cached summary."""
-    state = request.app.state
-    if state.llm is None or state.summarizer is None:
+    if llm is None or summarizer is None:
         raise HTTPException(status_code=503, detail="LLM not configured")
 
     job = await job_store.create_if_not_running(kind="summarize-all")
     if job is None:
         raise HTTPException(status_code=409, detail="A summarize-all job is already running")
-    background_tasks.add_task(run_summarize_all, job.id, state.summarizer, state.llm, job_store)
+    background_tasks.add_task(run_summarize_all, job.id, summarizer, llm, job_store)
     return {"job_id": job.id, "status": job.status}
 
 

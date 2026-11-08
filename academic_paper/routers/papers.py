@@ -2,19 +2,20 @@
 
 Path, response and OpenAPI are unchanged. require_scope (#627) is applied per route.
 App-level dependencies (embedder, vector_store, active ingest tasks) are
-read from ``request.app.state`` so this module does not import server.py.
+injected via academic_paper.dependencies (#360).
 """
 
 import asyncio
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse
 
 from academic_paper.auth import Scope, require_scope
 from academic_paper.config import get_settings
 from academic_paper.db import db_connection, get_paper, list_papers_filtered
+from academic_paper.dependencies import get_active_ingest_tasks, get_embedder, get_vector_store
 from academic_paper.errors import _http_exc_for, mapped_errors
 from academic_paper.extractor import hash_file
 from academic_paper.jobs import job_store
@@ -30,7 +31,6 @@ _DUPLICATE_DETAIL = {"indexed": "File already ingested", "pending": "File is alr
 
 @router.post("/papers/ingest", dependencies=[Depends(require_scope(Scope.INGEST))])
 async def ingest_paper(
-    request: Request,
     file: UploadFile = File(...),
     title: str | None = Form(None, max_length=1000),
     authors: str | None = Form(None, max_length=10000),
@@ -38,6 +38,9 @@ async def ingest_paper(
     published_date: str | None = Form(None, max_length=10),
     source: str | None = Form(None, max_length=100),
     wait: bool = Query(False, description="Process synchronously and return the indexed result (200)"),
+    embedder=Depends(get_embedder),
+    vector_store=Depends(get_vector_store),
+    active=Depends(get_active_ingest_tasks),
 ):
     """Ingest a PDF paper with optional metadata.
 
@@ -56,7 +59,6 @@ async def ingest_paper(
         HTTPException 422: Invalid metadata (non-ISO published_date, non-string list elements).
         HTTPException 400: Extraction / chunking / embedding error (wait=true only).
     """
-    state = request.app.state
     tmp_path: str | None = None
     keep_tmp = False
     try:
@@ -91,14 +93,14 @@ async def ingest_paper(
         if wait:
             try:
                 chunks = await ingest_service.ingest_pipeline(
-                    tmp_path, paper_id, file_hash, file_name, embedder=state.embedder, vector_store=state.vector_store
+                    tmp_path, paper_id, file_hash, file_name, embedder=embedder, vector_store=vector_store
                 )
             except Exception as e:
                 logger.exception("Synchronous ingest failed for paper_id=%s", paper_id)
                 await ingest_service.mark_paper_failed(paper_id)
                 # _ingest_pipeline already compensates Qdrant on save_chunks failure;
                 # compensate here for embed/upsert errors that leave no Qdrant data.
-                await ingest_service.compensate_qdrant(state.vector_store, paper_id)
+                await ingest_service.compensate_qdrant(vector_store, paper_id)
                 raise _http_exc_for(e, "Ingest failed: check PDF content and try again")
             return {
                 "paper_id": paper_id,
@@ -116,8 +118,8 @@ async def ingest_paper(
                     paper_id,
                     file_hash,
                     file_name,
-                    embedder=state.embedder,
-                    vector_store=state.vector_store,
+                    embedder=embedder,
+                    vector_store=vector_store,
                     job_store=job_store,
                 )
             )
@@ -129,7 +131,6 @@ async def ingest_paper(
         # A task cancelled before its first step (shutdown) never enters
         # _run_ingest's try/finally, so also unlink when the task completes (#454).
         task.add_done_callback(lambda _t, p=tmp_path: ingest_service.unlink_quiet(p))
-        active = getattr(state, "active_ingest_tasks", None)
         if active is not None:
             active.add(task)
             task.add_done_callback(active.discard)
