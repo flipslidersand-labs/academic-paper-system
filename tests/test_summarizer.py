@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from academic_paper.errors import NoUsableContentError
 from academic_paper.llm import LLMOutputError
 from academic_paper.summarizer import SYSTEM_PROMPT, RAGSummarizer
 
@@ -234,7 +235,7 @@ async def test_summarize_raises_when_no_chunks():
     mock_qdrant.asearch = AsyncMock(return_value=[])
 
     summarizer = RAGSummarizer(mock_llm, mock_qdrant)
-    with pytest.raises(ValueError, match="No chunks found"):
+    with pytest.raises(NoUsableContentError, match="No chunks found"):
         await summarizer.summarize(paper_id=1, file_hash="abc")
 
 
@@ -246,7 +247,7 @@ async def test_summarize_raises_when_no_valid_text_in_chunks():
     mock_qdrant.asearch = AsyncMock(return_value=[{"id": "1", "payload": {"paper_id": 1, "page_start": 1, "text": ""}}])
 
     summarizer = RAGSummarizer(mock_llm, mock_qdrant)
-    with pytest.raises(ValueError, match="No valid content"):
+    with pytest.raises(NoUsableContentError, match="No valid content"):
         await summarizer.summarize(paper_id=1, file_hash="abc")
 
 
@@ -814,7 +815,7 @@ def test_build_prompt_no_warning_when_nothing_skipped(caplog):
     assert not caplog.records
 
 
-def test_build_prompt_all_payloads_none_raises_value_error():
-    """#853: no usable content raises ValueError (not AttributeError)."""
-    with pytest.raises(ValueError, match="No valid content"):
+def test_build_prompt_all_payloads_none_raises_no_usable_content():
+    """#853/#867: no usable content raises NoUsableContentError (not AttributeError)."""
+    with pytest.raises(NoUsableContentError, match="No valid content"):
         RAGSummarizer._build_prompt([{"payload": None}], top_k=5, paper_id=1)
