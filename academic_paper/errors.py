@@ -87,9 +87,12 @@ def _classify_genai_error(exc: genai_errors.APIError) -> ErrorInfo:
     The key and str(exc) are never included in the public message.
     """
     code = exc.code
+    if not isinstance(code, int):
+        # code can be None on non-HTTP paths (e.g. websocket); treat as a protocol error.
+        return ErrorInfo("upstream_protocol", 502, "LLM service rejected the request")
     if code in (401, 403):
         return ErrorInfo("upstream_auth", 502, "LLM service rejected authentication (check GOOGLE_API_KEY)")
-    if code == 429 or code >= 500:
+    if code == 429 or 500 <= code < 600:
         return ErrorInfo("upstream_unavailable", 503, "LLM service unavailable")
     return ErrorInfo("upstream_protocol", 502, "LLM service rejected the request")
 
