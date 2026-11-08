@@ -133,7 +133,8 @@ class RAGSummarizer:
             Dictionary with keys: objective, method, results, limitations, keywords
 
         Raises:
-            ValueError: If no chunks found or LLM returns invalid JSON
+            NoUsableContentError: If no usable chunks are found
+            ValueError: If LLM returns invalid JSON
             TimeoutError: If the call exceeds get_settings().summarize_total_timeout
         """
         # The embedding/Qdrant/LLM wait_for calls below are awaited sequentially,

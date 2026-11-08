@@ -97,7 +97,8 @@ def classify_error(exc: Exception, fallback_msg: str = "") -> ErrorInfo:
     - EmbeddingCountMismatchError / EmbeddingResponseError / LLMOutputError → 502
     - builtin TimeoutError (asyncio.wait_for deadlines) → 504 (#423)
     - sqlite3.IntegrityError (file_hash UNIQUE violation) → 409
-    - ValueError from input validation (no text, no chunks) → 400
+    - NoUsableContentError (no usable chunks for a paper, #867) → 500 with a fixed message
+    - ValueError from input validation (e.g. no text) → 400
     - Everything else → kind "internal" (500); the caller adds an opaque id and logs.
     """
     if isinstance(exc, NotFoundError):
