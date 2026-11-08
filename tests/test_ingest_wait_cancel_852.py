@@ -1,6 +1,7 @@
 """wait=true ingest cancelled mid-pipeline must fail the paper and compensate (#852)."""
 
 import asyncio
+import logging
 import sqlite3
 from unittest.mock import AsyncMock, MagicMock
 
@@ -109,3 +110,29 @@ def test_second_cancel_during_compensation_still_fails_paper_and_deletes_qdrant(
     asyncio.run(run())
     assert _status(temp_db, seen["paper_id"]) == "failed"
     store.adelete_by_paper_id.assert_awaited_once_with(seen["paper_id"])
+
+
+def test_cancel_propagates_and_logs_error_when_compensation_raises(temp_db, override_settings, monkeypatch, caplog):
+    override_settings(academic_db=temp_db)
+    store = MagicMock()
+    seen = {}
+
+    async def hang(*a, **kw):
+        seen["started"].set()
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(ingest_service, "ingest_pipeline", hang)
+    monkeypatch.setattr(ingest_service, "mark_paper_failed", AsyncMock(side_effect=RuntimeError("db down")))
+    monkeypatch.setattr(ingest_service, "compensate_qdrant", AsyncMock(side_effect=RuntimeError("qdrant down")))
+
+    async def run():
+        seen["started"] = asyncio.Event()
+        task = asyncio.create_task(_call(store))
+        await asyncio.wait_for(seen["started"].wait(), 10)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):  # not replaced by the compensation RuntimeError
+            await task
+
+    with caplog.at_level(logging.ERROR, logger=papers_router.logger.name):
+        asyncio.run(run())
+    assert any("Cancel compensation failed" in r.message and r.levelno == logging.ERROR for r in caplog.records)
