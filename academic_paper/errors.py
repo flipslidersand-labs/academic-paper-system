@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 import httpx
 from fastapi import HTTPException
+from google.genai import errors as genai_errors
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
 from academic_paper.config import get_settings
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DomainError",
     "ErrorInfo",
+    "NoUsableContentError",
     "NotConfiguredError",
     "NotFoundError",
     "PdfExtractionError",
@@ -41,6 +43,13 @@ class NotFoundError(DomainError):
 
 class NotConfiguredError(DomainError):
     """A required backend is not configured or not initialized (HTTP 503)."""
+
+
+class NoUsableContentError(Exception):
+    """No usable chunk text exists for a paper (server-side data state, not client input) -> 500 (#867).
+
+    Deliberately not a ValueError so classify_error does not map it to 400.
+    """
 
 
 class PdfExtractionError(ValueError):
@@ -80,16 +89,34 @@ def _classify_http_status(exc: httpx.HTTPStatusError) -> ErrorInfo:
     return ErrorInfo("upstream_protocol", 502, "Upstream service rejected the request")
 
 
+def _classify_genai_error(exc: genai_errors.APIError) -> ErrorInfo:
+    """Classify a Gemini (google-genai) APIError by its HTTP status code (#861).
+
+    The key and str(exc) are never included in the public message.
+    """
+    code = exc.code
+    if not isinstance(code, int):
+        # code can be None on non-HTTP paths (e.g. websocket); treat as a protocol error.
+        return ErrorInfo("upstream_protocol", 502, "LLM service rejected the request")
+    if code in (401, 403):
+        return ErrorInfo("upstream_auth", 502, "LLM service rejected authentication (check GOOGLE_API_KEY)")
+    if code == 429 or 500 <= code < 600:
+        return ErrorInfo("upstream_unavailable", 503, "LLM service unavailable")
+    return ErrorInfo("upstream_protocol", 502, "LLM service rejected the request")
+
+
 def classify_error(exc: Exception, fallback_msg: str = "") -> ErrorInfo:
     """Classify an exception without logging or building an HTTPException (#148, #741).
 
     - NotFoundError → 404, NotConfiguredError → 503 (service-layer domain errors, #741)
     - httpx.HTTPStatusError: 401/403 → 502, 5xx/429 → 503, other 4xx → 502 (#792, #818)
+    - genai APIError: 401/403 → 502, 5xx/429 → 503, other 4xx → 502 (#861)
     - Dependency-unavailable (httpx connect/timeout, Qdrant HTTP errors) → 502/503
     - EmbeddingCountMismatchError / EmbeddingResponseError / LLMOutputError → 502
     - builtin TimeoutError (asyncio.wait_for deadlines) → 504 (#423)
     - sqlite3.IntegrityError (file_hash UNIQUE violation) → 409
-    - ValueError from input validation (no text, no chunks) → 400
+    - NoUsableContentError (no usable chunks for a paper, #867) → 500 with a fixed message
+    - ValueError from input validation (e.g. no text) → 400
     - Everything else → kind "internal" (500); the caller adds an opaque id and logs.
     """
     if isinstance(exc, NotFoundError):
@@ -98,6 +125,8 @@ def classify_error(exc: Exception, fallback_msg: str = "") -> ErrorInfo:
         return ErrorInfo("not_configured", 503, str(exc))
     if isinstance(exc, httpx.HTTPStatusError):
         return _classify_http_status(exc)
+    if isinstance(exc, genai_errors.APIError):
+        return _classify_genai_error(exc)
     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
         return ErrorInfo("upstream_unavailable", 503, "Upstream service unavailable")
     if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)):
@@ -118,6 +147,8 @@ def classify_error(exc: Exception, fallback_msg: str = "") -> ErrorInfo:
         return ErrorInfo("upstream_protocol", 502, "Vector store returned an unexpected response")
     if isinstance(exc, sqlite3.IntegrityError):
         return ErrorInfo("conflict", 409, "Conflict: duplicate record")
+    if isinstance(exc, NoUsableContentError):
+        return ErrorInfo("no_usable_content", 500, "Summarization failed: no usable content for this paper")
     if isinstance(exc, ValueError):
         return ErrorInfo("invalid_input", 400, fallback_msg)
     return ErrorInfo("internal", 500, "")

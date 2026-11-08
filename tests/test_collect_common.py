@@ -46,6 +46,8 @@ def _mock_stream_response(content: bytes, content_type: str = "application/pdf")
             pass
 
     class _FakeClient:
+        trust_env = False
+
         def stream(self, method, url, **kwargs):
             return _FakeStreamResp()
 
@@ -85,6 +87,8 @@ def test_download_pdf_rejects_unsafe_url_before_streaming():
     """download_pdf must refuse an SSRF-unsafe URL without ever calling client.stream."""
 
     class _ExplodingClient:
+        trust_env = False
+
         def stream(self, method, url, **kwargs):
             raise AssertionError("client.stream() must not be called for an unsafe URL")
 
@@ -156,6 +160,8 @@ def test_download_pdf_raises_when_size_exceeds_limit():
             pass
 
     class _FakeClient:
+        trust_env = False
+
         def stream(self, method, url, **kwargs):
             return _FakeOversizedResp()
 
@@ -184,6 +190,8 @@ def test_download_pdf_cleanup_on_exception():
             pass
 
     class _FailClient:
+        trust_env = False
+
         def stream(self, method, url, **kwargs):
             return _FailStream()
 
@@ -247,6 +255,8 @@ def test_download_pdf_rejects_redirect_to_unsafe_host():
     """A redirect Location pointing at cloud metadata must be rejected before it is fetched (#278)."""
 
     class _FakeClient:
+        trust_env = False
+
         def stream(self, method, url, **kwargs):
             assert url == "http://example.com/redirect"
             return _fake_redirect_resp("http://169.254.169.254/latest/meta-data/")
@@ -262,6 +272,8 @@ def test_download_pdf_follows_safe_redirect_to_final_pdf():
     calls = []
 
     class _FakeClient:
+        trust_env = False
+
         def stream(self, method, url, **kwargs):
             calls.append(url)
             if url == "http://example.com/redirect":
@@ -275,6 +287,8 @@ def test_download_pdf_follows_safe_redirect_to_final_pdf():
 
 def test_download_pdf_raises_on_too_many_redirects():
     class _FakeClient:
+        trust_env = False
+
         def stream(self, method, url, **kwargs):
             return _fake_redirect_resp("http://example.com/redirect")
 
@@ -421,6 +435,8 @@ def test_download_pdf_pins_resolution_during_fetch():
     seen_during_stream = {}
 
     class _FakeClient:
+        trust_env = False
+
         def stream(self, method, url, **kwargs):
             # Simulate the HTTP client's own DNS resolution happening inside stream().
             seen_during_stream["addrinfo"] = socket.getaddrinfo("example.com", 80, type=socket.SOCK_STREAM)
@@ -748,3 +764,110 @@ def test_ingest_downloaded_pdf_client_ignores_proxy_env(monkeypatch):
     assert isinstance(dl_client, httpx.Client)
     assert dl_client.trust_env is False
     assert not dl_client._mounts  # no proxy transport mounted from env
+
+
+# ---------------------------------------------------------------- #864 minors
+
+
+def test_download_pdf_rejects_trust_env_client():
+    """#864-2: the SSRF guard assumes a trust_env=False client; refuse anything else."""
+    with httpx.Client(trust_env=True) as env_client:
+        with pytest.raises(ValueError, match="trust_env=False"):
+            with download_pdf(env_client, "https://example.com/a.pdf"):
+                pass
+
+
+def _set_proxy_env(monkeypatch, proxy_url):
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        monkeypatch.setenv(name, proxy_url)
+    monkeypatch.setenv("NO_PROXY", "")
+    monkeypatch.setenv("no_proxy", "")
+
+
+def _ingest_kwargs(url):
+    return {
+        "pdf_url": url,
+        "file_name": "p.pdf",
+        "title": "t",
+        "authors": [],
+        "categories": [],
+        "published_date": None,
+        "source": "test",
+    }
+
+
+def test_ingest_downloaded_loopback_rejected_even_with_proxy_env(monkeypatch):
+    """#864-3: with proxy env vars set, a loopback PDF URL is still refused by the
+    SSRF guard and never reaches the (unreachable) proxy."""
+    _set_proxy_env(monkeypatch, "http://127.0.0.1:9")
+    with patch("_collect_common.ingest_pdf") as mock_ingest:
+        with pytest.raises(ValueError, match="non-public"):
+            ingest_downloaded(MagicMock(), "http://api.invalid", **_ingest_kwargs("http://127.0.0.1:8/a.pdf"))
+    mock_ingest.assert_not_called()
+
+
+def test_ingest_downloaded_real_download_pdf_bypasses_proxy_and_uses_pin(monkeypatch):
+    """#864-3/4: real download_pdf + real httpx client. Proxy env points at a dead
+    port; the fetch of a validated host must still succeed by connecting to the
+    pinned address directly (a proxied request would fail to connect)."""
+    import socket
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    body = b"%PDF-1.4 test"
+
+    class _H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), _H)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        _set_proxy_env(monkeypatch, "http://127.0.0.1:9")
+        pinned = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
+        monkeypatch.setattr("_collect_common._resolve_safe", lambda host, p: pinned)
+        seen = {}
+
+        def _fake_ingest(client, api_url, file_name, path, meta, timeout):
+            seen["bytes"] = Path(path).read_bytes()
+            return {"status": "ingested"}
+
+        monkeypatch.setattr("_collect_common.ingest_pdf", _fake_ingest)
+        result = ingest_downloaded(
+            MagicMock(), "http://api.invalid", **_ingest_kwargs(f"http://pdf.example:{port}/a.pdf")
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert result == {"status": "ingested"}
+    assert seen["bytes"] == body
+
+
+def test_ingest_downloaded_closes_download_client_before_ingest(monkeypatch):
+    """#864-5: the download client is closed once the PDF is on disk, before ingest."""
+    import _collect_common
+
+    seen = {}
+
+    @contextlib.contextmanager
+    def _fake_download(client, url, timeout=60, max_mb=None):
+        seen["client"] = client
+        yield "/tmp/unused.pdf"
+
+    def _fake_ingest(client, *a, **k):
+        seen["closed_at_ingest"] = seen["client"].is_closed
+        return {"status": "ingested"}
+
+    monkeypatch.setattr(_collect_common, "download_pdf", _fake_download)
+    monkeypatch.setattr(_collect_common, "ingest_pdf", _fake_ingest)
+    ingest_downloaded(MagicMock(), "http://api.invalid", **_ingest_kwargs("https://example.com/p.pdf"))
+    assert seen["closed_at_ingest"] is True
