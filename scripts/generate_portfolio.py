@@ -4,6 +4,7 @@ import argparse
 import html
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -13,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cli_utils import auth_headers  # noqa: E402
 
+from academic_paper.arxiv_ids import ARXIV_ID_PATTERN  # noqa: E402
 from academic_paper.db import arxiv_id_from_file_name  # noqa: E402
 
 # Prebuilt Tailwind CSS (no runtime CDN script, #649). Rebuild when classes in this file change:
@@ -64,12 +66,23 @@ def fetch_all(url: str) -> list:
 PUBLIC_PAPER_FIELDS = ("title", "authors", "categories", "published_date", "source", "score")
 
 
+_ARXIV_ID_RE = re.compile(ARXIV_ID_PATTERN)
+
+
+def _arxiv_id(paper: dict) -> str | None:
+    """arxiv_id column if present, else derived from file_name; only returned if it is a well-formed id."""
+    arxiv_id = paper.get("arxiv_id") or arxiv_id_from_file_name(paper.get("file_name") or "")
+    if isinstance(arxiv_id, str) and _ARXIV_ID_RE.fullmatch(arxiv_id):
+        return arxiv_id
+    return None
+
+
 def public_paper(paper: dict) -> dict:
     """Reduce an API paper row to the allowlisted public fields (+ arxiv_id for arXiv papers)."""
-    out = {k: paper[k] for k in PUBLIC_PAPER_FIELDS if k in paper}
+    out = {k: paper[k] for k in PUBLIC_PAPER_FIELDS if paper.get(k) is not None}
     # No file_name -> title fallback here: file_name is internal and must not be published.
     if paper.get("source") == "arxiv":
-        arxiv_id = paper.get("arxiv_id") or arxiv_id_from_file_name(paper.get("file_name") or "")
+        arxiv_id = _arxiv_id(paper)
         if arxiv_id:
             out["arxiv_id"] = arxiv_id
     return out
@@ -90,10 +103,9 @@ def score_badge(score) -> str:
 
 def source_link(paper: dict) -> str:
     source = paper.get("source") or ""
-    title = html.escape(paper.get("title") or paper.get("file_name", "Untitled"))
+    title = html.escape(paper.get("title") or "Untitled")  # never fall back to internal file_name
     if source == "arxiv":
-        fname = paper.get("file_name", "")
-        arxiv_id = arxiv_id_from_file_name(fname) if fname else None
+        arxiv_id = _arxiv_id(paper)
         if arxiv_id:
             return f'<a href="https://arxiv.org/abs/{arxiv_id}" target="_blank" rel="noopener" class="hover:underline text-blue-700">{title}</a>'
     return f"<span>{title}</span>"
