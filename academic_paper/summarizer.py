@@ -229,7 +229,7 @@ class RAGSummarizer:
 
         context_parts = []
         for chunk in chunks[:top_k]:
-            payload = chunk.get("payload", {})
+            payload = chunk.get("payload") or {}
             page_start = payload.get("page_start", "unknown")
             text = payload.get("text", "")
             if text:
