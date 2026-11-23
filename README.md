@@ -1,5 +1,7 @@
 # academic-paper-system
 
+Release type: `service`
+
 Research paper knowledge base — PDF ingestion → hybrid search → structured summarization RAG (Python + FastAPI).
 
 ## Architecture
