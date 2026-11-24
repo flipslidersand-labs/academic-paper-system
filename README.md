@@ -208,7 +208,7 @@ MIT
 
 The daily arXiv collection, the weekly portfolio publish and their watchdog run from a private ops repo on a
 self-hosted runner. The watchdog check logic (`scripts/watchdog_check.py`) stays in this repo. This public repo has no self-hosted runner and no `runs-on` pointing at one: public CI uses
-GitHub-hosted runners only (repo-compass ADR-010).
+GitHub-hosted runners only.
 
 ## 設計判断 / Architecture decisions
 
