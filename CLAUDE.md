@@ -395,7 +395,7 @@ academic-paper-system/
 │   ├── test_*.py
 │   └── __init__.py
 ├── frontend/                # フロントエンド (index.html)
-├── docs/                    # ポートフォリオ公開ページ・マイグレーション記録
+├── docs/                    # ポートフォリオ公開ページ(docs/ 配下の JSON は内部列を含めない: tests/test_docs_published_json.py)
 ├── data/                    # SQLite DB (docker-compose mount)
 ├── pyproject.toml           # プロジェクト設定・依存関係
 ├── requirements.lock        # ハッシュ固定した依存ロック
