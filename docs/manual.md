@@ -31,7 +31,7 @@ pip install -e ".[dev]"
 
 起動には、次の環境変数が要ります。
 
-- `API_KEY`: 認証キー。無いと起動しません。試すだけなら `AUTH_DISABLED=true` で無認証にもできます。
+- `API_KEY`: 認証キー。無いと起動しません。試すだけなら `AUTH_DISABLED=true` で、キーが 1 つも無い状態でも起動できます(キーを 1 つでも設定していれば、認証は有効のままです)。
 - `EMBEDDING_SVC_URL`、`QDRANT_URL`: 既定値はプレースホルダー(`http://<internal-host>:…`)で、そのままだと起動しません。
 
 ```bash
@@ -59,7 +59,7 @@ curl http://localhost:8020/health
 - `QDRANT_API_KEY` は必須です。空だと `docker compose` が起動前に失敗します。1 つの値を Qdrant と `paper-rag` の両方に使います。`openssl rand -hex 32` で作れます。
 - `paper-rag` は `127.0.0.1:8020` にだけ公開されます。外から使うには SSH トンネルかリバースプロキシを使います。
 - Qdrant の保存先(`qdrant_storage` / `qdrant_snapshots`)は、初回に Compose が自動で作ります。既存のボリュームを使うときは `docker-compose.override.yml`(gitignore 済み)で `name` と `external: true` を指定します。
-- `docker compose up` が `qdrant` の `restart` を含めて動くのは未検証です。`/health` が 200 を返すことを確かめてください。
+- `docker-compose.yml` は `qdrant` と `paper-rag` の両方に `restart: unless-stopped` を設定しています(ファイルで確認済み)。`docker compose up -d` の実機での起動は未検証なので、起動後に `curl http://localhost:8020/health` が 200 を返すことを確かめてください。
 
 ### 2.3 要約を使う
 
@@ -153,7 +153,7 @@ curl -s -X POST -H "X-API-Key: $API_KEY" http://localhost:8020/papers/1/summary 
 curl -s -X POST -H "X-API-Key: $API_KEY" http://localhost:8020/jobs/summarize-all # 要約が無い論文をまとめて要約(LLM が要る・未検証)
 ```
 
-`POST` は `admin` スコープの鍵(`API_KEY`)が要ります。`INGEST_API_KEY` では 403 です。LLM が未設定のとき、`POST /jobs/summarize-all` は 503 です(確認済み: `{"detail":"LLM not configured"}`)。`POST .../summary` は、論文が無ければ先に 404 `Paper not found` を返します(確認済み)。論文があって LLM が未設定のときの 503 は、コードから書いたもので未検証です。
+`POST /papers/{paper_id}/summary`・`POST /papers/score-all`・`POST /papers/{paper_id}/score`・`POST /jobs/summarize-all` は `admin` スコープの鍵(`API_KEY`)が要り、`INGEST_API_KEY` では 403 です。`POST /papers/ingest` だけは `ingest` スコープなので、`INGEST_API_KEY` でも通ります。LLM が未設定のとき、`POST /jobs/summarize-all` は 503 です(確認済み: `{"detail":"LLM not configured"}`)。`POST .../summary` は、論文が無ければ先に 404 `Paper not found` を返します(確認済み)。論文があって LLM が未設定のときの 503 は、コードから書いたもので未検証です。
 
 ### 4.4 関連度スコア
 
@@ -189,7 +189,7 @@ python scripts/arxiv_collect.py --api-url http://localhost:8020 --categories cs.
 
 | 症状 | 原因と対処 |
 | --- | --- |
-| 起動時に `API_KEY / API_KEYS is not set. Refusing to start…`(確認済み) | 認証キーが無い。`API_KEY` を設定する。認証なしで試すだけなら `AUTH_DISABLED=true` |
+| 起動時に `API_KEY / API_KEYS is not set. Refusing to start…`(確認済み) | 認証キーが無い。`API_KEY` を設定する。キー無しで試すだけなら `AUTH_DISABLED=true`(キーを設定したときは認証が有効のまま) |
 | 起動時に `Invalid value '…': contains placeholder` | `EMBEDDING_SVC_URL` / `QDRANT_URL`(または各 API キー)に `<…>` の値が残っている。実際の値を設定する |
 | 起動時に `llm_generate_timeout … must be >=` などのエラー | タイムアウトの下限を下回っている。値を上げるか、未設定に戻す([設定仕様](spec/configuration.md)) |
 | 401 `Invalid or missing API key`(確認済み) | `X-API-Key` が無い、または一致しない |
@@ -199,5 +199,5 @@ python scripts/arxiv_collect.py --api-url http://localhost:8020 --categories cs.
 | 取り込みが 409 | 同じファイルが取り込み済み、または取り込み中(`file_hash` で判定)。`failed` の論文は、同じファイルを再度アップロードできる |
 | 取り込みのジョブが `failed` | `GET /jobs/{job_id}` の `errors` を見る。`Failed to extract text from PDF` なら PDF が壊れている、暗号化されている |
 | `/docs` が 404(確認済み) | 既定で無効。`ENABLE_DOCS=true` で公開できる(認証なしで全エンドポイントが見えるため、公開は慎重に) |
-| `--workers` を増やしたらジョブが 404 になる | 単一プロセス前提で未対応([ADR](adr/20261127-single-process-job-store.md)) |
+| `--workers` を増やしたらジョブが 404 になる | 単一プロセス前提で未対応([ADR](adr/20261127-02-single-process-job-store.md)) |
 | Docker で `/data` に書けない(未検証) | `sudo chown -R 10001:10001 data/` |

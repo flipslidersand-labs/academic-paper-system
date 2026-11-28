@@ -1,6 +1,6 @@
 # 設定仕様
 
-対象: `main`(1174fe1 時点)。正本は `academic_paper/config.py` の `Settings` です。値は環境変数、またはカレントディレクトリの `.env` から読みます(pydantic-settings。環境変数が優先)。名前の大文字小文字は区別しません。
+対象: `main`(2026-11-27 時点)。正本は `academic_paper/config.py` の `Settings` です。値は環境変数、またはカレントディレクトリの `.env` から読みます(pydantic-settings。環境変数が優先)。名前の大文字小文字は区別しません。
 
 ## 起動時の検証
 
@@ -70,7 +70,7 @@ ERROR:    Application startup failed. Exiting.
 | `API_KEY` | 空 | 全スコープ(`ingest` / `read` / `admin`)の `X-API-Key` |
 | `API_KEYS` | 空 | 追加の全スコープキー(カンマ区切り。鍵のローテーション用。空要素は無視) |
 | `INGEST_API_KEY` | 空 | `ingest` スコープだけのキー。単独で設定しても認証は有効になる |
-| `AUTH_DISABLED` | `false` | `true` で認証なしの起動を明示的に許可する |
+| `AUTH_DISABLED` | `false` | `true` で、認証キーが無い状態での起動を許可する。キーを 1 つでも設定していれば認証は有効のまま(`auth_enabled`、`config.py`) |
 
 詳細は [API 仕様](api.md) の「認証とスコープ」を参照してください。
 

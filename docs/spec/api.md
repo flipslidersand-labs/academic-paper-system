@@ -1,6 +1,6 @@
 # API 仕様
 
-対象: `academic-paper-system` の `main`(1174fe1 時点)。正本はコード(`academic_paper/server.py`、`academic_paper/routers/`)です。
+対象: `academic-paper-system` の `main`(2026-11-27 時点)。正本はコード(`academic_paper/server.py`、`academic_paper/routers/`)です。
 実行時の OpenAPI は `ENABLE_DOCS=true` のときだけ `/docs`・`/redoc`・`/openapi.json` で公開されます(既定は無効で、`/docs` は 404)。
 
 この文書の確かさの区分:
@@ -19,7 +19,7 @@
 
 - キーが無い・一致しない: **401** `{"detail": "Invalid or missing API key"}`
 - キーは有効だがスコープが足りない: **403** `{"detail": "Insufficient scope"}`
-- `API_KEY`・`API_KEYS`・`INGEST_API_KEY` がすべて空で `AUTH_DISABLED=true` でもない場合、サーバーは起動を拒否します(fail-closed、`RuntimeError`)。認証なしで動かすには `AUTH_DISABLED=true` を明示します。この場合、認証は全エンドポイントで素通りになります。
+- `API_KEY`・`API_KEYS`・`INGEST_API_KEY` がすべて空で `AUTH_DISABLED=true` でもない場合、サーバーは起動を拒否します(fail-closed、`RuntimeError`)。キー無しで起動するには `AUTH_DISABLED=true` を明示します。この場合、認証は全エンドポイントで素通りになります。`AUTH_DISABLED` が許可するのは「キー無しでの起動」だけで、キーを 1 つでも設定していれば認証は有効のままです。
 - `/health` と `/ui` は認証不要です。
 
 ## エンドポイント一覧
@@ -151,7 +151,7 @@ PDF をアップロードしてインデックス化します。
 - 論文が無い: 404 `Paper not found`(実測)
 - 要約が未生成: 404(`Summary not generated yet — POST /papers/{paper_id}/summary to generate`)
 
-`POST /papers/{paper_id}/summary` は要約を生成して保存します。キャッシュがあればそれを返し、`force=true` で再生成します。LLM が未設定なら 503 `LLM not configured`、論文が無ければ 404 です。
+`POST /papers/{paper_id}/summary` は要約を生成して保存します。キャッシュがあればそれを返し、`force=true` で再生成します。判定の順は、論文が無ければ 404、キャッシュがあれば(LLM が未設定でも)200 でそれを返し、キャッシュが無く LLM が未設定なら 503 `LLM not configured` です(`summary_service.generate_summary`)。
 
 応答(コードから):
 
@@ -205,9 +205,10 @@ PDF をアップロードしてインデックス化します。
 
 - ID のキー名は、作成時の応答では `job_id`、ジョブオブジェクトでは `id` です。
 - `status` は `pending` / `running` / `done` / `failed` です。`kind` は `ingest` または `summarize-all` です。
+- `GET /jobs` はメモリ上のジョブだけを返します。メモリから SQLite へ退避された完了ジョブは含まれないので、`GET /jobs/{job_id}` で個別に取ります(`routers/jobs.py` の docstring)。
 - `errors` は先頭 10 件だけ返します。`started_at` と `finished_at` は UNIX 時刻(秒)です。
 - サーバー再起動時に `pending` / `running` だったジョブは `failed` になり、`errors` に `Server restarted while job was in flight` が入ります。
-- ジョブ状態の正本はプロセス内のメモリです(単一プロセス前提。[ADR](../adr/20261127-single-process-job-store.md))。完了ジョブはメモリに最大 1000 件まで保持し、超えた分は SQLite にだけ残ります。
+- ジョブ状態の正本はプロセス内のメモリです(単一プロセス前提。[ADR](../adr/20261127-02-single-process-job-store.md))。完了ジョブはメモリに最大 1000 件まで保持し、超えた分は SQLite にだけ残ります。
 
 ## `GET /search`
 

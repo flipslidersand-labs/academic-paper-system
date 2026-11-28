@@ -279,7 +279,7 @@ Docker Compose での起動、非 root(uid 10001)の注意、`QDRANT_API_KEY` �
 
 ## 運用上の注意
 
-- 単一プロセス・単一ワーカー前提です。`uvicorn --workers>1` やレプリカ増設には対応していません(ジョブ状態の正本がプロセス内メモリのため。[ADR](docs/adr/20261127-single-process-job-store.md))。
+- 単一プロセス・単一ワーカー前提です。`uvicorn --workers>1` やレプリカ増設には対応していません(ジョブ状態の正本がプロセス内メモリのため。[ADR](docs/adr/20261127-02-single-process-job-store.md))。
 - 日次の論文収集と週次のポートフォリオ公開は、非公開の ops リポから実行します。このリポの CI は GitHub-hosted ランナーだけを使います。
 
 ## ライセンス
