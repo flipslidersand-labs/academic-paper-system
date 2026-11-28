@@ -64,10 +64,14 @@ jobs:
           git add requirements.lock requirements-dev.lock
           git commit -m "chore(deps): update requirements.lock and requirements-dev.lock"
           # persist-credentials: false のため、push だけ actions/checkout と同じ方式のヘッダーで認証する。
+          # ヘッダーは引数でなく環境変数(GIT_CONFIG_*)で渡す: 引数だと push の間、ps で他ユーザーから読める。
+          # URL は github.com 固定(GHES で動かすなら github.server_url から組み立てる)。
           AUTH_HEADER="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
           echo "::add-mask::${AUTH_HEADER}"
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" \
-            push --force origin "$BRANCH"
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${AUTH_HEADER}" \
+            git push --force origin "$BRANCH"
 
           if [ -z "$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number')" ]; then
             gh pr create --base main --head "$BRANCH" \
