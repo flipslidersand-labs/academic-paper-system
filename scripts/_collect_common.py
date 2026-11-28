@@ -187,6 +187,13 @@ def download_pdf(client: httpx.Client, url: str, timeout: int = 60, max_mb: int 
     Trade-off: ``trust_env=False`` also ignores SSL_CERT_FILE / SSL_CERT_DIR and
     ``~/.netrc``, so in an environment relying on a corporate CA bundle via those
     variables, TLS verification of the PDF host can fail (#864).
+
+    The ``trust_env`` check is the only thing verified: a client built with
+    ``trust_env=False`` but an explicit ``proxy=``, ``mounts=`` or ``transport=``
+    still passes it, and its requests would then be resolved by the proxy
+    rather than by ``_pin_resolution``. The caller must therefore build the
+    client with none of those. The only caller is ``ingest_downloaded``, which
+    uses a bare ``httpx.Client(trust_env=False)`` (#879).
     """
     if client.trust_env:
         raise ValueError("download_pdf requires an httpx.Client created with trust_env=False")

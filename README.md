@@ -4,6 +4,18 @@ Release type: `service`
 
 Research paper knowledge base — PDF ingestion → hybrid search → structured summarization RAG (Python + FastAPI).
 
+## Documentation
+
+The sections below are an overview. The documents in the table go deeper (written in Japanese).
+
+| Document | Contents |
+|----------|----------|
+| [docs/manual.md](docs/manual.md) | Setup, daily operations and troubleshooting, with each command marked verified or unverified |
+| [docs/spec/api.md](docs/spec/api.md) | Endpoints, scopes, parameters, status codes and error responses |
+| [docs/spec/configuration.md](docs/spec/configuration.md) | Environment variables, defaults and startup validation |
+| [docs/design.md](docs/design.md) | Components, ingest and search flows (diagrams), data model, constraints |
+| [docs/adr/README.md](docs/adr/README.md) | Architecture decision records |
+
 ## Architecture
 
 ```
@@ -36,7 +48,7 @@ Every endpoint except `GET /health` and the static UI at `/ui` requires the `X-A
 | `POST` | `/jobs/summarize-all` | yes | Start a background job that summarizes papers (**202 + `job_id`**) |
 | `GET` | `/jobs` | yes | List background jobs, newest first (`limit`/`offset`, in-memory jobs only; returns `total` + `jobs`) |
 | `GET` | `/jobs/{id}` | yes | Poll a background job; `done` carries `result.paper_id`/`result.chunks` |
-| `GET` | `/search` | yes | Hybrid search (`mode=hybrid\|vector\|keyword`) |
+| `GET` | `/search` | yes | Search (`mode=hybrid\|vector\|keyword\|nugget`) |
 | `GET` | `/health` | no | Qdrant / embedding-svc reachability (**503** when degraded) |
 | `GET` | `/stats` | yes | Counts: `papers`, `chunks`, `qdrant_points` |
 | `GET` | `/metrics` | yes (**admin** scope) | Prometheus metrics (`prometheus-fastapi-instrumentator`). Requires a full-scope key (`API_KEY`/`API_KEYS`); `INGEST_API_KEY` gets 403 |
@@ -68,6 +80,7 @@ it: they submit without `wait`, receive 202, and poll `GET /jobs/{job_id}`
 - **hybrid** — RRF fusion of BM25 (FTS5) + vector scores
 - **keyword** — BM25 only (fast, offline)
 - **vector** — semantic similarity only
+- **nugget** — hybrid retrieval, then only the sentences most relevant to the query are kept from each chunk (shorter context for LLM callers)
 
 ### Summary response schema
 
@@ -213,3 +226,62 @@ GitHub-hosted runners only.
 ## 設計判断 / Architecture decisions
 
 [ADR 一覧](docs/adr/README.md) — 設計判断、根拠資料、未決定事項。
+
+---
+
+# academic-paper-system(日本語)
+
+リリース種別: `service`
+
+論文ナレッジベースです。PDF の取り込み → ハイブリッド検索 → 構造化要約までを行う RAG サービスです(Python + FastAPI)。
+
+## ドキュメント
+
+| 文書 | 内容 |
+|------|------|
+| [docs/manual.md](docs/manual.md) | 導入・日常操作・トラブル時の手順(各コマンドに「確認済み」「未検証」を明記) |
+| [docs/spec/api.md](docs/spec/api.md) | API 仕様(エンドポイント、スコープ、パラメータ、ステータス、エラー) |
+| [docs/spec/configuration.md](docs/spec/configuration.md) | 設定仕様(環境変数、既定値、起動時の検証) |
+| [docs/design.md](docs/design.md) | 設計書(構成・取り込みと検索の流れの図、データモデル、制約) |
+| [docs/adr/README.md](docs/adr/README.md) | 設計判断の記録(ADR) |
+
+## 構成
+
+```
+PDF アップロード
+  → pdfplumber でテキスト抽出
+  → チャンク分割(512 語 / 重なり 64)
+  → embedding-svc で multilingual-e5-base の埋め込み(768 次元)
+  → Qdrant(ベクトル)+ SQLite FTS5(BM25)
+  → RRF によるハイブリッド検索
+  → Gemini / Ollama による構造化要約
+```
+
+スタック: FastAPI・pdfplumber・Qdrant・SQLite FTS5・Google Generative AI・Ollama・OpenTelemetry・Prometheus
+
+## API の要点
+
+- `GET /health` と静的 UI(`/ui`)以外は、`X-API-Key` ヘッダーが必要です。認証キー(`API_KEY` など)が無いとサーバーは起動しません。認証なしで動かすには `AUTH_DISABLED=true` を明示します。
+- `POST /papers/ingest` は 202 と `job_id` を返し、バックグラウンドで取り込みます。`GET /jobs/{job_id}` で完了を確認します(`?wait=true` なら同期)。
+- `GET /search` は `mode=hybrid|vector|keyword|nugget` を選べます。`keyword` は embedding-svc と Qdrant が無くても動きます。
+- 要約は `POST /papers/{id}/summary` で生成し、`GET /papers/{id}/summary` は保存済みのものだけを返します。
+- 全エンドポイントの表は、上の英語の「API」節と [docs/spec/api.md](docs/spec/api.md) にあります。
+
+## セットアップ
+
+```bash
+cp .env.example .env   # embedding-svc・Qdrant・Gemini の API キーを設定する
+pip install -e ".[dev]"
+uvicorn academic_paper.server:app --reload --port 8020
+```
+
+Docker Compose での起動、非 root(uid 10001)の注意、`QDRANT_API_KEY` の設定は、上の英語の「Docker Compose」節と [docs/manual.md](docs/manual.md) を参照してください。環境変数の一覧は [docs/spec/configuration.md](docs/spec/configuration.md) にあります。
+
+## 運用上の注意
+
+- 単一プロセス・単一ワーカー前提です。`uvicorn --workers>1` やレプリカ増設には対応していません(ジョブ状態の正本がプロセス内メモリのため。[ADR](docs/adr/20261127-02-single-process-job-store.md))。
+- 日次の論文収集と週次のポートフォリオ公開は、非公開の ops リポから実行します。このリポの CI は GitHub-hosted ランナーだけを使います。
+
+## ライセンス
+
+MIT(サードパーティのライセンスは、上の英語の「License」節を参照)

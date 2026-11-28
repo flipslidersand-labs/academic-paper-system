@@ -2,7 +2,9 @@
 
 import argparse
 import contextlib
+import ipaddress
 import json
+import socket
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -12,6 +14,7 @@ import pytest
 # scripts/ is added to sys.path in tests/conftest.py (#272).
 from _collect_common import (  # noqa: E402
     _paper_label,
+    _pin_lock,
     add_common_args,
     assert_safe_url,
     download_pdf,
@@ -21,6 +24,42 @@ from _collect_common import (  # noqa: E402
     run_collect,
     write_summary,
 )
+
+# Hosts the tests below use; they resolve to _STUB_PUBLIC_IP instead of hitting real DNS (#879).
+_STUB_HOSTS = frozenset({"example.com", "example.org", "arxiv.org"})
+_STUB_PUBLIC_IP = "8.8.8.8"  # globally routable, so it passes _resolve_safe's is_global filter
+
+
+@pytest.fixture(autouse=True)
+def _offline_dns_and_pin_lock_guard(monkeypatch):
+    """Keep this module independent of real DNS and detect a leaked ``_pin_lock`` (#879).
+
+    * ``socket.getaddrinfo`` is replaced for the whole module: the hosts in
+      ``_STUB_HOSTS`` resolve to a public address, IP literals go to the real
+      implementation (numeric parsing only, no DNS, so loopback / metadata
+      literals are still refused by the real ``is_global`` filter), and any
+      other name raises ``gaierror``, so an unexpected lookup fails loudly
+      instead of silently using the network.
+    * After each test ``_pin_lock`` must be free. A leaked lock makes every
+      later ``_pin_resolution`` fail with "already active", so report the
+      leaking test here. The lock is deliberately not force-released: a
+      generator finalised later would otherwise release a lock another test holds.
+    """
+    real_getaddrinfo = socket.getaddrinfo
+
+    def _stub_getaddrinfo(host, port, *args, **kwargs):
+        if host in _STUB_HOSTS:
+            return real_getaddrinfo(_STUB_PUBLIC_IP, port, *args, **kwargs)
+        try:
+            ipaddress.ip_address(host)
+        except (TypeError, ValueError):
+            raise socket.gaierror(socket.EAI_NONAME, f"unexpected real DNS lookup in test: {host!r}") from None
+        return real_getaddrinfo(host, port, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", _stub_getaddrinfo)
+    yield
+    assert not _pin_lock.locked(), "_pin_lock was left held by this test (leaked download_pdf / _pin_resolution)"
+
 
 # ---------------------------------------------------------------------------
 # download_pdf
@@ -796,9 +835,13 @@ def _ingest_kwargs(url):
     }
 
 
-def test_ingest_downloaded_loopback_rejected_even_with_proxy_env(monkeypatch):
+def test_ingest_downloaded_loopback_rejected_by_resolve_safe_with_proxy_env(monkeypatch):
     """#864-3: with proxy env vars set, a loopback PDF URL is still refused by the
-    SSRF guard and never reaches the (unreachable) proxy."""
+    SSRF guard (``_resolve_safe``, before any connection is made).
+
+    This only covers the guard. It does NOT show that the client ignores the proxy
+    env: a proxy-using client would be rejected here too. That is checked by
+    ``test_ingest_downloaded_real_download_pdf_bypasses_proxy_and_uses_pin`` (#879)."""
     _set_proxy_env(monkeypatch, "http://127.0.0.1:9")
     with patch("_collect_common.ingest_pdf") as mock_ingest:
         with pytest.raises(ValueError, match="non-public"):
