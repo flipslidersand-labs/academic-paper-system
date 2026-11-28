@@ -8,6 +8,7 @@ hand-written records such as migration logs, which the generator never touches.
 import json
 from pathlib import Path
 
+import generate_portfolio  # scripts/ is on sys.path via tests/conftest.py
 import pytest
 
 DOCS_DIR = Path(__file__).resolve().parents[1] / "docs"
@@ -34,20 +35,23 @@ def _keys(node):
             yield from _keys(item)
 
 
-def _param(path: Path):
-    rel = path.relative_to(DOCS_DIR).as_posix()
-    if rel == "papers.json":
-        # The committed copy predates the allowlist (#856) and is regenerated outside this repo.
-        # strict: once #893 regenerates it, this xfail turns into a failure and must be removed.
-        return pytest.param(
-            path,
-            id=rel,
-            marks=pytest.mark.xfail(strict=True, reason="#893: stale papers.json still carries internal columns"),
-        )
-    return pytest.param(path, id=rel)
-
-
-@pytest.mark.parametrize("path", [_param(p) for p in sorted(DOCS_DIR.rglob("*.json"))])
+@pytest.mark.parametrize(
+    "path",
+    [pytest.param(p, id=p.relative_to(DOCS_DIR).as_posix()) for p in sorted(DOCS_DIR.rglob("*.json"))],
+)
 def test_published_json_exposes_no_internal_columns(path):
     found = INTERNAL_KEYS & set(_keys(json.loads(path.read_text(encoding="utf-8"))))
     assert not found, f"internal columns published under docs/: {sorted(found)}"
+
+
+def test_papers_json_keys_are_allowlisted_only():
+    """papers.json must carry only the allowlisted columns (+ arxiv_id), not merely avoid a denylist (#893).
+
+    INTERNAL_KEYS above is a denylist, so a column it does not know (id, file_name, status, ...) would pass.
+    The allowlist is the generator's own, so a stale committed file fails here rather than going out unnoticed.
+    """
+    allowed = set(generate_portfolio.PUBLIC_PAPER_FIELDS) | {"arxiv_id"}
+    papers = json.loads((DOCS_DIR / "papers.json").read_text(encoding="utf-8"))["papers"]
+    assert papers, "docs/papers.json has no papers"
+    extra = {key for paper in papers for key in paper} - allowed
+    assert not extra, f"non-allowlisted columns published in docs/papers.json: {sorted(extra)}"
