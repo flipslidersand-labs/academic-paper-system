@@ -98,12 +98,12 @@ it: they submit without `wait`, receive 202, and poll `GET /jobs/{job_id}`
 
 ## Use from Claude (MCP)
 
-`academic_paper_mcp` is a read-only [MCP](https://modelcontextprotocol.io) server over the REST API, so Claude can search the knowledge base and read stored summaries during a conversation. It exposes five tools: `search_papers` (default mode `nugget`), `get_paper`, `get_summary`, `list_papers` and `library_stats`. It never ingests, summarizes or scores, so give it a key with the `read` scope only.
+`academic_paper_mcp` is a read-only [MCP](https://modelcontextprotocol.io) server over the REST API, so Claude can search the knowledge base and read stored summaries during a conversation. It exposes five tools: `search_papers` (default mode `nugget`), `get_paper`, `get_summary`, `list_papers` and `library_stats`. It only issues GET requests and never ingests, summarizes or scores. The API has no read-only key yet (`API_KEY` / `API_KEYS` carry every scope), so the key you give it is as powerful as the server's own; use it only from a machine you trust.
 
 ```bash
 pip install -e ".[mcp]"          # in the environment that will run the server
 claude mcp add academic-papers \
-  -e PAPER_API_URL=http://localhost:8020 -e PAPER_API_KEY=<key with read scope> \
+  -e PAPER_API_URL=http://localhost:8020 -e PAPER_API_KEY=<API key> \
   -- /path/to/.venv/bin/python -m academic_paper_mcp
 ```
 
@@ -284,7 +284,7 @@ PDF アップロード
 
 ## Claude から使う(MCP)
 
-`academic_paper_mcp` は、REST API を包む読み取り専用の [MCP](https://modelcontextprotocol.io) サーバーです。Claude が会話の中で、知識ベースの検索と保存済み要約の参照を行えます。ツールは `search_papers`(既定は `nugget` モード)、`get_paper`、`get_summary`、`list_papers`、`library_stats` の 5 つです。取り込み・要約生成・スコア計算はしないので、`read` スコープだけのキーを渡してください。
+`academic_paper_mcp` は、REST API を包む読み取り専用の [MCP](https://modelcontextprotocol.io) サーバーです。Claude が会話の中で、知識ベースの検索と保存済み要約の参照を行えます。ツールは `search_papers`(既定は `nugget` モード)、`get_paper`、`get_summary`、`list_papers`、`library_stats` の 5 つです。GET しか呼ばず、取り込み・要約生成・スコア計算はしません。ただし API にはまだ読み取り専用のキーが無く(`API_KEY` / `API_KEYS` は全権)、渡すキーはサーバー自身のキーと同じ強さになります。信頼できるマシンだけで使ってください。
 
 手順は、上の英語の「Use from Claude (MCP)」の節にあるコマンドのとおりです(`pip install -e ".[mcp]"` のあと `claude mcp add`)。stdio で動くため、同じマシンの Claude Code から使います。claude.ai には公開しません。Docker イメージには含めません。
 

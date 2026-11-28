@@ -2,12 +2,13 @@
 
 Wraps the existing REST API so an MCP client (Claude Code, etc.) can search the paper
 knowledge base and read stored summaries. It talks to a running API server with an
-``X-API-Key`` that has the ``read`` scope; it never ingests, summarizes or scores, so a
-read-only key is enough (and is all it should be given).
+``X-API-Key``. It only issues GET requests (it never ingests, summarizes or scores), but the API has
+no read-only key yet (api_key / api_keys carry every scope), so the key you give it is as powerful
+as the one the API server was configured with.
 
 Configuration (environment):
 - ``PAPER_API_URL``  base URL of the API server (default ``http://localhost:8020``)
-- ``PAPER_API_KEY``  X-API-Key with the ``read`` scope (omit only when the server runs with AUTH_DISABLED)
+- ``PAPER_API_KEY``  X-API-Key (omit only when the server runs with AUTH_DISABLED)
 """
 
 from __future__ import annotations
