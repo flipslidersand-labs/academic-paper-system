@@ -34,20 +34,10 @@ def _keys(node):
             yield from _keys(item)
 
 
-def _param(path: Path):
-    rel = path.relative_to(DOCS_DIR).as_posix()
-    if rel == "papers.json":
-        # The committed copy predates the allowlist (#856) and is regenerated outside this repo.
-        # strict: once #893 regenerates it, this xfail turns into a failure and must be removed.
-        return pytest.param(
-            path,
-            id=rel,
-            marks=pytest.mark.xfail(strict=True, reason="#893: stale papers.json still carries internal columns"),
-        )
-    return pytest.param(path, id=rel)
-
-
-@pytest.mark.parametrize("path", [_param(p) for p in sorted(DOCS_DIR.rglob("*.json"))])
+@pytest.mark.parametrize(
+    "path",
+    [pytest.param(p, id=p.relative_to(DOCS_DIR).as_posix()) for p in sorted(DOCS_DIR.rglob("*.json"))],
+)
 def test_published_json_exposes_no_internal_columns(path):
     found = INTERNAL_KEYS & set(_keys(json.loads(path.read_text(encoding="utf-8"))))
     assert not found, f"internal columns published under docs/: {sorted(found)}"
