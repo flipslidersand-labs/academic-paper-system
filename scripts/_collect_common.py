@@ -187,6 +187,13 @@ def download_pdf(client: httpx.Client, url: str, timeout: int = 60, max_mb: int 
     Trade-off: ``trust_env=False`` also ignores SSL_CERT_FILE / SSL_CERT_DIR and
     ``~/.netrc``, so in an environment relying on a corporate CA bundle via those
     variables, TLS verification of the PDF host can fail (#864).
+
+    The ``trust_env`` check is the only thing verified: a client built with
+    ``trust_env=False`` but an explicit ``proxy=``, ``mounts=`` or ``transport=``
+    still passes it, and its requests would then be resolved by the proxy
+    rather than by ``_pin_resolution``. The caller must therefore build the
+    client with none of those. The only caller is ``ingest_downloaded``, which
+    uses a bare ``httpx.Client(trust_env=False)`` (#879).
     """
     if client.trust_env:
         raise ValueError("download_pdf requires an httpx.Client created with trust_env=False")
@@ -397,16 +404,13 @@ def run_collect(
                 status = result["status"]
                 counts[status] = counts.get(status, 0) + 1
                 tag = "OK  " if status == "ingested" else "SKIP"
-                title = (paper.get("title") or "")[:50] if isinstance(paper, dict) else ""
-                # Strip control chars (incl. newlines) before printing — externally
-                # sourced titles can otherwise forge/inject cron log lines (#233).
-                title = _CONTROL_CHARS_RE.sub(" ", title)
-                print(f"  {tag} [{label}] {title}")
+                title = _one_line((paper.get("title") or "")[:50] if isinstance(paper, dict) else "")
+                print(f"  {tag} [{_one_line(label)}] {title}")
                 detail.append({"label": label, "status": status, **result})
             except Exception as exc:
                 label = _paper_label(paper)
                 counts["failed"] += 1
-                print(f"  ERR  [{label}] {exc}", file=sys.stderr)
+                print(f"  ERR  [{_one_line(label)}] {_one_line(exc)}", file=sys.stderr)
                 detail.append({"label": label, "status": "failed", "error": str(exc)})
 
     tag_lower = source_label.lower().replace(" ", "-")
@@ -422,6 +426,11 @@ def run_collect(
 
     if counts["failed"] > 0:
         sys.exit(1)
+
+
+def _one_line(value: object) -> str:
+    """Strip control chars (incl. newlines/ESC) so externally sourced text cannot forge or inject log lines (#233)."""
+    return _CONTROL_CHARS_RE.sub(" ", str(value))
 
 
 def _paper_label(paper: dict) -> str:
