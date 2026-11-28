@@ -60,16 +60,18 @@ async def _body():
     yield f"\r\n--{_BOUNDARY}--\r\n".encode()
 
 
-async def _post_async(path: str, key: str | None, counting: _Counting):
+async def _post_async(path: str, key: str | None, counting: _Counting, root_path: str = ""):
     headers: dict[str, str | bytes] = {"content-type": f"multipart/form-data; boundary={_BOUNDARY}"}
     if key is not None:
         headers["X-API-Key"] = key.encode("latin-1")  # bytes: httpx rejects non-ASCII str headers
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=counting), base_url="http://t") as c:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=counting, root_path=root_path), base_url="http://t"
+    ) as c:
         return await c.post(path, content=_body(), headers=headers)
 
 
-def _post(path: str, key: str | None, counting: _Counting):
-    return asyncio.run(_post_async(path, key, counting))
+def _post(path: str, key: str | None, counting: _Counting, root_path: str = ""):
+    return asyncio.run(_post_async(path, key, counting, root_path))
 
 
 @pytest.fixture
@@ -87,6 +89,14 @@ def test_bad_key_is_rejected_without_reading_the_body(keys, key):
     assert r.json() == {"detail": "Invalid or missing API key"}
     assert counting.read_at_response is not None
     assert counting.read_at_response < len(_CHUNK) * _CHUNKS // 10  # not the ~10 MiB upload
+
+
+def test_bad_key_is_rejected_before_the_body_behind_a_root_path(keys):
+    """--root-path: scope["path"] carries the prefix; the guard must still match /papers/ingest."""
+    counting = _Counting(_make_app())
+    r = _post("/api/papers/ingest", None, counting, root_path="/api")
+    assert r.status_code == 401
+    assert counting.read_at_response < len(_CHUNK) * _CHUNKS // 10
 
 
 @pytest.mark.parametrize("key", ["full", "ing"])

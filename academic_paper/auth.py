@@ -93,7 +93,10 @@ class PreAuthBodyGuard:
     async def __call__(self, scope, receive, send) -> None:
         required = None
         if scope["type"] == "http":
-            required = self.GUARDED.get((scope["method"], scope["path"]))
+            path, root = scope["path"], scope.get("root_path", "")
+            if root and path.startswith(root + "/"):  # behind a prefix (--root-path): route on the path below it
+                path = path[len(root) :]
+            required = self.GUARDED.get((scope["method"], path))
         if required is not None:
             # Starlette decodes header bytes as latin-1; do the same so both checks see the same value.
             provided = next((v.decode("latin-1") for k, v in scope["headers"] if k == b"x-api-key"), None)
