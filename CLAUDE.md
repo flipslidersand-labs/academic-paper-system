@@ -323,6 +323,7 @@ pytest tests/ --cov=academic_paper --cov-report=html
 - `test_http_client.py` — `academic_paper/http_client.py` の注入/一時 AsyncClient ヘルパー
 - `test_scripts_deps.py` — scripts/ が import するサードパーティ依存の宣言漏れ検出
 - `test_search_service.py` — `academic_paper/services/search_service.py` (FastAPI 非起動の単体テスト)
+- `test_mcp_server.py` — `academic_paper_mcp` (SDK のインメモリクライアントと respx。読み取り専用・エラー文にキー/本文を出さない)
 - `test_auth_keys.py` / `test_auth_scope.py` / `test_ui_auth.py` — API キー・スコープ・UI の認証
 - `test_papers_router.py` / `test_jobs_router.py` / `test_summary_router.py` — `routers/` の各ルート
 - `test_ingest_service.py` / `test_ingest_compensation*.py` — 取り込みパイプラインと失敗時の補償
@@ -398,6 +399,7 @@ academic-paper-system/
 │   │   └── search_service.py # 検索ロジック (FastAPI 非依存)
 │   ├── logging_config.py     # 構造化 JSON ロギング設定
 │   └── telemetry.py          # OpenTelemetry 計装
+├── academic_paper_mcp/      # 読み取り専用 MCP サーバー (REST API を包む。`pip install -e ".[mcp]"`、Docker イメージには含めない)
 ├── scripts/                  # 論文収集・運用スクリプト
 │   ├── _collect_common.py    # 収集スクリプト共通ヘルパー
 │   ├── cli_utils.py          # 収集スクリプト共通 argparse バリデータ
