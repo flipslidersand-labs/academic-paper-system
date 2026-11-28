@@ -15,6 +15,7 @@ The sections below are an overview. The documents in the table go deeper (writte
 | [docs/spec/configuration.md](docs/spec/configuration.md) | Environment variables, defaults and startup validation |
 | [docs/design.md](docs/design.md) | Components, ingest and search flows (diagrams), data model, constraints |
 | [docs/adr/README.md](docs/adr/README.md) | Architecture decision records |
+| [CHANGELOG.md](CHANGELOG.md) | Notable changes by category (no version has been tagged yet; all entries are under Unreleased) |
 
 ## Architecture
 
@@ -244,6 +245,7 @@ GitHub-hosted runners only.
 | [docs/spec/configuration.md](docs/spec/configuration.md) | 設定仕様(環境変数、既定値、起動時の検証) |
 | [docs/design.md](docs/design.md) | 設計書(構成・取り込みと検索の流れの図、データモデル、制約) |
 | [docs/adr/README.md](docs/adr/README.md) | 設計判断の記録(ADR) |
+| [CHANGELOG.md](CHANGELOG.md) | 主な変更の履歴(カテゴリ別。版のタグはまだ無く、すべて Unreleased に載っています) |
 
 ## 構成
 
