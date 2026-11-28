@@ -323,6 +323,9 @@ async def run_ingest(
             job.failed = 1
             job.errors.append(f"paper_id={paper_id}: {_safe_error_message(e)}")
             job.status = "failed"
+            # status と同時に finished_at を入れる: 補償の await 中に GET /jobs が来ても、
+            # failed かつ finished_at=None の中間状態を見せない(finally は後から上書きしない)。
+            job.finished_at = time.time()
             await mark_paper_failed(paper_id)
             # Upsert may have partially succeeded (batched); remove leftover vectors
             # so a failed paper is not returned by vector search (#471).
@@ -339,7 +342,8 @@ async def run_ingest(
             job.status = "failed"
             raise
         finally:
-            job.finished_at = time.time()
+            if job.finished_at is None:
+                job.finished_at = time.time()
             try:
                 await _persist_shielded(job_store, job)
             except Exception:

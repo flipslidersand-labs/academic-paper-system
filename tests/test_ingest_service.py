@@ -127,6 +127,30 @@ async def test_run_ingest_failure_marks_paper_and_job_failed(tmp_path):
 
 
 @_sync
+async def test_run_ingest_failed_status_never_visible_without_finished_at(tmp_path):
+    """status が failed になった時点で finished_at も入っている。補償の await 中に
+    GET /jobs/{id} が来ても、failed かつ finished_at=None の中間状態を見せない (#872 の副作用)。"""
+    pdf = tmp_path / "a.pdf"
+    pdf.write_bytes(b"%PDF-")
+    job = Job(id="j", status="pending", kind="ingest")
+    embedder, store = _deps()
+    seen: list[tuple[str, float | None]] = []
+
+    async def _snapshot_during_compensation(_paper_id):
+        seen.append((job.status, job.finished_at))
+
+    with (
+        patch.object(svc, "ingest_pipeline", AsyncMock(side_effect=ValueError("bad"))),
+        patch.object(svc, "mark_paper_failed", _snapshot_during_compensation),
+    ):
+        await svc.run_ingest(
+            "j", str(pdf), 9, "h", "f.pdf", embedder=embedder, vector_store=store, job_store=_job_store(job)
+        )
+    assert seen == [("failed", seen[0][1])]
+    assert seen[0][1] is not None
+
+
+@_sync
 async def test_run_ingest_success_sets_result(tmp_path):
     pdf = tmp_path / "a.pdf"
     pdf.write_bytes(b"%PDF-")
