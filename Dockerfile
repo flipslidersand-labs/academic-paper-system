@@ -10,11 +10,11 @@ RUN python -m venv /opt/venv && \
 # Stage 2: Runtime — slim image with only the venv, no build toolchain
 FROM python:3.12-slim@sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54 AS runtime
 COPY --from=builder /opt/venv /opt/venv
-# trivy-image (CRITICAL/HIGH, fixable only) で検出された zlib1g の修正版が
-# debian-security に出ていてもベースイメージに未反映の間は、ここだけ更新する。
+# trivy-image (CRITICAL/HIGH, fixable only) で検出された zlib1g・libzstd1(CVE-2026-124851, #897)の
+# 修正版が debian-security に出ていてもベースイメージに未反映の間は、ここだけ更新する。
 # ベース更新で解消したら不要(この RUN を削除)。
 RUN apt-get update -qq && \
-    apt-get install -y --no-install-recommends --only-upgrade zlib1g && \
+    apt-get install -y --no-install-recommends --only-upgrade zlib1g libzstd1 && \
     rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY frontend/ ./frontend/
