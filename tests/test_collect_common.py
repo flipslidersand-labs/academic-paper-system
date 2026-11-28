@@ -916,3 +916,26 @@ def test_run_collect_plain_output_unchanged(capsys):
 
     out = _run_collect_capture([{"title": "Plain title"}], _ingest, capsys).out
     assert "  OK   [2401.0001] Plain title" in out
+
+
+def test_run_collect_summary_detail_keeps_raw_label_and_error(tmp_path):
+    """Only the printed lines are sanitized; the summary JSON (detail) keeps the raw values."""
+    summary = tmp_path / "summary.json"
+    raw_label = "id1\nX\x1b[0m"
+
+    def _ingest(client, paper):
+        if paper["n"] == 0:
+            return {"status": "ingested", "label": raw_label, "paper_id": 1}
+        raise RuntimeError("boom\nX")
+
+    with patch("_collect_common.httpx.Client") as mock_cls:
+        mock_cls.return_value.__enter__ = lambda s: s
+        mock_cls.return_value.__exit__ = MagicMock(return_value=False)
+        with pytest.raises(SystemExit):
+            run_collect(
+                "Test", [{"n": 0, "title": "a"}, {"n": 1, "title": "b", "arxiv_id": "9\n9"}], _ingest, str(summary)
+            )
+    detail = json.loads(summary.read_text())["detail"]
+    assert detail[0]["label"] == raw_label
+    assert detail[1]["label"] == "9\n9"
+    assert detail[1]["error"] == "boom\nX"

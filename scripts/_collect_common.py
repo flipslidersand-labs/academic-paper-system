@@ -393,17 +393,17 @@ def run_collect(
         for paper in papers:
             try:
                 result = ingest_fn(client, paper)
-                label = _one_line(result.pop("label", "?"))
+                label = result.pop("label", "?")
                 status = result["status"]
                 counts[status] = counts.get(status, 0) + 1
                 tag = "OK  " if status == "ingested" else "SKIP"
                 title = _one_line((paper.get("title") or "")[:50] if isinstance(paper, dict) else "")
-                print(f"  {tag} [{label}] {title}")
+                print(f"  {tag} [{_one_line(label)}] {title}")
                 detail.append({"label": label, "status": status, **result})
             except Exception as exc:
-                label = _one_line(_paper_label(paper))
+                label = _paper_label(paper)
                 counts["failed"] += 1
-                print(f"  ERR  [{label}] {_one_line(exc)}", file=sys.stderr)
+                print(f"  ERR  [{_one_line(label)}] {_one_line(exc)}", file=sys.stderr)
                 detail.append({"label": label, "status": "failed", "error": str(exc)})
 
     tag_lower = source_label.lower().replace(" ", "-")
