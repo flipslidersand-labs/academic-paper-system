@@ -21,7 +21,7 @@ PDF → pdfplumber抽出 → テキストチャンク分割(512/64)
 - **要約LLM**: Google Generative AI (Gemini) / Ollama (Mistral)
 - **テレメトリ**: OpenTelemetry SDK + FastAPI instrumentation
 
-**運用前提（単一プロセス）**: 現状は単一プロセス・単一ワーカー前提。`JobStore` はプロセスローカルの dict をジョブ読み取り（`get()` / `list_all()` / `has_running()`）の正本にしており、SQLite は永続化のみ。`uvicorn --workers>1` やレプリカ増設ではジョブ作成と照会が別プロセスになり `get()` が None（404）になるため未対応（#387）。Dockerfile の CMD は `--workers` 未指定（=1）。
+**運用前提（単一プロセス）**: 現状は単一プロセス・単一ワーカー前提。`JobStore` はプロセスローカルの dict をジョブ読み取り（`get()` / `list_all()` / 実行中判定の `create_if_not_running()`）の正本にしており、SQLite は永続化が主（メモリから退避された完了ジョブだけ `get_or_load()` が SQLite から読む。#751/#774）。`uvicorn --workers>1` やレプリカ増設ではジョブ作成と照会が別プロセスになり `get()` が None（404）になるため未対応（#387）。Dockerfile の CMD は `--workers` 未指定（=1）。
 
 ## セットアップ
 
@@ -61,7 +61,7 @@ uvicorn academic_paper.server:app --reload --port 8020
 
 セキュリティヘッダ: 全応答に `X-Content-Type-Options: nosniff` / `X-Frame-Options: DENY` / `Referrer-Policy: no-referrer`、`/ui` 配下には CSP（インライン script は index.html から算出した sha256 で許可、Alpine CDN 版のため `'unsafe-eval'` を含む, #734）を付与する。
 
-認証: `API_KEY` 環境変数が設定されている場合、「要」のエンドポイントは `X-API-Key` ヘッダーが必須 (不一致は 401)。`API_KEY`/`API_KEYS` が両方空で `AUTH_DISABLED=true` も未指定なら起動拒否 (fail-closed, #646)。認証なしで動かすには `AUTH_DISABLED=true` を明示する。
+認証: `API_KEY` 環境変数が設定されている場合、「要」のエンドポイントは `X-API-Key` ヘッダーが必須 (不一致は 401)。`API_KEY`/`API_KEYS` が両方空で `AUTH_DISABLED=true` も未指定なら起動拒否 (fail-closed, #646)。キー無しで起動するには `AUTH_DISABLED=true` を明示する(許可するのは「キー無しでの起動」だけで、キーを 1 つでも設定していれば認証は有効のまま)。
 
 | Method | Path | 認証 | 概要 |
 |--------|------|------|------|
@@ -79,6 +79,7 @@ uvicorn academic_paper.server:app --reload --port 8020
 | GET | `/search` | 要 | 検索 (`mode=hybrid/vector/keyword/nugget`) |
 | GET | `/health` | 不要 | Qdrant / embedding-svc 疎通確認 (両方正常で 200、障害時 503) |
 | GET | `/stats` | 要 | DB 統計 (`papers`/`chunks`/`qdrant_points`) |
+| GET | `/metrics` | 要 (admin) | Prometheus メトリクス。フルキー (`API_KEY`/`API_KEYS`) のみ。`INGEST_API_KEY` は 403 |
 | (mount) | `/ui` | 不要 | `frontend/` の静的 UI (`frontend/` ディレクトリが存在する場合のみ、全 API ルートの後に mount) |
 
 ### 非同期処理・エラーコードの注意点
@@ -263,19 +264,19 @@ title / authors / categories / published_date / source: 任意のメタデータ
 | `PDF_EXTRACT_TIMEOUT` | `extract_text()` の上限秒（超過で ingest ジョブ失敗） | `120` |
 | `LLM_GENERATE_TIMEOUT` | 要約時の `llm.generate()` 上限秒 | `903` |
 | `SUMMARIZE_TOTAL_TIMEOUT` | `summarize()` 全体の上限秒 | `1063` |
-| `PORT` | API サーバーポート | `8020` |
+| `PORT` | API サーバーポート(`Settings` に定義はあるがコードから参照されない。待ち受けは uvicorn の `--port`、Dockerfile は 8020 固定) | `8020` |
 | `ENABLE_DOCS` | `/docs`・`/redoc`・`/openapi.json` を公開する（無認証のため既定は無効, #648） | `false` |
 | `API_KEY` | `/health` 以外の全エンドポイントの X-API-Key（読み取り系含む。`API_KEY`/`API_KEYS`/`INGEST_API_KEY` 全て空かつ `AUTH_DISABLED` 未指定なら起動拒否） | (空) |
-| `AUTH_DISABLED` | `true` で認証なし起動を明示許可（既定 false, #646） | false |
+| `AUTH_DISABLED` | `true` でキー無しの起動を許可（既定 false, #646）。キーを 1 つでも設定していれば認証は有効のまま | false |
 | `INGEST_API_KEY` | ingest スコープ限定の X-API-Key（#355。単独設定でも認証有効。POST /papers/ingest のみ許可、他は 403。/metrics は admin スコープ=フルキー必須 #627） | (空) |
 | `PAPER_API_KEY` | コレクタ側が送る X-API-Key（cron は repo secret 経由） | (空) |
 | `SEMANTIC_SCHOLAR_API_KEY` | `scripts/semantic_scholar_collect.py` 用 API キー（`--api-key` でも指定可。サーバー設定ではない） | (空) |
-| `DISCORD_WEBHOOK_URL` | arxiv-daily.yml の失敗/結果通知先（**repo secret 必須**。未設定だと通知が無効化され、schedule 実行の失敗は Notify ステップが exit 1 で表面化する。登録はオペレーター手動作業 #481） | (未設定) |
+| `DISCORD_WEBHOOK_URL` | 定期収集の失敗/結果通知先。定期実行は非公開の ops リポへ移っており、`arxiv-daily.yml` はこのリポに無い。このリポのコードは参照しない (`grep` で確認) | (未設定) |
 
 **タイムアウトの連動制約** (`academic_paper/config.py`):
-- `OLLAMA_TIMEOUT` × 3 + 3 ≤ `LLM_GENERATE_TIMEOUT`（Ollama は最大3回リトライ + backoff 1s+2s。既定 300×3+3=903）
-- `SUMMARIZE_TOTAL_TIMEOUT` ≥ `EMBEDDING_TIMEOUT` + `QDRANT_TIMEOUT` + `LLM_GENERATE_TIMEOUT`（各 wait_for は逐次実行され累積するため。既定 120+30+903=1053 + 余裕）
-- `OLLAMA_TIMEOUT` を上げる場合は `LLM_GENERATE_TIMEOUT` と `SUMMARIZE_TOTAL_TIMEOUT` も合わせて上げる
+- `OLLAMA_TIMEOUT` × 3 + 3 ≤ `LLM_GENERATE_TIMEOUT`（Ollama は最大3回リトライ + backoff 1s+2s。既定 300×3+3=903。未設定なら自動でこの値、下回る明示値は起動拒否 #651）
+- `SUMMARIZE_TOTAL_TIMEOUT` ≥ `EMBEDDING_TIMEOUT` + `QDRANT_TIMEOUT` + `LLM_GENERATE_TIMEOUT` + 10（各 wait_for は逐次実行され累積するため。既定 120+30+903+10=1063。未設定なら自動でこの値、下回る明示値は起動拒否 #651）
+- `OLLAMA_TIMEOUT` を上げる場合は `LLM_GENERATE_TIMEOUT` と `SUMMARIZE_TOTAL_TIMEOUT` を未設定にして自動導出に任せるか、下限以上に合わせて上げる
 
 ## テスト
 
@@ -322,6 +323,12 @@ pytest tests/ --cov=academic_paper --cov-report=html
 - `test_http_client.py` — `academic_paper/http_client.py` の注入/一時 AsyncClient ヘルパー
 - `test_scripts_deps.py` — scripts/ が import するサードパーティ依存の宣言漏れ検出
 - `test_search_service.py` — `academic_paper/services/search_service.py` (FastAPI 非起動の単体テスト)
+- `test_auth_keys.py` / `test_auth_scope.py` / `test_ui_auth.py` — API キー・スコープ・UI の認証
+- `test_papers_router.py` / `test_jobs_router.py` / `test_summary_router.py` — `routers/` の各ルート
+- `test_ingest_service.py` / `test_ingest_compensation*.py` — 取り込みパイプラインと失敗時の補償
+- `test_classify_error.py` / `test_http_status.py` — 例外の分類と HTTP ステータス
+- `test_watchdog_check.py` — `scripts/watchdog_check.py`
+- 上記は主要なもの。全件は `ls tests/` を見る（`test_*.py` は 70 本超）
 - `conftest.py` — テスト共通 fixture（`temp_db` など）・環境変数の初期値設定
 
 ## 開発
@@ -343,7 +350,7 @@ ruff format academic_paper/ tests/
 
 ### requirements.lock / requirements-dev.lock の再生成
 
-Docker・CI・arxiv-daily は `requirements.lock` (ハッシュ付き) を正本として使う。
+Docker・CI は `requirements.lock` (ハッシュ付き) を正本として使う(定期収集は非公開の ops リポへ移っており、このリポには無い)。
 `pyproject.toml` の依存を変えたとき、または依存を最新化したいときに再生成する (Python 3.12 + `pip install pip-tools` が必要)。
 
 ```bash
@@ -376,8 +383,18 @@ academic-paper-system/
 │   ├── retry.py              # 一時的な通信失敗のリトライ
 │   ├── scorer.py             # 論文スコアリング (鮮度・カテゴリ関連度)
 │   ├── http_client.py        # 注入 or 一時 AsyncClient ヘルパー
+│   ├── auth.py               # X-API-Key 検証とスコープ (ingest/read/admin)
+│   ├── errors.py             # 例外の分類と HTTPException への変換
+│   ├── http_status.py        # HTTP ステータスの共通分類
+│   ├── dependencies.py       # app.state の FastAPI 依存提供
+│   ├── validators.py         # メタデータの検証・制御文字除去
+│   ├── models.py             # 要約スキーマ (PaperSummary)
+│   ├── arxiv_ids.py          # arXiv ID 抽出
+│   ├── routers/              # HTTP ルート (papers / summary / jobs)
 │   ├── services/             # サービス層
 │   │   ├── __init__.py
+│   │   ├── ingest_service.py  # 取り込みパイプライン (FastAPI 非依存)
+│   │   ├── summary_service.py # 要約の取得・生成ロジック
 │   │   └── search_service.py # 検索ロジック (FastAPI 非依存)
 │   ├── logging_config.py     # 構造化 JSON ロギング設定
 │   └── telemetry.py          # OpenTelemetry 計装
@@ -389,13 +406,14 @@ academic-paper-system/
 │   ├── openalex_collect.py   # OpenAlex 論文収集
 │   ├── pubmed_collect.py     # PubMed Central 論文収集
 │   ├── semantic_scholar_collect.py # Semantic Scholar 論文収集
+│   ├── watchdog_check.py     # 定期実行の監視チェック (呼び出しは非公開の ops リポ)
 │   ├── update-lock.sh        # requirements.lock 再生成 (--upgrade で最新化)
 │   └── generate_portfolio.py # ポートフォリオ静的ページ生成
 ├── tests/                   # テストスイート
 │   ├── test_*.py
 │   └── __init__.py
 ├── frontend/                # フロントエンド (index.html)
-├── docs/                    # ポートフォリオ公開ページ・マイグレーション記録
+├── docs/                    # 設計書(design.md)・マニュアル(manual.md)・仕様(spec/)・ADR(adr/)・ポートフォリオ公開ページ・マイグレーション記録
 ├── data/                    # SQLite DB (docker-compose mount)
 ├── pyproject.toml           # プロジェクト設定・依存関係
 ├── requirements.lock        # ハッシュ固定した依存ロック
@@ -404,7 +422,10 @@ academic-paper-system/
 ├── docker-compose.yml       # コンテナオーケストレーション
 ├── Dockerfile               # コンテナイメージ
 ├── .github/workflows/
-│   └── ci.yml                # GitHub Actions CI(定期実行は非公開の ops リポへ移設)
+│   ├── ci.yml                # GitHub Actions CI(定期実行は非公開の ops リポへ移設)
+│   ├── license-check.yml     # 依存ライセンスの許可リスト検査
+│   ├── lock-update.yml       # requirements.lock の週次更新 PR
+│   └── vuln-scan.yml         # pip-audit + Trivy
 ├── README.md                # プロジェクト説明
 ├── .env.example             # 環境変数テンプレート
 └── CLAUDE.md               # このファイル
@@ -495,6 +516,8 @@ docker run -d \
 対象外（本リポジトリは Kubernetes マニフェストを提供しない）。
 
 ## Last Updated
+
+2026-11-27 — 実物との食い違いを修正（`arxiv-daily.yml`・`has_running()` の記述、`/metrics`、ディレクトリ構造、ワークフロー、テスト一覧、タイムアウト下限、`PORT`）。
 
 2026-10-01 — ディレクトリ構造・テスト一覧を実ファイルに合わせて更新。
 
