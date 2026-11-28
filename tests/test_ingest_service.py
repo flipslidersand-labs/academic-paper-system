@@ -127,6 +127,30 @@ async def test_run_ingest_failure_marks_paper_and_job_failed(tmp_path):
 
 
 @_sync
+async def test_run_ingest_failed_status_never_visible_without_finished_at(tmp_path):
+    """status が failed になった時点で finished_at も入っている。補償の await 中に
+    GET /jobs/{id} が来ても、failed かつ finished_at=None の中間状態を見せない (#872 の副作用)。"""
+    pdf = tmp_path / "a.pdf"
+    pdf.write_bytes(b"%PDF-")
+    job = Job(id="j", status="pending", kind="ingest")
+    embedder, store = _deps()
+    seen: list[tuple[str, float | None]] = []
+
+    async def _snapshot_during_compensation(_paper_id):
+        seen.append((job.status, job.finished_at))
+
+    with (
+        patch.object(svc, "ingest_pipeline", AsyncMock(side_effect=ValueError("bad"))),
+        patch.object(svc, "mark_paper_failed", _snapshot_during_compensation),
+    ):
+        await svc.run_ingest(
+            "j", str(pdf), 9, "h", "f.pdf", embedder=embedder, vector_store=store, job_store=_job_store(job)
+        )
+    assert seen == [("failed", seen[0][1])]
+    assert seen[0][1] is not None
+
+
+@_sync
 async def test_run_ingest_success_sets_result(tmp_path):
     pdf = tmp_path / "a.pdf"
     pdf.write_bytes(b"%PDF-")
@@ -274,6 +298,100 @@ async def test_run_ingest_cancel_during_compensation_keeps_job_failed(tmp_path):
     assert job.errors and job.errors[0].startswith("paper_id=9: ") and "cancelled" not in job.errors[0]
     assert js.persist.await_args_list[-1].args[0] is job
     assert not os.path.exists(pdf)
+
+
+async def _cancel_during_db_write(tmp_path, save_chunks_effect):
+    """Run run_ingest with the real pipeline, cancel while the DB write is in flight (#878)."""
+    import threading
+
+    pdf = tmp_path / "a.pdf"
+    pdf.write_bytes(b"%PDF-")
+    job = Job(id="j", status="pending", kind="ingest")
+    js = _job_store(job)
+    embedder, store = _deps()
+    entered = threading.Event()
+    release = threading.Event()
+
+    def _slow_save_chunks(*a, **kw):
+        entered.set()
+        release.wait(timeout=10)
+        return save_chunks_effect()
+
+    with (
+        patch.object(svc, "extract_text", return_value=_PAGES),
+        patch.object(svc, "chunk_pages", return_value=[{"text": "hello"}]),
+        patch.object(svc, "db_connection"),
+        patch.object(svc, "save_chunks", _slow_save_chunks),
+        patch.object(svc, "update_paper_status") as status,
+        patch.object(svc, "mark_paper_failed", AsyncMock()),
+    ):
+        task = asyncio.ensure_future(
+            svc.run_ingest("j", str(pdf), 9, "h", "f.pdf", embedder=embedder, vector_store=store, job_store=js)
+        )
+        await asyncio.to_thread(entered.wait, 10)
+        task.cancel()
+        asyncio.get_running_loop().call_later(0.1, release.set)
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    return job, js, status
+
+
+@_sync
+async def test_run_ingest_cancel_after_write_success_notes_paper_indexed(tmp_path):
+    job, js, status = await _cancel_during_db_write(tmp_path, lambda: None)
+    assert status.call_args.args[1:] == (9, "indexed")  # the write really committed
+    assert job.status == "failed" and job.failed == 1
+    assert len(job.errors) == 1
+    assert job.errors[0].startswith("paper_id=9: cancelled")
+    assert "paper is indexed" in job.errors[0]
+    assert js.persist.await_args_list[-1].args[0] is job
+
+
+@_sync
+async def test_run_ingest_cancel_after_write_failure_does_not_claim_indexed(tmp_path):
+    def _boom():
+        raise sqlite3.OperationalError("locked")
+
+    job, _js, status = await _cancel_during_db_write(tmp_path, _boom)
+    status.assert_not_called()
+    assert job.status == "failed"
+    assert job.errors == ["paper_id=9: cancelled"]
+
+
+@_sync
+async def test_await_settled_waits_through_repeated_cancel_and_reraises():
+    release = asyncio.Event()
+    done: list[str] = []
+
+    async def _work():
+        await release.wait()
+        done.append("x")
+        return 5
+
+    fut = asyncio.ensure_future(_work())
+
+    async def _outer():
+        return await svc._await_settled(fut, "work")
+
+    task = asyncio.ensure_future(_outer())
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0)
+    task.cancel()  # a second cancel must not abandon the wait
+    await asyncio.sleep(0)
+    assert not task.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert done == ["x"] and fut.result() == 5
+
+
+@_sync
+async def test_await_settled_returns_result_without_cancel():
+    async def _work():
+        return 3
+
+    assert await svc._await_settled(asyncio.ensure_future(_work()), "work") == 3
 
 
 class _FakeUpload:

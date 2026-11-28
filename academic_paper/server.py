@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from academic_paper.auth import Scope, require_scope
+from academic_paper.auth import PreAuthBodyGuard, Scope, require_scope
 from academic_paper.config import get_settings
 from academic_paper.db import (
     count_rows,
@@ -359,6 +359,10 @@ _SECURITY_HEADERS = {
 _ui_csp_value = (
     _ui_csp(_index.read_text(encoding="utf-8")) if (_index := _frontend_dir / "index.html").exists() else None
 )
+
+
+# Registered before _security_headers so the 401/403 it returns still gets the security headers (#899).
+app.add_middleware(PreAuthBodyGuard)
 
 
 @app.middleware("http")

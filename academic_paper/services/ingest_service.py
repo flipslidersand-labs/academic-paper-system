@@ -117,6 +117,33 @@ def register_paper(file_name: str, file_hash: str, metadata_factory: Callable[[]
         return save_paper(conn, file_name, file_hash, **metadata_factory())
 
 
+class CancelledAfterIndexed(asyncio.CancelledError):
+    """ingest_pipeline was cancelled, but its DB write had already committed (paper is 'indexed') (#878)."""
+
+
+async def _await_settled[T](fut: asyncio.Future[T], what: str) -> T:
+    """Await ``fut`` shielded; if cancelled meanwhile, wait for it to settle, then re-raise (#855, #872).
+
+    Cancelling the awaiting task does not stop the underlying work, so callers that must
+    observe its final state (a committed DB write, a persisted job) wait for it to finish,
+    even through repeated cancellation, before the CancelledError propagates. A failure of
+    ``fut`` during that wait is logged; the CancelledError is still what propagates.
+    """
+    try:
+        return await asyncio.shield(fut)
+    except asyncio.CancelledError:
+        while not fut.done():
+            try:
+                await asyncio.shield(fut)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if not fut.cancelled() and fut.exception() is not None:
+            logger.error("%s failed while cancellation was pending", what, exc_info=fut.exception())
+        raise
+
+
 async def ingest_pipeline(
     tmp_path: str,
     paper_id: int,
@@ -191,21 +218,12 @@ async def ingest_pipeline(
         # 'indexed' write is committed, never before it.
         fut = asyncio.ensure_future(asyncio.to_thread(_write))
         try:
-            await asyncio.shield(fut)
-        except asyncio.CancelledError:
-            while not fut.done():
-                try:
-                    await asyncio.shield(fut)
-                except asyncio.CancelledError:
-                    continue
-                except Exception:
-                    break
-            if not fut.cancelled() and fut.exception() is not None:
-                logger.error(
-                    "DB write failed while ingest was being cancelled for paper_id=%s",
-                    paper_id,
-                    exc_info=fut.exception(),
-                )
+            await _await_settled(fut, f"DB write for paper_id={paper_id}")
+        except asyncio.CancelledError as exc:
+            if not fut.cancelled() and fut.exception() is None:
+                # The write committed before the cancel surfaced: tell run_ingest so the
+                # job's error can say the paper is indexed (#878).
+                raise CancelledAfterIndexed() from exc
             raise
     except Exception:
         # Qdrant upsert succeeded but DB write failed — compensate by deleting
@@ -259,26 +277,8 @@ def unlink_quiet(path: str) -> None:
 
 
 async def _persist_shielded(job_store: JobStore, job: Job) -> None:
-    """persist(job) that survives repeated task cancellation (#872).
-
-    Awaiting directly would raise CancelledError again if the task is cancelled
-    while persisting, losing the terminal state. Run it as its own future and
-    wait for it to settle; the cancellation is re-raised afterwards.
-    """
-    fut = asyncio.ensure_future(job_store.persist(job))
-    try:
-        await asyncio.shield(fut)
-    except asyncio.CancelledError:
-        while not fut.done():
-            try:
-                await asyncio.shield(fut)
-            except asyncio.CancelledError:
-                continue
-            except Exception:
-                break
-        if not fut.cancelled() and fut.exception() is not None:
-            logger.error("Failed to persist final state of job=%s", job.id, exc_info=fut.exception())
-        raise
+    """persist(job) that survives repeated task cancellation (#872)."""
+    await _await_settled(asyncio.ensure_future(job_store.persist(job)), f"persist of final state of job={job.id}")
 
 
 async def run_ingest(
@@ -323,11 +323,14 @@ async def run_ingest(
             job.failed = 1
             job.errors.append(f"paper_id={paper_id}: {_safe_error_message(e)}")
             job.status = "failed"
+            # status と同時に finished_at を入れる: 補償の await 中に GET /jobs が来ても、
+            # failed かつ finished_at=None の中間状態を見せない(finally は後から上書きしない)。
+            job.finished_at = time.time()
             await mark_paper_failed(paper_id)
             # Upsert may have partially succeeded (batched); remove leftover vectors
             # so a failed paper is not returned by vector search (#471).
             await compensate_qdrant(vector_store, paper_id)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as exc:
             # CancelledError is a BaseException so `except Exception` misses it; without
             # this the job stays 'running' with finished_at set (#872). Terminalize the
             # job in memory first (the finally below persists it), then re-raise. Paper
@@ -335,11 +338,18 @@ async def run_ingest(
             # don't double-compensate.
             logger.warning("Background ingest cancelled for paper_id=%s job=%s", paper_id, job_id)
             job.failed = 1
-            job.errors.append(f"paper_id={paper_id}: cancelled")
+            # The write may have committed just before the cancel surfaced (#878): the
+            # paper is then 'indexed' while the job is 'failed'. Say so in the error
+            # (the job stays failed; the API shape is unchanged).
+            note = ""
+            if isinstance(exc, CancelledAfterIndexed):
+                note = " (paper is indexed: DB write completed before cancellation)"
+            job.errors.append(f"paper_id={paper_id}: cancelled{note}")
             job.status = "failed"
             raise
         finally:
-            job.finished_at = time.time()
+            if job.finished_at is None:
+                job.finished_at = time.time()
             try:
                 await _persist_shielded(job_store, job)
             except Exception:
