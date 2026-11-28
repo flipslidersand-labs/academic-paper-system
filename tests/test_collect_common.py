@@ -871,3 +871,48 @@ def test_ingest_downloaded_closes_download_client_before_ingest(monkeypatch):
     monkeypatch.setattr(_collect_common, "ingest_pdf", _fake_ingest)
     ingest_downloaded(MagicMock(), "http://api.invalid", **_ingest_kwargs("https://example.com/p.pdf"))
     assert seen["closed_at_ingest"] is True
+
+
+# ---------------------------------------------------------------------------
+# run_collect: control characters in label / exception text (#233 follow-up)
+# ---------------------------------------------------------------------------
+
+
+def _run_collect_capture(papers, ingest_fn, capsys):
+    with patch("_collect_common.httpx.Client") as mock_cls:
+        mock_cls.return_value.__enter__ = lambda s: s
+        mock_cls.return_value.__exit__ = MagicMock(return_value=False)
+        try:
+            run_collect("Test", papers, ingest_fn, None)
+        except SystemExit:
+            pass
+    return capsys.readouterr()
+
+
+def test_run_collect_strips_control_chars_from_label(capsys):
+    def _ingest(client, paper):
+        return {"status": "ingested", "label": "id1\n  OK   [forged] injected\x1b[31m", "paper_id": 1}
+
+    out = _run_collect_capture([{"title": "t"}], _ingest, capsys).out
+    ok_lines = [ln for ln in out.splitlines() if ln.startswith("  OK")]
+    assert len(ok_lines) == 1  # the newline in label cannot forge a second OK line
+    assert "\x1b" not in out
+
+
+def test_run_collect_strips_control_chars_from_exception_and_paper_label(capsys):
+    def _fail(client, paper):
+        raise RuntimeError("boom\n  OK   [forged] injected\r\x1b[2J")
+
+    err = _run_collect_capture([{"arxiv_id": "2401.0001\nX", "title": "t"}], _fail, capsys).err
+    err_lines = err.splitlines()
+    assert len(err_lines) == 1  # exception text and label stay on one line
+    assert err_lines[0].startswith("  ERR")
+    assert "\x1b" not in err and "\r" not in err
+
+
+def test_run_collect_plain_output_unchanged(capsys):
+    def _ingest(client, paper):
+        return {"status": "ingested", "label": "2401.0001", "paper_id": 1}
+
+    out = _run_collect_capture([{"title": "Plain title"}], _ingest, capsys).out
+    assert "  OK   [2401.0001] Plain title" in out

@@ -393,20 +393,17 @@ def run_collect(
         for paper in papers:
             try:
                 result = ingest_fn(client, paper)
-                label = result.pop("label", "?")
+                label = _one_line(result.pop("label", "?"))
                 status = result["status"]
                 counts[status] = counts.get(status, 0) + 1
                 tag = "OK  " if status == "ingested" else "SKIP"
-                title = (paper.get("title") or "")[:50] if isinstance(paper, dict) else ""
-                # Strip control chars (incl. newlines) before printing — externally
-                # sourced titles can otherwise forge/inject cron log lines (#233).
-                title = _CONTROL_CHARS_RE.sub(" ", title)
+                title = _one_line((paper.get("title") or "")[:50] if isinstance(paper, dict) else "")
                 print(f"  {tag} [{label}] {title}")
                 detail.append({"label": label, "status": status, **result})
             except Exception as exc:
-                label = _paper_label(paper)
+                label = _one_line(_paper_label(paper))
                 counts["failed"] += 1
-                print(f"  ERR  [{label}] {exc}", file=sys.stderr)
+                print(f"  ERR  [{label}] {_one_line(exc)}", file=sys.stderr)
                 detail.append({"label": label, "status": "failed", "error": str(exc)})
 
     tag_lower = source_label.lower().replace(" ", "-")
@@ -422,6 +419,11 @@ def run_collect(
 
     if counts["failed"] > 0:
         sys.exit(1)
+
+
+def _one_line(value: object) -> str:
+    """Strip control chars (incl. newlines/ESC) so externally sourced text cannot forge or inject log lines (#233)."""
+    return _CONTROL_CHARS_RE.sub(" ", str(value))
 
 
 def _paper_label(paper: dict) -> str:
