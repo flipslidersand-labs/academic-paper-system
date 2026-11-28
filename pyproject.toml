@@ -39,6 +39,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# MCP サーバー (academic_paper_mcp)。API サーバー・Docker イメージには入れない (クライアント側の追加機能)。
+mcp = [
+    "mcp>=2.3,<3",
+]
 dev = [
     "pytest>=8.4",
     "pytest-cov>=4.1",
@@ -50,6 +54,8 @@ dev = [
     "fpdf2>=2.7",
     # tests/test_watchdog_workflow.py parses workflow YAML (#517).
     "pyyaml>=6.0",
+    # tests/test_mcp_server.py (academic_paper_mcp)。mcp extra と同じ範囲に揃える。
+    "mcp>=2.3,<3",
 ]
 
 [project.urls]
@@ -57,7 +63,7 @@ Homepage = "https://github.com/flipslidersand-labs/academic-paper-system"
 Repository = "https://github.com/flipslidersand-labs/academic-paper-system.git"
 
 [tool.hatch.build.targets.wheel]
-packages = ["academic_paper"]
+packages = ["academic_paper", "academic_paper_mcp"]
 
 # Coverage flags live in CI (qa-workflows python-test passes --cov) — keeping
 # them out of addopts avoids double --cov specs whose union polluted the
